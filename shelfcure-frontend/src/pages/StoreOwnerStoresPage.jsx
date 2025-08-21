@@ -192,6 +192,7 @@ const StoreOwnerStoresPage = () => {
             </div>
           )}
         </div>
+        </div>
       </div>
     </StoreOwnerLayout>
   );
