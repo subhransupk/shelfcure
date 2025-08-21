@@ -57,7 +57,8 @@ const StoreOwnerStoresPage = () => {
 
   return (
     <StoreOwnerLayout>
-      <div className="px-4 sm:px-6 lg:px-8 py-8">
+      <div className="px-6 py-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="sm:flex sm:items-center">
           <div className="sm:flex-auto">
@@ -190,6 +191,7 @@ const StoreOwnerStoresPage = () => {
               )}
             </div>
           )}
+        </div>
         </div>
       </div>
     </StoreOwnerLayout>
