@@ -49,6 +49,7 @@ import AffiliateSettingsPage from './pages/AffiliateSettingsPage';
 import StoreOwnerDashboard from './pages/StoreOwnerDashboard';
 import StoreOwnerStoresPage from './pages/StoreOwnerStoresPage';
 import StoreOwnerSettingsPage from './pages/StoreOwnerSettingsPage';
+import CreateStorePage from './pages/CreateStorePage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import AdminSettingsPage from './pages/AdminSettingsPage';
 import AdminCustomPricingPage from './pages/AdminCustomPricingPage';
@@ -112,6 +113,7 @@ function App() {
           {/* Store Owner Routes */}
           <Route path="/store-owner/dashboard" element={<StoreOwnerDashboard />} />
           <Route path="/store-owner/stores" element={<StoreOwnerStoresPage />} />
+          <Route path="/store-owner/stores/create" element={<CreateStorePage />} />
           <Route path="/store-owner/settings" element={<StoreOwnerSettingsPage />} />
         </Routes>
       </Router>

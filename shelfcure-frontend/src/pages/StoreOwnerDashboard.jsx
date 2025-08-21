@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Store, 
-  Users, 
-  TrendingUp, 
-  DollarSign, 
-  Package, 
+import { useNavigate } from 'react-router-dom';
+import {
+  Store,
+  Users,
+  TrendingUp,
+  DollarSign,
+  Package,
   Calendar,
   Plus,
   Eye,
@@ -18,6 +19,7 @@ import { getCurrentUser } from '../services/authService';
 
 
 const StoreOwnerDashboard = () => {
+  const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -78,11 +80,17 @@ const StoreOwnerDashboard = () => {
               <p className="text-gray-600 text-left">Welcome back, {user?.name}</p>
             </div>
             <div className="flex items-center space-x-4">
-              <button className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center">
+              <button
+                onClick={() => navigate('/store-owner/stores/create')}
+                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center"
+              >
                 <Plus className="w-4 h-4 mr-2" />
                 Add Store
               </button>
-              <button className="text-gray-600 hover:text-gray-900">
+              <button
+                onClick={() => navigate('/store-owner/settings')}
+                className="text-gray-600 hover:text-gray-900"
+              >
                 <Settings className="w-6 h-6" />
               </button>
             </div>
@@ -199,7 +207,10 @@ const StoreOwnerDashboard = () => {
                     <Store className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                     <h3 className="text-lg font-medium text-gray-900 mb-2">No stores yet</h3>
                     <p className="text-gray-600 mb-4">Get started by creating your first store</p>
-                    <button className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
+                    <button
+                      onClick={() => navigate('/store-owner/stores/create')}
+                      className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+                    >
                       Create Store
                     </button>
                   </div>
@@ -216,19 +227,31 @@ const StoreOwnerDashboard = () => {
                 <h2 className="text-lg font-semibold text-gray-900">Quick Actions</h2>
               </div>
               <div className="p-6 space-y-3">
-                <button className="w-full text-left p-3 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center">
+                <button
+                  onClick={() => navigate('/store-owner/stores/create')}
+                  className="w-full text-left p-3 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center"
+                >
                   <Plus className="w-5 h-5 text-green-600 mr-3" />
                   <span>Add New Store</span>
                 </button>
-                <button className="w-full text-left p-3 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center">
+                <button
+                  onClick={() => navigate('/store-owner/staff')}
+                  className="w-full text-left p-3 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center"
+                >
                   <Users className="w-5 h-5 text-blue-600 mr-3" />
                   <span>Manage Staff</span>
                 </button>
-                <button className="w-full text-left p-3 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center">
+                <button
+                  onClick={() => navigate('/store-owner/analytics')}
+                  className="w-full text-left p-3 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center"
+                >
                   <BarChart3 className="w-5 h-5 text-purple-600 mr-3" />
                   <span>View Analytics</span>
                 </button>
-                <button className="w-full text-left p-3 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center">
+                <button
+                  onClick={() => navigate('/store-owner/settings')}
+                  className="w-full text-left p-3 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center"
+                >
                   <Settings className="w-5 h-5 text-gray-600 mr-3" />
                   <span>Settings</span>
                 </button>
