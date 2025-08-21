@@ -3,7 +3,10 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 export const API_ENDPOINTS = {
   // Auth endpoints
+  LOGIN: `${API_BASE_URL}/api/auth/login`,
   ADMIN_LOGIN: `${API_BASE_URL}/api/auth/admin-login`,
+  REGISTER: `${API_BASE_URL}/api/auth/register`,
+  LOGOUT: `${API_BASE_URL}/api/auth/logout`,
   
   // Admin dashboard endpoints
   DASHBOARD_STATS: `${API_BASE_URL}/api/admin/dashboard/stats`,
@@ -44,7 +47,7 @@ export const API_ENDPOINTS = {
 
 // Helper function to make authenticated API calls
 export const makeAuthenticatedRequest = async (url, options = {}) => {
-  const token = localStorage.getItem('adminToken');
+  const token = localStorage.getItem('adminToken') || localStorage.getItem('token');
   
   const defaultOptions = {
     headers: {
@@ -70,7 +73,14 @@ export const makeAuthenticatedRequest = async (url, options = {}) => {
         // Token expired or invalid, redirect to login
         localStorage.removeItem('adminToken');
         localStorage.removeItem('adminUser');
-        window.location.href = '/admin-login';
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        // Redirect based on current path
+        if (window.location.pathname.startsWith('/admin')) {
+          window.location.href = '/admin-login';
+        } else {
+          window.location.href = '/login';
+        }
         throw new Error('Authentication failed');
       }
       throw new Error(`HTTP error! status: ${response.status}`);

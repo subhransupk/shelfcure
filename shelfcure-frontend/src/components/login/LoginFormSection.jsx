@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { LogIn, Mail, Lock, Eye, EyeOff, ArrowRight, AlertCircle, CheckCircle, User, Building } from 'lucide-react';
+import { loginUser, redirectAfterLogin } from '../../services/authService';
 
 const LoginFormSection = () => {
   const [formData, setFormData] = useState({
@@ -12,6 +13,7 @@ const LoginFormSection = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [loginType, setLoginType] = useState('store'); // 'store' or 'owner'
+  const [message, setMessage] = useState('');
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -50,17 +52,32 @@ const LoginFormSection = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+    setErrors({});
+    setMessage('');
+
     if (!validateForm()) return;
-    
+
     setIsLoading(true);
-    
-    // Simulate login process
-    setTimeout(() => {
+
+    try {
+      const result = await loginUser(formData.email, formData.password, loginType);
+
+      if (result.success) {
+        setMessage('Login successful! Redirecting...');
+
+        // Redirect based on user role
+        setTimeout(() => {
+          redirectAfterLogin(result.user);
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      setErrors({
+        general: error.message || 'Login failed. Please check your credentials and try again.'
+      });
+    } finally {
       setIsLoading(false);
-      // Redirect to dashboard would happen here
-      console.log('Login successful:', formData);
-    }, 2000);
+    }
   };
 
   const quickLoginOptions = [
@@ -115,6 +132,22 @@ const LoginFormSection = () => {
 
               {/* Login Form */}
               <form onSubmit={handleSubmit} className="space-y-6">
+                {/* Error Message */}
+                {errors.general && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3">
+                    <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+                    <p className="text-red-700 text-sm">{errors.general}</p>
+                  </div>
+                )}
+
+                {/* Success Message */}
+                {message && (
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center gap-3">
+                    <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
+                    <p className="text-green-700 text-sm">{message}</p>
+                  </div>
+                )}
+
                 {/* Email Field */}
                 <div>
                   <label className="block text-sm font-semibold text-secondary-700 mb-3">
