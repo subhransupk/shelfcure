@@ -428,6 +428,9 @@ app.use('/api/discounts', require('./routes/discounts'));
 app.use('/api/whatsapp', require('./routes/whatsapp'));
 app.use('/api/chat', require('./routes/chat'));
 
+// Store Owner Routes
+app.use('/api/store-owner', require('./routes/storeOwnerClean'));
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.status(200).json({

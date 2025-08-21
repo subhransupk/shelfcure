@@ -486,6 +486,413 @@ router.get('/users', protect, authorize('superadmin', 'admin'), async (req, res)
   }
 });
 
+// @desc    Create new user
+// @route   POST /api/admin/users
+// @access  Private/Admin
+router.post('/users', protect, authorize('superadmin', 'admin'), async (req, res) => {
+  try {
+    console.log(`Admin create user request from user: ${req.user.email} Role: ${req.user.role}`);
+
+    const { name, email, password, role, phone, address, stores } = req.body;
+
+    // Validate required fields
+    if (!name || !email || !password || !role) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, email, password, and role are required'
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid email address'
+      });
+    }
+
+    // Validate role
+    const validRoles = ['store_owner', 'store_manager', 'staff', 'cashier', 'admin'];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid role specified'
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'User with this email already exists'
+      });
+    }
+
+    // Create user data
+    const userData = {
+      name,
+      email,
+      password,
+      role,
+      phone: phone || '',
+      address: address || '',
+      isActive: true,
+      createdBy: req.user._id
+    };
+
+    // Add stores if provided (for store-related roles)
+    if (stores && Array.isArray(stores) && stores.length > 0) {
+      userData.stores = stores;
+      userData.currentStore = stores[0]; // Set first store as current
+    }
+
+    // Create user
+    const user = await User.create(userData);
+
+    // Remove password from response
+    user.password = undefined;
+
+    // Populate store information
+    await user.populate('currentStore', 'name code');
+    await user.populate('stores', 'name code');
+
+    res.status(201).json({
+      success: true,
+      message: 'User created successfully',
+      data: user
+    });
+  } catch (error) {
+    console.error('Admin create user error:', error);
+
+    // Handle duplicate key error
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'User with this email already exists'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error creating user',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Get single user
+// @route   GET /api/admin/users/:id
+// @access  Private/Admin
+router.get('/users/:id', protect, authorize('superadmin', 'admin'), async (req, res) => {
+  try {
+    console.log(`Admin get user request from user: ${req.user.email} Role: ${req.user.role}`);
+
+    const user = await User.findById(req.params.id)
+      .select('-password -refreshToken')
+      .populate('currentStore', 'name code address')
+      .populate('stores', 'name code address')
+      .populate('createdBy', 'name email')
+      .populate('updatedBy', 'name email');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: user
+    });
+  } catch (error) {
+    console.error('Admin get user error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error getting user',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Update user
+// @route   PUT /api/admin/users/:id
+// @access  Private/Admin
+router.put('/users/:id', protect, authorize('superadmin', 'admin'), async (req, res) => {
+  try {
+    console.log(`Admin update user request from user: ${req.user.email} Role: ${req.user.role}`);
+
+    const { name, email, role, phone, address, isActive, stores } = req.body;
+
+    // Find user
+    let user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Prevent updating superadmin users
+    if (user.role === 'superadmin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot update superadmin users'
+      });
+    }
+
+    // Validate email format if provided
+    if (email) {
+      const emailRegex = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please provide a valid email address'
+        });
+      }
+
+      // Check if email is already taken by another user
+      const existingUser = await User.findOne({
+        email,
+        _id: { $ne: req.params.id }
+      });
+      if (existingUser) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email is already taken by another user'
+        });
+      }
+    }
+
+    // Validate role if provided
+    if (role) {
+      const validRoles = ['store_owner', 'store_manager', 'staff', 'cashier', 'admin'];
+      if (!validRoles.includes(role)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid role specified'
+        });
+      }
+    }
+
+    // Update user data
+    const updateData = {
+      updatedBy: req.user._id
+    };
+
+    if (name) updateData.name = name;
+    if (email) updateData.email = email;
+    if (role) updateData.role = role;
+    if (phone !== undefined) updateData.phone = phone;
+    if (address !== undefined) updateData.address = address;
+    if (isActive !== undefined) updateData.isActive = isActive;
+
+    // Handle stores update
+    if (stores && Array.isArray(stores)) {
+      updateData.stores = stores;
+      if (stores.length > 0) {
+        updateData.currentStore = stores[0]; // Set first store as current
+      } else {
+        updateData.currentStore = null;
+      }
+    }
+
+    // Update user
+    user = await User.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true, runValidators: true }
+    )
+      .select('-password -refreshToken')
+      .populate('currentStore', 'name code')
+      .populate('stores', 'name code')
+      .populate('updatedBy', 'name email');
+
+    res.status(200).json({
+      success: true,
+      message: 'User updated successfully',
+      data: user
+    });
+  } catch (error) {
+    console.error('Admin update user error:', error);
+
+    // Handle duplicate key error
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is already taken by another user'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error updating user',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Delete user
+// @route   DELETE /api/admin/users/:id
+// @access  Private/Admin
+router.delete('/users/:id', protect, authorize('superadmin', 'admin'), async (req, res) => {
+  try {
+    console.log(`Admin delete user request from user: ${req.user.email} Role: ${req.user.role}`);
+
+    // Find user
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Prevent deleting superadmin users
+    if (user.role === 'superadmin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot delete superadmin users'
+      });
+    }
+
+    // Prevent deleting yourself
+    if (user._id.toString() === req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot delete your own account'
+      });
+    }
+
+    // Soft delete - set isActive to false instead of actually deleting
+    user.isActive = false;
+    user.updatedBy = req.user._id;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'User deleted successfully'
+    });
+  } catch (error) {
+    console.error('Admin delete user error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error deleting user',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Reset user password
+// @route   PUT /api/admin/users/:id/reset-password
+// @access  Private/Admin
+router.put('/users/:id/reset-password', protect, authorize('superadmin', 'admin'), async (req, res) => {
+  try {
+    console.log(`Admin reset password request from user: ${req.user.email} Role: ${req.user.role}`);
+
+    const { newPassword } = req.body;
+
+    // Validate new password
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be at least 6 characters long'
+      });
+    }
+
+    // Find user
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Prevent resetting superadmin passwords
+    if (user.role === 'superadmin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot reset superadmin passwords'
+      });
+    }
+
+    // Update password
+    user.password = newPassword;
+    user.updatedBy = req.user._id;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Password reset successfully'
+    });
+  } catch (error) {
+    console.error('Admin reset password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error resetting password',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Toggle user status (activate/deactivate)
+// @route   PUT /api/admin/users/:id/toggle-status
+// @access  Private/Admin
+router.put('/users/:id/toggle-status', protect, authorize('superadmin', 'admin'), async (req, res) => {
+  try {
+    console.log(`Admin toggle user status request from user: ${req.user.email} Role: ${req.user.role}`);
+
+    // Find user
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Prevent toggling superadmin status
+    if (user.role === 'superadmin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot modify superadmin status'
+      });
+    }
+
+    // Prevent deactivating yourself
+    if (user._id.toString() === req.user._id.toString() && user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot deactivate your own account'
+      });
+    }
+
+    // Toggle status
+    user.isActive = !user.isActive;
+    user.updatedBy = req.user._id;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: `User ${user.isActive ? 'activated' : 'deactivated'} successfully`,
+      data: {
+        userId: user._id,
+        isActive: user.isActive
+      }
+    });
+  } catch (error) {
+    console.error('Admin toggle user status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error toggling user status',
+      error: error.message
+    });
+  }
+});
+
 // @desc    Get system health status
 // @route   GET /api/admin/system/health
 // @access  Private/Admin
