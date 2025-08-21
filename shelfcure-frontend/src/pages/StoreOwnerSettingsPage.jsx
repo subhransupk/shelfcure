@@ -229,7 +229,6 @@ const StoreOwnerSettingsPage = () => {
             </div>
           </div>
         </div>
-        </div>
       </div>
     </StoreOwnerLayout>
   );

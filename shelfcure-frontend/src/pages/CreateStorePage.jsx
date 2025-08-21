@@ -376,7 +376,6 @@ const CreateStorePage = () => {
             </form>
           </div>
         </div>
-        </div>
       </div>
     </StoreOwnerLayout>
   );
