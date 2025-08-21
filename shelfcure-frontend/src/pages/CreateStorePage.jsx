@@ -67,7 +67,7 @@ const CreateStorePage = () => {
   return (
     <StoreOwnerLayout>
       <div className="px-4 sm:px-6 lg:px-8 py-8">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           {/* Header */}
           <div className="mb-8">
             <button
