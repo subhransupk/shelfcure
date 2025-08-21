@@ -10,6 +10,7 @@ const {
   updateStore,
   deleteStore,
   getStoreAnalytics,
+  getStoreStaff,
 
   // Dashboard & Analytics
   getDashboardData,
@@ -24,14 +25,6 @@ const {
   deleteStaff,
   getStaffDetails
 } = require('../controllers/storeOwnerStaffControllerSimple');
-
-// Import additional functions from main controller
-const {
-  getStores,
-  createStore,
-  getStore,
-  getStoreStaff
-} = require('../controllers/storeOwnerControllerSimple');
 
 // Placeholder functions for features to be implemented
 const getAttendance = (req, res) => res.status(501).json({ success: false, message: 'Feature coming soon' });

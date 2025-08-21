@@ -40,9 +40,15 @@ import AdminAffiliatesPage from './pages/AdminAffiliatesPage';
 import CreateAffiliatePage from './pages/CreateAffiliatePage';
 import ViewAffiliatePage from './pages/ViewAffiliatePage';
 import EditAffiliatePage from './pages/EditAffiliatePage';
+
 import AffiliateCommissionsPage from './pages/AffiliateCommissionsPage';
 import CommissionDetailsPage from './pages/CommissionDetailsPage';
 import AffiliateSettingsPage from './pages/AffiliateSettingsPage';
+
+// Store Owner Pages
+import StoreOwnerDashboard from './pages/StoreOwnerDashboard';
+import StoreOwnerStoresPage from './pages/StoreOwnerStoresPage';
+import StoreOwnerSettingsPage from './pages/StoreOwnerSettingsPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import AdminSettingsPage from './pages/AdminSettingsPage';
 import AdminCustomPricingPage from './pages/AdminCustomPricingPage';
@@ -102,6 +108,11 @@ function App() {
           <Route path="/admin/analytics" element={<AnalyticsPage />} />
           <Route path="/admin/settings" element={<AdminSettingsPage />} />
           <Route path="/live-chat" element={<LiveChatPage />} />
+
+          {/* Store Owner Routes */}
+          <Route path="/store-owner/dashboard" element={<StoreOwnerDashboard />} />
+          <Route path="/store-owner/stores" element={<StoreOwnerStoresPage />} />
+          <Route path="/store-owner/settings" element={<StoreOwnerSettingsPage />} />
         </Routes>
       </Router>
     </div>
