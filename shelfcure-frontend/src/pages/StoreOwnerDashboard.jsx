@@ -15,7 +15,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { getCurrentUser } from '../services/authService';
-import { makeAuthenticatedRequest, API_ENDPOINTS } from '../config/api';
+
 
 const StoreOwnerDashboard = () => {
   const [user, setUser] = useState(null);
@@ -34,7 +34,13 @@ const StoreOwnerDashboard = () => {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      const response = await makeAuthenticatedRequest(`${API_ENDPOINTS.BASE_URL}/api/store-owner/dashboard`);
+      const response = await fetch('http://localhost:5000/api/store-owner/dashboard', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
       
       if (response.ok) {
         const data = await response.json();

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, Eye, Edit, Trash2, Store, MapPin, Phone, Mail } from 'lucide-react';
 import StoreOwnerLayout from '../components/store-owner/StoreOwnerLayout';
-import { makeAuthenticatedRequest, API_ENDPOINTS } from '../config/api';
+
 
 const StoreOwnerStoresPage = () => {
   const [stores, setStores] = useState([]);
@@ -16,7 +16,13 @@ const StoreOwnerStoresPage = () => {
   const fetchStores = async () => {
     try {
       setLoading(true);
-      const response = await makeAuthenticatedRequest(`${API_ENDPOINTS.BASE_URL}/api/store-owner/stores`);
+      const response = await fetch('http://localhost:5000/api/store-owner/stores', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
       
       if (response.ok) {
         const data = await response.json();
