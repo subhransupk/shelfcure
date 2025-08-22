@@ -492,6 +492,18 @@ const getStores = async (req, res) => {
   });
 });
 
+// @desc    Generate unique store code
+// @route   GET /api/store-owner/stores/generate-code
+// @access  Private (Store Owner only)
+const generateStoreCode = asyncHandler(async (req, res) => {
+  const code = await Store.generateUniqueCode();
+
+  res.status(200).json({
+    success: true,
+    data: { code }
+  });
+});
+
 // @desc    Create new store
 // @route   POST /api/store-owner/stores
 // @access  Private (Store Owner only)
@@ -936,6 +948,7 @@ module.exports = {
   getStoreOwnerAnalytics,
   getFinancialSummary,
   getStores,
+  generateStoreCode,
   createStore,
   getStore,
   updateStore,

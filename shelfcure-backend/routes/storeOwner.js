@@ -5,6 +5,7 @@ const router = express.Router();
 const {
   // Store Management
   getStores,
+  generateStoreCode,
   createStore,
   getStore,
   updateStore,
@@ -73,6 +74,9 @@ router.get('/financial-summary', getFinancialSummary);
 router.route('/stores')
   .get(getStores)
   .post(createStore);
+
+// Specific routes must come before parameterized routes
+router.get('/stores/generate-code', generateStoreCode);
 
 router.route('/stores/:id')
   .get(getStore)

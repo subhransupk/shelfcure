@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 
 const storeSchema = new mongoose.Schema({
   name: {
@@ -281,6 +282,26 @@ storeSchema.virtual('totalStaff').get(function() {
 // Subscription status is now determined by the Store Owner's subscription
 // This virtual will be populated when needed
 
+// Static method to generate unique store code
+storeSchema.statics.generateUniqueCode = async function() {
+  let code;
+  let isUnique = false;
+
+  while (!isUnique) {
+    // Generate a 6-character code: ST + 4 random characters
+    const randomPart = crypto.randomBytes(2).toString('hex').toUpperCase();
+    code = `ST${randomPart}`;
+
+    // Check if code already exists
+    const existingStore = await this.findOne({ code: code });
+    if (!existingStore) {
+      isUnique = true;
+    }
+  }
+
+  return code;
+};
+
 // Indexes
 storeSchema.index({ code: 1 });
 storeSchema.index({ owner: 1 });
@@ -289,12 +310,32 @@ storeSchema.index({ 'business.licenseNumber': 1 });
 storeSchema.index({ isActive: 1 });
 
 // Pre-save middleware
-storeSchema.pre('save', function(next) {
+storeSchema.pre('save', async function(next) {
+  // Auto-generate unique store code if not provided
+  if (!this.code) {
+    let code;
+    let isUnique = false;
+
+    while (!isUnique) {
+      // Generate a 6-character code: ST + 4 random characters
+      const randomPart = crypto.randomBytes(2).toString('hex').toUpperCase();
+      code = `ST${randomPart}`;
+
+      // Check if code already exists
+      const existingStore = await this.constructor.findOne({ code: code });
+      if (!existingStore) {
+        isUnique = true;
+      }
+    }
+
+    this.code = code;
+  }
+
   // Ensure store code is uppercase
   if (this.code) {
     this.code = this.code.toUpperCase();
   }
-  
+
   // Set default operating hours if not provided
   if (!this.operatingHours.monday.open) {
     const defaultHours = { open: '09:00', close: '21:00', closed: false };
@@ -309,7 +350,7 @@ storeSchema.pre('save', function(next) {
       this.operatingHours.sunday = { open: '', close: '', closed: true };
     }
   }
-  
+
   next();
 });
 

@@ -14,7 +14,6 @@ const AdminMasterMedicinesPage = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -25,7 +24,7 @@ const AdminMasterMedicinesPage = () => {
 
   useEffect(() => {
     fetchMedicines();
-  }, [currentPage, searchTerm, categoryFilter, typeFilter, statusFilter]);
+  }, [currentPage, searchTerm, categoryFilter, statusFilter]);
 
   const fetchMedicines = useCallback(async () => {
     try {
@@ -43,7 +42,6 @@ const AdminMasterMedicinesPage = () => {
         limit: itemsPerPage,
         ...(searchTerm && { search: searchTerm }),
         ...(categoryFilter && { category: categoryFilter }),
-        ...(typeFilter && { type: typeFilter }),
         ...(statusFilter && { isActive: statusFilter })
       });
 
@@ -62,7 +60,7 @@ const AdminMasterMedicinesPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, searchTerm, categoryFilter, typeFilter, statusFilter]);
+  }, [currentPage, searchTerm, categoryFilter, statusFilter]);
 
   const handleDeleteMedicine = async (medicineId) => {
     if (window.confirm('Are you sure you want to delete this medicine?')) {
@@ -124,9 +122,7 @@ const AdminMasterMedicinesPage = () => {
     'Patch', 'Suppository', 'Other'
   ];
 
-  const medicineTypes = [
-    'prescription', 'over-the-counter', 'controlled'
-  ];
+
 
   return (
     <AdminLayout title="Master Medicine Database" subtitle="Manage the central medicine database for all stores">
@@ -222,17 +218,7 @@ const AdminMasterMedicinesPage = () => {
                 ))}
               </select>
 
-              {/* Type Filter */}
-              <select
-                value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-              >
-                <option value="">All Types</option>
-                {medicineTypes.map(type => (
-                  <option key={type} value={type}>{type.replace('-', ' ').toUpperCase()}</option>
-                ))}
-              </select>
+
 
               {/* Status Filter */}
               <select
@@ -278,7 +264,7 @@ const AdminMasterMedicinesPage = () => {
                     Manufacturer
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Type & Category
+                    Category
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Pricing (Strip/Individual)
@@ -309,16 +295,7 @@ const AdminMasterMedicinesPage = () => {
                       <div className="text-sm text-gray-900">{medicine.manufacturer || 'N/A'}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="space-y-1">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          medicine.type === 'prescription' ? 'bg-red-100 text-red-800' :
-                          medicine.type === 'over-the-counter' ? 'bg-green-100 text-green-800' :
-                          'bg-yellow-100 text-yellow-800'
-                        }`}>
-                          {medicine.type?.replace('-', ' ').toUpperCase() || 'N/A'}
-                        </span>
-                        <div className="text-xs text-gray-500">{medicine.category || 'N/A'}</div>
-                      </div>
+                      <div className="text-sm text-gray-900">{medicine.category || 'N/A'}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-left">
@@ -415,7 +392,7 @@ const AdminMasterMedicinesPage = () => {
               <Pill className="mx-auto h-12 w-12 text-gray-400" />
               <h3 className="mt-2 text-sm font-medium text-gray-900">No medicines found</h3>
               <p className="mt-1 text-sm text-gray-500">
-                {searchTerm || categoryFilter || typeFilter || statusFilter
+                {searchTerm || categoryFilter || statusFilter
                   ? 'Try adjusting your search or filter criteria.'
                   : 'Get started by adding your first medicine to the database.'
                 }

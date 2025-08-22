@@ -1,16 +1,21 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AdminLayout from '../components/admin/AdminLayout';
+import { API_ENDPOINTS } from '../config/api';
 import {
-  ArrowLeft, Save, Eye, Pill, FileText, 
+  ArrowLeft, Save, Eye, Pill, FileText,
   Settings, CheckCircle, AlertTriangle,
-  Thermometer, Package, Info
+  Thermometer, Package, Info, Upload, Download
 } from 'lucide-react';
 
 const AddMasterMedicinePage = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  
+  const [csvImporting, setCsvImporting] = useState(false);
+  const [csvFile, setCsvFile] = useState(null);
+  const [importResults, setImportResults] = useState(null);
+  const [showImportResults, setShowImportResults] = useState(false);
+
   const [formData, setFormData] = useState({
     // Basic Medicine Information
     name: '',
@@ -20,7 +25,6 @@ const AddMasterMedicinePage = () => {
     
     // Classification
     categories: [],
-    type: 'over-the-counter',
     requiresPrescription: false,
     
     // Unit Configuration
@@ -177,10 +181,93 @@ const AddMasterMedicinePage = () => {
     }
   };
 
+  const handleCsvFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.type !== 'text/csv' && !file.name.toLowerCase().endsWith('.csv')) {
+        alert('Please select a CSV file');
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) { // 10MB limit
+        alert('File size must be less than 10MB');
+        return;
+      }
+      setCsvFile(file);
+    }
+  };
+
+  const handleCsvImport = async () => {
+    if (!csvFile) {
+      alert('Please select a CSV file first');
+      return;
+    }
+
+    setCsvImporting(true);
+    setImportResults(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('csvFile', csvFile);
+
+      const response = await fetch(`${API_ENDPOINTS.ADMIN_MEDICINES}/import`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setImportResults(data.data);
+        setShowImportResults(true);
+        setCsvFile(null);
+        // Reset file input
+        const fileInput = document.getElementById('csvFileInput');
+        if (fileInput) fileInput.value = '';
+      } else {
+        alert(`Import failed: ${data.message}`);
+      }
+    } catch (error) {
+      console.error('CSV import error:', error);
+      alert('Error importing CSV file. Please try again.');
+    } finally {
+      setCsvImporting(false);
+    }
+  };
+
+  const downloadCsvTemplate = async () => {
+    try {
+      const response = await fetch(`${API_ENDPOINTS.ADMIN_MEDICINES}/csv-template`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'medicine-import-template.csv';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      } else {
+        alert('Error downloading template');
+      }
+    } catch (error) {
+      console.error('Template download error:', error);
+      alert('Error downloading template. Please try again.');
+    }
+  };
+
   return (
-    <AdminLayout 
-      title="Add Master Medicine" 
-      subtitle="Add a new medicine to the master database for all stores"
+    <AdminLayout
+      title="Add Master Medicine"
+      subtitle="Add medicines individually or import multiple medicines from CSV file"
       rightHeaderContent={
         <div className="flex items-center gap-3">
           <button
@@ -193,6 +280,145 @@ const AddMasterMedicinePage = () => {
         </div>
       }
     >
+      {/* CSV Import Results Modal */}
+      {showImportResults && importResults && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 text-left">Import Results</h3>
+              <button
+                onClick={() => setShowImportResults(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-4 gap-4 text-sm">
+                <div className="bg-blue-50 p-3 rounded-lg text-left">
+                  <div className="text-blue-600 font-medium">Total</div>
+                  <div className="text-2xl font-bold text-blue-800">{importResults.summary.total}</div>
+                </div>
+                <div className="bg-green-50 p-3 rounded-lg text-left">
+                  <div className="text-green-600 font-medium">Successful</div>
+                  <div className="text-2xl font-bold text-green-800">{importResults.summary.successful}</div>
+                </div>
+                <div className="bg-yellow-50 p-3 rounded-lg text-left">
+                  <div className="text-yellow-600 font-medium">Duplicates</div>
+                  <div className="text-2xl font-bold text-yellow-800">{importResults.summary.duplicates}</div>
+                </div>
+                <div className="bg-red-50 p-3 rounded-lg text-left">
+                  <div className="text-red-600 font-medium">Failed</div>
+                  <div className="text-2xl font-bold text-red-800">{importResults.summary.failed}</div>
+                </div>
+              </div>
+
+              {importResults.results.failed.length > 0 && (
+                <div>
+                  <h4 className="font-medium text-red-600 mb-2 text-left">Failed Imports:</h4>
+                  <div className="max-h-32 overflow-y-auto">
+                    {importResults.results.failed.map((item, index) => (
+                      <div key={index} className="text-sm text-red-600 text-left">
+                        {item.name} ({item.manufacturer}): {item.reason}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {importResults.results.duplicates.length > 0 && (
+                <div>
+                  <h4 className="font-medium text-yellow-600 mb-2 text-left">Duplicate Medicines:</h4>
+                  <div className="max-h-32 overflow-y-auto">
+                    {importResults.results.duplicates.map((item, index) => (
+                      <div key={index} className="text-sm text-yellow-600 text-left">
+                        {item.name} ({item.manufacturer}): {item.reason}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end mt-6">
+              <button
+                onClick={() => setShowImportResults(false)}
+                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CSV Import Section */}
+      <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+        <div className="flex items-center gap-2 mb-6">
+          <Upload className="w-5 h-5 text-primary-600" />
+          <h3 className="text-lg font-semibold text-gray-900 text-left">Bulk Import from CSV</h3>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2 text-left">
+              Upload CSV File
+            </label>
+            <input
+              id="csvFileInput"
+              type="file"
+              accept=".csv"
+              onChange={handleCsvFileChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            />
+            <p className="mt-1 text-xs text-gray-500 text-left">
+              Upload a CSV file with medicine data. Maximum file size: 10MB
+            </p>
+          </div>
+
+          <div className="flex flex-col justify-center space-y-3">
+            <button
+              type="button"
+              onClick={downloadCsvTemplate}
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              Download Template
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCsvImport}
+              disabled={!csvFile || csvImporting}
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {csvImporting ? (
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+              ) : (
+                <Upload className="w-4 h-4" />
+              )}
+              {csvImporting ? 'Importing...' : 'Import CSV'}
+            </button>
+          </div>
+        </div>
+
+        {csvFile && (
+          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+            <p className="text-sm text-blue-700 text-left">
+              Selected file: <span className="font-medium">{csvFile.name}</span> ({(csvFile.size / 1024).toFixed(1)} KB)
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Divider */}
+      <div className="flex items-center my-6">
+        <div className="flex-1 border-t border-gray-300"></div>
+        <div className="px-4 text-sm text-gray-500">OR</div>
+        <div className="flex-1 border-t border-gray-300"></div>
+      </div>
+
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column - Medicine Information */}
@@ -316,22 +542,7 @@ const AddMasterMedicinePage = () => {
                   </p>
                 </div>
 
-                {/* Type */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2 text-left">
-                    Medicine Type
-                  </label>
-                  <select
-                    name="type"
-                    value={formData.type}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  >
-                    <option value="over-the-counter">Over-the-Counter</option>
-                    <option value="prescription">Prescription</option>
-                    <option value="controlled">Controlled Substance</option>
-                  </select>
-                </div>
+
 
                 {/* Prescription Required */}
                 <div className="md:col-span-2">

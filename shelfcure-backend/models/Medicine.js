@@ -31,11 +31,6 @@ const medicineSchema = new mongoose.Schema({
       'Patch', 'Suppository', 'Other'
     ]
   },
-  type: {
-    type: String,
-    enum: ['prescription', 'over-the-counter', 'controlled'],
-    default: 'over-the-counter'
-  },
   
   // Dual Unit System Configuration
   unitTypes: {

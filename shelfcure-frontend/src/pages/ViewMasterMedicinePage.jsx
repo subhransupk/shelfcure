@@ -208,10 +208,7 @@ const ViewMasterMedicinePage = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1 text-left">Category</label>
                 <p className="text-gray-900 text-left">{medicine.category || 'N/A'}</p>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1 text-left">Type</label>
-                <p className="text-gray-900 text-left">{medicine.type || 'N/A'}</p>
-              </div>
+
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1 text-left">Composition</label>
                 <p className="text-gray-900 text-left">{medicine.composition || 'N/A'}</p>

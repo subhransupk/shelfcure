@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Store, MapPin, Phone, Mail, User, Building } from 'lucide-react';
+import { ArrowLeft, Save, Store, MapPin, Phone, Mail, User, Building, RefreshCw } from 'lucide-react';
 import StoreOwnerLayout from '../components/store-owner/StoreOwnerLayout';
 
 const CreateStorePage = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [codeGenerating, setCodeGenerating] = useState(false);
   const [message, setMessage] = useState('');
   const [formData, setFormData] = useState({
     name: '',
@@ -23,6 +24,11 @@ const CreateStorePage = () => {
     gstNumber: ''
   });
 
+  // Auto-generate store code on component mount
+  useEffect(() => {
+    generateStoreCode();
+  }, []);
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({
@@ -31,19 +37,76 @@ const CreateStorePage = () => {
     }));
   };
 
+  const generateStoreCode = async () => {
+    setCodeGenerating(true);
+    try {
+      const response = await fetch('http://localhost:5000/api/store-owner/generate-store-code', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setFormData(prev => ({
+          ...prev,
+          code: data.data.code
+        }));
+      } else {
+        console.error('Failed to generate store code');
+        setMessage('Failed to generate store code. Please try again.');
+      }
+    } catch (error) {
+      console.error('Generate store code error:', error);
+      setMessage('Failed to generate store code. Please try again.');
+    } finally {
+      setCodeGenerating(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setMessage('');
 
     try {
+      // Structure the data according to the backend model
+      const storeData = {
+        name: formData.name,
+        code: formData.code,
+        contact: {
+          phone: formData.phone,
+          email: formData.email || undefined
+        },
+        address: {
+          street: formData.address,
+          city: formData.city,
+          state: formData.state,
+          country: 'India',
+          pincode: formData.pincode
+        },
+        business: {
+          licenseNumber: formData.licenseNumber || undefined,
+          gstNumber: formData.gstNumber || undefined
+        },
+        // Manager information (if provided)
+        ...(formData.managerName && {
+          managers: [{
+            name: formData.managerName,
+            phone: formData.managerPhone,
+            email: formData.managerEmail
+          }]
+        })
+      };
+
       const response = await fetch('http://localhost:5000/api/store-owner/stores', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(storeData)
       });
 
       if (response.ok) {
@@ -86,7 +149,7 @@ const CreateStorePage = () => {
           {/* Form */}
           <div className="bg-white shadow rounded-lg">
             <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="text-lg font-medium text-gray-900">Store Information</h2>
+              <h2 className="text-lg font-medium text-gray-900 text-left">Store Information</h2>
             </div>
 
             <form onSubmit={handleSubmit} className="px-6 py-6 space-y-6">
@@ -103,7 +166,7 @@ const CreateStorePage = () => {
               {/* Basic Information */}
               <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="name" className="block text-sm font-medium text-gray-700">
+                  <label htmlFor="name" className="block text-sm font-medium text-gray-700 text-left">
                     Store Name *
                   </label>
                   <div className="mt-1 relative">
@@ -124,7 +187,7 @@ const CreateStorePage = () => {
                 </div>
 
                 <div>
-                  <label htmlFor="code" className="block text-sm font-medium text-gray-700">
+                  <label htmlFor="code" className="block text-sm font-medium text-gray-700 text-left">
                     Store Code *
                   </label>
                   <div className="mt-1 relative">
@@ -137,15 +200,29 @@ const CreateStorePage = () => {
                       id="code"
                       required
                       value={formData.code}
-                      onChange={handleInputChange}
-                      className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
-                      placeholder="Enter unique store code"
+                      readOnly
+                      className="block w-full pl-10 pr-12 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-50 text-gray-700 sm:text-sm cursor-not-allowed"
+                      placeholder="Auto-generated code"
                     />
+                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+                      <button
+                        type="button"
+                        onClick={generateStoreCode}
+                        disabled={codeGenerating}
+                        className="text-green-600 hover:text-green-700 focus:outline-none disabled:opacity-50"
+                        title="Generate new code"
+                      >
+                        <RefreshCw className={`h-4 w-4 ${codeGenerating ? 'animate-spin' : ''}`} />
+                      </button>
+                    </div>
                   </div>
+                  <p className="mt-1 text-xs text-gray-500 text-left">
+                    Auto-generated unique code. Click refresh to generate a new one.
+                  </p>
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label htmlFor="address" className="block text-sm font-medium text-gray-700">
+                  <label htmlFor="address" className="block text-sm font-medium text-gray-700 text-left">
                     Address *
                   </label>
                   <div className="mt-1 relative">
@@ -166,7 +243,7 @@ const CreateStorePage = () => {
                 </div>
 
                 <div>
-                  <label htmlFor="city" className="block text-sm font-medium text-gray-700">
+                  <label htmlFor="city" className="block text-sm font-medium text-gray-700 text-left">
                     City *
                   </label>
                   <input
@@ -182,7 +259,7 @@ const CreateStorePage = () => {
                 </div>
 
                 <div>
-                  <label htmlFor="state" className="block text-sm font-medium text-gray-700">
+                  <label htmlFor="state" className="block text-sm font-medium text-gray-700 text-left">
                     State *
                   </label>
                   <input
@@ -198,7 +275,7 @@ const CreateStorePage = () => {
                 </div>
 
                 <div>
-                  <label htmlFor="pincode" className="block text-sm font-medium text-gray-700">
+                  <label htmlFor="pincode" className="block text-sm font-medium text-gray-700 text-left">
                     Pincode *
                   </label>
                   <input
@@ -214,7 +291,7 @@ const CreateStorePage = () => {
                 </div>
 
                 <div>
-                  <label htmlFor="phone" className="block text-sm font-medium text-gray-700">
+                  <label htmlFor="phone" className="block text-sm font-medium text-gray-700 text-left">
                     Phone Number *
                   </label>
                   <div className="mt-1 relative">
@@ -235,7 +312,7 @@ const CreateStorePage = () => {
                 </div>
 
                 <div>
-                  <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+                  <label htmlFor="email" className="block text-sm font-medium text-gray-700 text-left">
                     Email Address
                   </label>
                   <div className="mt-1 relative">
@@ -255,7 +332,7 @@ const CreateStorePage = () => {
                 </div>
 
                 <div>
-                  <label htmlFor="licenseNumber" className="block text-sm font-medium text-gray-700">
+                  <label htmlFor="licenseNumber" className="block text-sm font-medium text-gray-700 text-left">
                     License Number
                   </label>
                   <input
@@ -270,7 +347,7 @@ const CreateStorePage = () => {
                 </div>
 
                 <div>
-                  <label htmlFor="gstNumber" className="block text-sm font-medium text-gray-700">
+                  <label htmlFor="gstNumber" className="block text-sm font-medium text-gray-700 text-left">
                     GST Number
                   </label>
                   <input
@@ -287,10 +364,10 @@ const CreateStorePage = () => {
 
               {/* Manager Information */}
               <div className="border-t border-gray-200 pt-6">
-                <h3 className="text-lg font-medium text-gray-900 mb-4">Store Manager Information</h3>
+                <h3 className="text-lg font-medium text-gray-900 mb-4 text-left">Store Manager Information</h3>
                 <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                   <div>
-                    <label htmlFor="managerName" className="block text-sm font-medium text-gray-700">
+                    <label htmlFor="managerName" className="block text-sm font-medium text-gray-700 text-left">
                       Manager Name
                     </label>
                     <div className="mt-1 relative">
@@ -310,7 +387,7 @@ const CreateStorePage = () => {
                   </div>
 
                   <div>
-                    <label htmlFor="managerPhone" className="block text-sm font-medium text-gray-700">
+                    <label htmlFor="managerPhone" className="block text-sm font-medium text-gray-700 text-left">
                       Manager Phone
                     </label>
                     <div className="mt-1 relative">
@@ -330,7 +407,7 @@ const CreateStorePage = () => {
                   </div>
 
                   <div className="sm:col-span-2">
-                    <label htmlFor="managerEmail" className="block text-sm font-medium text-gray-700">
+                    <label htmlFor="managerEmail" className="block text-sm font-medium text-gray-700 text-left">
                       Manager Email
                     </label>
                     <div className="mt-1 relative">

@@ -16,7 +16,6 @@ const EditMasterMedicinePage = () => {
     name: '',
     genericName: '',
     category: '',
-    type: '',
     composition: '',
     description: '',
     manufacturer: '',
@@ -60,7 +59,6 @@ const EditMasterMedicinePage = () => {
           name: medicine.name || '',
           genericName: medicine.genericName || '',
           category: medicine.category || '',
-          type: medicine.type || '',
           composition: medicine.composition || '',
           description: medicine.description || '',
           manufacturer: medicine.manufacturer || '',
@@ -286,46 +284,23 @@ const EditMasterMedicinePage = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1 text-left">
-                      Type
-                    </label>
-                    <select
-                      value={formData.type}
-                      onChange={(e) => handleInputChange('type', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    >
-                      <option value="">Select Type</option>
-                      <option value="Tablet">Tablet</option>
-                      <option value="Capsule">Capsule</option>
-                      <option value="Syrup">Syrup</option>
-                      <option value="Injection">Injection</option>
-                      <option value="Cream">Cream</option>
-                      <option value="Ointment">Ointment</option>
-                      <option value="Drops">Drops</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1 text-left">
-                      Unit
-                    </label>
-                    <select
-                      value={formData.unit}
-                      onChange={(e) => handleInputChange('unit', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    >
-                      <option value="">Select Unit</option>
-                      <option value="Strip">Strip</option>
-                      <option value="Bottle">Bottle</option>
-                      <option value="Box">Box</option>
-                      <option value="Vial">Vial</option>
-                      <option value="Tube">Tube</option>
-                      <option value="Piece">Piece</option>
-                    </select>
-                  </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1 text-left">
+                    Unit
+                  </label>
+                  <select
+                    value={formData.unit}
+                    onChange={(e) => handleInputChange('unit', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  >
+                    <option value="">Select Unit</option>
+                    <option value="Strip">Strip</option>
+                    <option value="Bottle">Bottle</option>
+                    <option value="Box">Box</option>
+                    <option value="Vial">Vial</option>
+                    <option value="Tube">Tube</option>
+                    <option value="Piece">Piece</option>
+                  </select>
                 </div>
 
                 <div>

@@ -1,7 +1,197 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const { protect, authorize } = require('../middleware/auth');
 const Medicine = require('../models/Medicine');
+const MasterMedicine = require('../models/MasterMedicine');
+
+// Configure multer for CSV file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = 'uploads/csv';
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    cb(null, `medicines-${Date.now()}-${Math.round(Math.random() * 1E9)}.csv`);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  },
+  fileFilter: function (req, file, cb) {
+    if (file.mimetype === 'text/csv' || file.originalname.toLowerCase().endsWith('.csv')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only CSV files are allowed'));
+    }
+  }
+});
+
+// Helper function to parse CSV content
+const parseCSV = (csvContent) => {
+  const lines = csvContent.split('\n').filter(line => line.trim());
+  if (lines.length < 2) {
+    throw new Error('CSV file must contain at least a header row and one data row');
+  }
+
+  const headers = lines[0].split(',').map(header => header.trim().replace(/"/g, ''));
+  const medicines = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const values = lines[i].split(',').map(value => value.trim().replace(/"/g, ''));
+    if (values.length !== headers.length) {
+      continue; // Skip malformed rows
+    }
+
+    const medicine = {};
+    headers.forEach((header, index) => {
+      const value = values[index];
+
+      // Map CSV headers to medicine schema fields
+      switch (header.toLowerCase()) {
+        case 'name':
+        case 'medicine name':
+          medicine.name = value;
+          break;
+        case 'generic name':
+        case 'genericname':
+          medicine.genericName = value;
+          break;
+        case 'composition':
+          medicine.composition = value;
+          break;
+        case 'manufacturer':
+          medicine.manufacturer = value;
+          break;
+        case 'category':
+        case 'categories':
+          // Map common category names to valid enum values
+          const categoryMapping = {
+            'pain relief': 'Other',
+            'painrelief': 'Other',
+            'antibiotic': 'Other',
+            'antibiotics': 'Other',
+            'anti-allergic': 'Other',
+            'antiallergic': 'Other',
+            'allergy relief': 'Other',
+            'diabetes care': 'Other',
+            'diabetescare': 'Other',
+            'antacid': 'Other',
+            'acid reflux': 'Other',
+            'heartburn': 'Other',
+            'tablet': 'Tablet',
+            'capsule': 'Capsule',
+            'syrup': 'Syrup',
+            'injection': 'Injection',
+            'drops': 'Drops',
+            'cream': 'Cream',
+            'ointment': 'Ointment',
+            'powder': 'Powder',
+            'inhaler': 'Inhaler',
+            'spray': 'Spray',
+            'gel': 'Gel',
+            'lotion': 'Lotion',
+            'solution': 'Solution',
+            'suspension': 'Suspension',
+            'patch': 'Patch',
+            'suppository': 'Suppository'
+          };
+
+          const normalizedCategory = value.toLowerCase().trim();
+          medicine.category = categoryMapping[normalizedCategory] || 'Other';
+          break;
+        case 'strength':
+          medicine.dosage = { ...medicine.dosage, strength: value };
+          break;
+        case 'form':
+          medicine.dosage = { ...medicine.dosage, form: value };
+          break;
+        case 'frequency':
+          medicine.dosage = { ...medicine.dosage, frequency: value };
+          break;
+        case 'requires prescription':
+        case 'requiresprescription':
+        case 'prescription required':
+          medicine.requiresPrescription = value.toLowerCase() === 'true' || value.toLowerCase() === 'yes' || value === '1';
+          break;
+        case 'has strips':
+        case 'hasstrips':
+          if (!medicine.unitTypes) medicine.unitTypes = {};
+          medicine.unitTypes.hasStrips = value.toLowerCase() === 'true' || value.toLowerCase() === 'yes' || value === '1';
+          break;
+        case 'has individual':
+        case 'hasindividual':
+          if (!medicine.unitTypes) medicine.unitTypes = {};
+          medicine.unitTypes.hasIndividual = value.toLowerCase() === 'true' || value.toLowerCase() === 'yes' || value === '1';
+          break;
+        case 'units per strip':
+        case 'unitsperstrip':
+          if (!medicine.unitTypes) medicine.unitTypes = {};
+          medicine.unitTypes.unitsPerStrip = parseInt(value) || 10;
+          break;
+        case 'barcode':
+          medicine.barcode = value;
+          break;
+        case 'tags':
+          medicine.tags = value ? value.split(';').map(tag => tag.trim()) : [];
+          break;
+        case 'side effects':
+        case 'sideeffects':
+          medicine.sideEffects = value ? value.split(';').map(effect => effect.trim()) : [];
+          break;
+        case 'contraindications':
+          medicine.contraindications = value ? value.split(';').map(contra => contra.trim()) : [];
+          break;
+        case 'interactions':
+          medicine.interactions = value ? value.split(';').map(interaction => interaction.trim()) : [];
+          break;
+        case 'notes':
+          medicine.notes = value;
+          break;
+        case 'is active':
+        case 'isactive':
+        case 'active':
+          medicine.isActive = value.toLowerCase() === 'true' || value.toLowerCase() === 'yes' || value === '1';
+          break;
+        default:
+          // Handle additional fields that might be in CSV
+          break;
+      }
+    });
+
+    // Set default values for required fields if not provided
+    if (!medicine.name) continue; // Skip if no name
+    if (!medicine.composition) medicine.composition = 'Not specified';
+    if (!medicine.manufacturer) medicine.manufacturer = 'Not specified';
+    if (!medicine.category) medicine.category = 'Other';
+    if (!medicine.dosage) medicine.dosage = {};
+    if (!medicine.dosage.strength) medicine.dosage.strength = 'Not specified';
+    if (!medicine.dosage.form) medicine.dosage.form = 'Other';
+
+    // Set up dual unit system defaults for master medicine template
+    if (!medicine.unitTypes) medicine.unitTypes = {};
+    if (medicine.unitTypes.hasStrips === undefined) medicine.unitTypes.hasStrips = true;
+    if (medicine.unitTypes.hasIndividual === undefined) medicine.unitTypes.hasIndividual = true;
+    if (!medicine.unitTypes.unitsPerStrip) medicine.unitTypes.unitsPerStrip = 10;
+
+    // Master medicines don't have pricing - that's handled at store level
+
+    if (medicine.requiresPrescription === undefined) medicine.requiresPrescription = false;
+    if (medicine.isActive === undefined) medicine.isActive = true;
+
+    medicines.push(medicine);
+  }
+
+  return medicines;
+};
 
 // @desc    Get all master medicines (Admin only)
 // @route   GET /api/medicines/admin/master
@@ -93,25 +283,21 @@ router.get('/admin/master', protect, authorize('superadmin', 'admin'), async (re
       query.category = req.query.category;
     }
 
-    if (req.query.type) {
-      query.type = req.query.type;
-    }
-
     if (req.query.isActive !== undefined) {
       query.isActive = req.query.isActive === 'true';
     }
 
-    const medicines = await Medicine.find(query)
-      .populate('store', 'name code')
+    const medicines = await MasterMedicine.find(query)
       .populate('createdBy', 'name')
+      .populate('updatedBy', 'name')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
 
-    const total = await Medicine.countDocuments(query);
+    const total = await MasterMedicine.countDocuments(query);
 
-    // Get statistics
-    const stats = await Medicine.aggregate([
+    // Get statistics for master medicines (no stock info since they're templates)
+    const stats = await MasterMedicine.aggregate([
       {
         $group: {
           _id: null,
@@ -119,35 +305,27 @@ router.get('/admin/master', protect, authorize('superadmin', 'admin'), async (re
           activeMedicines: {
             $sum: { $cond: [{ $eq: ['$isActive', true] }, 1, 0] }
           },
-          totalStripStock: { $sum: '$stripInfo.stock' },
-          totalIndividualStock: { $sum: '$individualInfo.stock' },
-          lowStockCount: {
-            $sum: {
-              $cond: [
-                {
-                  $or: [
-                    { $lt: ['$stripInfo.stock', '$stripInfo.minStock'] },
-                    { $lt: ['$individualInfo.stock', '$individualInfo.minStock'] }
-                  ]
-                },
-                1,
-                0
-              ]
-            }
-          }
+          categoriesCount: { $addToSet: '$category' }
         }
       }
+    ]);
+
+    // Get category distribution
+    const categoryStats = await MasterMedicine.aggregate([
+      { $match: { isActive: true } },
+      { $group: { _id: '$category', count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
     ]);
 
     res.status(200).json({
       success: true,
       data: medicines,
-      stats: stats[0] || {
-        totalMedicines: 0,
-        activeMedicines: 0,
-        totalStripStock: 0,
-        totalIndividualStock: 0,
-        lowStockCount: 0
+      stats: {
+        totalMedicines: stats[0]?.totalMedicines || 0,
+        activeMedicines: stats[0]?.activeMedicines || 0,
+        inactiveMedicines: (stats[0]?.totalMedicines || 0) - (stats[0]?.activeMedicines || 0),
+        totalCategories: stats[0]?.categoriesCount?.length || 0,
+        categoryDistribution: categoryStats
       },
       pagination: {
         currentPage: page,
@@ -166,20 +344,86 @@ router.get('/admin/master', protect, authorize('superadmin', 'admin'), async (re
   }
 });
 
+// @desc    Download CSV template for medicine import (Admin only)
+// @route   GET /api/medicines/admin/master/csv-template
+// @access  Private/Admin
+router.get('/admin/master/csv-template', protect, authorize('superadmin', 'admin'), (req, res) => {
+  try {
+    const csvHeaders = [
+      'Name',
+      'Generic Name',
+      'Composition',
+      'Manufacturer',
+      'Category',
+      'Strength',
+      'Form',
+      'Frequency',
+      'Requires Prescription',
+      'Has Strips',
+      'Has Individual',
+      'Units Per Strip',
+      'Barcode',
+      'Tags',
+      'Side Effects',
+      'Contraindications',
+      'Interactions',
+      'Notes',
+      'Is Active'
+    ];
+
+    const sampleData = [
+      'Paracetamol 500mg',
+      'Acetaminophen',
+      'Paracetamol 500mg',
+      'Cipla Ltd',
+      'Tablet',
+      '500mg',
+      'Tablet',
+      '3 times daily',
+      'false',
+      'true',
+      'true',
+      '10',
+      '1234567890123',
+      'pain relief;fever;headache',
+      'nausea;skin rash',
+      'liver disease;alcohol dependency',
+      'warfarin;alcohol',
+      'Common pain reliever',
+      'true'
+    ];
+
+    const csvContent = [csvHeaders, sampleData]
+      .map(row => row.map(field => `"${field}"`).join(','))
+      .join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="medicine-import-template.csv"');
+    res.send(csvContent);
+
+  } catch (error) {
+    console.error('CSV template download error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error generating CSV template',
+      error: error.message
+    });
+  }
+});
+
 // @desc    Get single master medicine (Admin only)
 // @route   GET /api/medicines/admin/master/:id
 // @access  Private/Admin
 router.get('/admin/master/:id', protect, authorize('superadmin', 'admin'), async (req, res) => {
   try {
-    const medicine = await Medicine.findById(req.params.id)
-      .populate('store', 'name code')
+    const medicine = await MasterMedicine.findById(req.params.id)
       .populate('createdBy', 'name email')
       .populate('updatedBy', 'name email');
 
     if (!medicine) {
       return res.status(404).json({
         success: false,
-        message: 'Medicine not found'
+        message: 'Master medicine not found'
       });
     }
 
@@ -188,10 +432,11 @@ router.get('/admin/master/:id', protect, authorize('superadmin', 'admin'), async
       data: medicine
     });
   } catch (error) {
-    console.error('Get medicine error:', error);
+    console.error('Get master medicine error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error'
+      message: 'Server error fetching master medicine',
+      error: error.message
     });
   }
 });
@@ -203,12 +448,11 @@ router.post('/admin/master', protect, authorize('superadmin', 'admin'), async (r
   try {
     const medicineData = {
       ...req.body,
-      createdBy: req.user.id,
-      store: req.body.store || req.user.currentStore // Use provided store or admin's current store
+      createdBy: req.user.id
+      // No store field for master medicines - they are global templates
     };
 
-    const medicine = await Medicine.create(medicineData);
-    await medicine.populate('store', 'name code');
+    const medicine = await MasterMedicine.create(medicineData);
     await medicine.populate('createdBy', 'name');
 
     res.status(201).json({
@@ -226,17 +470,141 @@ router.post('/admin/master', protect, authorize('superadmin', 'admin'), async (r
   }
 });
 
+// @desc    Bulk import master medicines from CSV (Admin only)
+// @route   POST /api/medicines/admin/master/import
+// @access  Private/Admin
+router.post('/admin/master/import', protect, authorize('superadmin', 'admin'), upload.single('csvFile'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please upload a CSV file'
+      });
+    }
+
+    // Read the uploaded CSV file
+    const csvContent = fs.readFileSync(req.file.path, 'utf8');
+
+    // Parse CSV content
+    let medicines;
+    try {
+      medicines = parseCSV(csvContent);
+    } catch (parseError) {
+      // Clean up uploaded file
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({
+        success: false,
+        message: `CSV parsing error: ${parseError.message}`
+      });
+    }
+
+    if (medicines.length === 0) {
+      // Clean up uploaded file
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({
+        success: false,
+        message: 'No valid medicine records found in CSV file'
+      });
+    }
+
+    // Process medicines in batches to avoid overwhelming the database
+    const batchSize = 50;
+    const results = {
+      successful: [],
+      failed: [],
+      duplicates: []
+    };
+
+    for (let i = 0; i < medicines.length; i += batchSize) {
+      const batch = medicines.slice(i, i + batchSize);
+
+      for (const medicineData of batch) {
+        try {
+          // Add metadata for master medicine (no store field)
+          const processedMedicine = {
+            ...medicineData,
+            createdBy: req.user.id
+            // No store field - master medicines are global templates
+          };
+
+          // Check for duplicates by name and manufacturer
+          const existingMedicine = await MasterMedicine.findOne({
+            name: processedMedicine.name,
+            manufacturer: processedMedicine.manufacturer
+          });
+
+          if (existingMedicine) {
+            results.duplicates.push({
+              name: processedMedicine.name,
+              manufacturer: processedMedicine.manufacturer,
+              reason: 'Master medicine with same name and manufacturer already exists'
+            });
+            continue;
+          }
+
+          // Create the master medicine
+          const medicine = await MasterMedicine.create(processedMedicine);
+          await medicine.populate('createdBy', 'name');
+
+          results.successful.push({
+            id: medicine._id,
+            name: medicine.name,
+            manufacturer: medicine.manufacturer
+          });
+
+        } catch (error) {
+          results.failed.push({
+            name: medicineData.name || 'Unknown',
+            manufacturer: medicineData.manufacturer || 'Unknown',
+            reason: error.message
+          });
+        }
+      }
+    }
+
+    // Clean up uploaded file
+    fs.unlinkSync(req.file.path);
+
+    res.status(200).json({
+      success: true,
+      message: `Import completed. ${results.successful.length} medicines imported successfully.`,
+      data: {
+        summary: {
+          total: medicines.length,
+          successful: results.successful.length,
+          failed: results.failed.length,
+          duplicates: results.duplicates.length
+        },
+        results: results
+      }
+    });
+
+  } catch (error) {
+    // Clean up uploaded file if it exists
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+
+    console.error('CSV import error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error during CSV import',
+      error: error.message
+    });
+  }
+});
+
 // @desc    Update master medicine (Admin only)
 // @route   PUT /api/medicines/admin/master/:id
 // @access  Private/Admin
 router.put('/admin/master/:id', protect, authorize('superadmin', 'admin'), async (req, res) => {
   try {
-    const medicine = await Medicine.findById(req.params.id);
+    const medicine = await MasterMedicine.findById(req.params.id);
 
     if (!medicine) {
       return res.status(404).json({
         success: false,
-        message: 'Medicine not found'
+        message: 'Master medicine not found'
       });
     }
 
@@ -250,7 +618,7 @@ router.put('/admin/master/:id', protect, authorize('superadmin', 'admin'), async
     medicine.updatedBy = req.user.id;
     await medicine.save();
 
-    await medicine.populate('store', 'name code');
+    await medicine.populate('createdBy', 'name');
     await medicine.populate('updatedBy', 'name');
 
     res.status(200).json({
@@ -273,16 +641,16 @@ router.put('/admin/master/:id', protect, authorize('superadmin', 'admin'), async
 // @access  Private/Admin
 router.delete('/admin/master/:id', protect, authorize('superadmin', 'admin'), async (req, res) => {
   try {
-    const medicine = await Medicine.findById(req.params.id);
+    const medicine = await MasterMedicine.findById(req.params.id);
 
     if (!medicine) {
       return res.status(404).json({
         success: false,
-        message: 'Medicine not found'
+        message: 'Master medicine not found'
       });
     }
 
-    await Medicine.findByIdAndDelete(req.params.id);
+    await MasterMedicine.findByIdAndDelete(req.params.id);
 
     res.status(200).json({
       success: true,
@@ -297,5 +665,7 @@ router.delete('/admin/master/:id', protect, authorize('superadmin', 'admin'), as
     });
   }
 });
+
+
 
 module.exports = router;

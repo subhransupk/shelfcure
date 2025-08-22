@@ -8,6 +8,7 @@ const {
   getStoreOwnerAnalytics,
   getFinancialSummary,
   getStores,
+  generateStoreCode,
   createStore,
   getStore,
   getStoreStaff
@@ -66,6 +67,9 @@ router.get('/financial-summary', getFinancialSummary);
 router.route('/stores')
   .get(getStores)
   .post(createStore);
+
+// Generate store code endpoint (separate from stores routes to avoid conflicts)
+router.get('/generate-store-code', generateStoreCode);
 
 router.route('/stores/:id')
   .get(getStore)

@@ -193,6 +193,28 @@ const getStores = async (req, res) => {
   }
 };
 
+// @desc    Generate unique store code
+// @route   GET /api/store-owner/generate-store-code
+// @access  Private (Store Owner only)
+const generateStoreCode = async (req, res) => {
+  console.log('🔥 generateStoreCode function called!');
+  try {
+    const code = await Store.generateUniqueCode();
+    console.log('✅ Generated code:', code);
+
+    res.status(200).json({
+      success: true,
+      data: { code }
+    });
+  } catch (error) {
+    console.error('Generate store code error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while generating store code'
+    });
+  }
+};
+
 // @desc    Create new store
 // @route   POST /api/store-owner/stores
 // @access  Private (Store Owner only)
@@ -245,6 +267,7 @@ const createStore = async (req, res) => {
 // @route   GET /api/store-owner/stores/:id
 // @access  Private (Store Owner only)
 const getStore = async (req, res) => {
+  console.log('🚨 getStore function called with ID:', req.params.id);
   try {
     const store = await Store.findOne({
       _id: req.params.id,
@@ -349,6 +372,7 @@ module.exports = {
   getStoreOwnerAnalytics,
   getFinancialSummary,
   getStores,
+  generateStoreCode,
   createStore,
   getStore,
   getStoreStaff
