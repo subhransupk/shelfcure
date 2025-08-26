@@ -81,8 +81,8 @@ const LoginFormSection = () => {
   };
 
   const quickLoginOptions = [
-    { name: 'Demo Account', email: 'demo@pharmacy.com', password: 'demo123' },
-    { name: 'Test Pharmacy', email: 'test@shelfcure.com', password: 'test123' }
+    { name: 'Store Owner', email: 'owner1@pharmacy1.com', password: 'password123' },
+    { name: 'Store Manager', email: 'manager@shelfcure.com', password: 'manager123' }
   ];
 
   return (

@@ -87,7 +87,7 @@ const CreateStorePage = () => {
           pincode: formData.pincode
         },
         business: {
-          licenseNumber: formData.licenseNumber || undefined,
+          licenseNumber: formData.licenseNumber,
           gstNumber: formData.gstNumber || undefined
         },
         // Manager information (if provided)
@@ -333,7 +333,7 @@ const CreateStorePage = () => {
 
                 <div>
                   <label htmlFor="licenseNumber" className="block text-sm font-medium text-gray-700 text-left">
-                    License Number
+                    License Number <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
@@ -341,6 +341,7 @@ const CreateStorePage = () => {
                     id="licenseNumber"
                     value={formData.licenseNumber}
                     onChange={handleInputChange}
+                    required
                     className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
                     placeholder="Enter license number"
                   />

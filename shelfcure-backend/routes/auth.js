@@ -990,12 +990,15 @@ router.post('/admin/users', protect, authorize('superadmin', 'admin'), async (re
       });
     }
 
+    // Set default password if not provided
+    const userPassword = password || 'ShelfCure@123';
+
     // Prepare user data
     const userData = {
       name,
       email,
       phone,
-      password,
+      password: userPassword,
       role: role || 'staff',
       stores: stores || [],
       currentStore: stores && stores.length > 0 ? stores[0] : null,
@@ -1233,11 +1236,17 @@ router.delete('/admin/users/:id', protect, authorize('superadmin', 'admin'), asy
       });
     }
 
+    // Delete associated subscriptions first
+    const Subscription = require('../models/Subscription');
+    const deletedSubscriptions = await Subscription.deleteMany({ storeOwner: user._id });
+    console.log(`Deleted ${deletedSubscriptions.deletedCount} subscriptions for user ${user.email}`);
+
+    // Delete the user
     await User.findByIdAndDelete(req.params.id);
 
     res.status(200).json({
       success: true,
-      message: 'User deleted successfully'
+      message: 'User and associated subscriptions deleted successfully'
     });
   } catch (error) {
     console.error('Delete user error:', error);

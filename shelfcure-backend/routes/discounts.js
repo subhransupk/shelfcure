@@ -8,6 +8,67 @@ const Discount = require('../models/Discount');
 // @access  Private/Admin
 router.get('/admin', protect, authorize('superadmin', 'admin'), async (req, res) => {
   try {
+    // Check if database is available
+    if (!global.isDatabaseConnected) {
+      console.log('Database not available for discounts, using mock data');
+
+      const mockDiscounts = [
+        {
+          _id: '1',
+          name: 'New Year Special',
+          code: 'NEWYEAR2024',
+          description: 'Special discount for new year subscribers',
+          type: 'percentage',
+          value: 20,
+          isActive: true,
+          validFrom: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30), // 30 days ago
+          validUntil: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30), // 30 days from now
+          usageLimit: 100,
+          usedCount: 25,
+          minOrderAmount: 999,
+          maxDiscountAmount: 500,
+          applicablePlans: ['basic', 'premium'],
+          createdBy: { name: 'System Admin' },
+          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30)
+        },
+        {
+          _id: '2',
+          name: 'First Time User',
+          code: 'WELCOME10',
+          description: 'Welcome discount for first-time users',
+          type: 'percentage',
+          value: 10,
+          isActive: true,
+          validFrom: new Date(Date.now() - 1000 * 60 * 60 * 24 * 60), // 60 days ago
+          validUntil: new Date(Date.now() + 1000 * 60 * 60 * 24 * 60), // 60 days from now
+          usageLimit: 500,
+          usedCount: 150,
+          minOrderAmount: 500,
+          maxDiscountAmount: 200,
+          applicablePlans: ['basic', 'premium', 'enterprise'],
+          createdBy: { name: 'System Admin' },
+          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 60)
+        }
+      ];
+
+      return res.status(200).json({
+        success: true,
+        data: mockDiscounts,
+        pagination: {
+          currentPage: 1,
+          totalPages: 1,
+          total: mockDiscounts.length,
+          limit: 10
+        },
+        stats: {
+          totalDiscounts: mockDiscounts.length,
+          activeDiscounts: mockDiscounts.filter(d => d.isActive).length,
+          inactiveDiscounts: mockDiscounts.filter(d => !d.isActive).length,
+          totalUsage: mockDiscounts.reduce((sum, d) => sum + d.usedCount, 0)
+        }
+      });
+    }
+
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;

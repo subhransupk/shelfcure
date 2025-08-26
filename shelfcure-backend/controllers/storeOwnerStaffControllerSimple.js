@@ -274,9 +274,87 @@ const deleteStaff = async (req, res) => {
   }
 };
 
+// @desc    Get all staff across all stores for store owner
+// @route   GET /api/store-owner/staff
+// @access  Private (Store Owner only)
+const getAllStaff = async (req, res) => {
+  try {
+    const storeOwnerId = req.user.id;
+    const { page = 1, limit = 10, search, role, status } = req.query;
+
+    // Get all stores owned by this store owner
+    const ownerStores = await Store.find({ owner: storeOwnerId }).select('_id');
+    const ownerStoreIds = ownerStores.map(store => store._id);
+
+    if (ownerStoreIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        count: 0,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: 0,
+          pages: 0
+        },
+        data: []
+      });
+    }
+
+    // Build query to find all staff in owner's stores
+    let query = { stores: { $in: ownerStoreIds } };
+
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (role) {
+      query.role = role;
+    }
+
+    if (status) {
+      query.isActive = status === 'active';
+    }
+
+    // Get staff members with store information
+    const staff = await User.find(query)
+      .select('name email phone role avatar isActive createdAt lastLogin stores currentStore address')
+      .populate('currentStore', 'name code')
+      .populate('stores', 'name code')
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .lean();
+
+    const total = await User.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      count: staff.length,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      },
+      data: staff
+    });
+  } catch (error) {
+    console.error('Get all staff error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching staff'
+    });
+  }
+};
+
 module.exports = {
   createStaff,
   getStaffDetails,
   updateStaff,
-  deleteStaff
+  deleteStaff,
+  getAllStaff
 };

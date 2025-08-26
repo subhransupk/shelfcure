@@ -11,7 +11,10 @@ const {
   generateStoreCode,
   createStore,
   getStore,
-  getStoreStaff
+  updateStore,
+  deleteStore,
+  getStoreStaff,
+  syncStoreCount
 } = require('../controllers/storeOwnerControllerSimple');
 
 const {
@@ -19,7 +22,8 @@ const {
   createStaff,
   updateStaff,
   deleteStaff,
-  getStaffDetails
+  getStaffDetails,
+  getAllStaff
 } = require('../controllers/storeOwnerStaffControllerSimple');
 
 // Import middleware
@@ -45,8 +49,7 @@ const getSubscriptionPlans = (req, res) => res.status(501).json({ success: false
 const upgradeSubscription = (req, res) => res.status(501).json({ success: false, message: 'Feature coming soon' });
 const paySubscription = (req, res) => res.status(501).json({ success: false, message: 'Feature coming soon' });
 const getPaymentHistory = (req, res) => res.status(501).json({ success: false, message: 'Feature coming soon' });
-const updateStore = (req, res) => res.status(501).json({ success: false, message: 'Feature coming soon' });
-const deleteStore = (req, res) => res.status(501).json({ success: false, message: 'Feature coming soon' });
+
 const getStoreAnalytics = (req, res) => res.status(501).json({ success: false, message: 'Feature coming soon' });
 
 // Apply authentication and authorization middleware to all routes
@@ -81,10 +84,15 @@ router.get('/stores/:id/analytics', getStoreAnalytics);
 // ===================
 // STAFF MANAGEMENT ROUTES
 // ===================
+// Get all staff across all stores
+router.get('/staff', getAllStaff);
+
+// Store-specific staff routes
 router.route('/stores/:storeId/staff')
   .get(getStoreStaff)
   .post(createStaff);
 
+// Individual staff routes
 router.route('/staff/:id')
   .get(getStaffDetails)
   .put(updateStaff)
@@ -125,5 +133,10 @@ router.get('/subscription/plans', getSubscriptionPlans);
 router.put('/subscription/upgrade', upgradeSubscription);
 router.post('/subscription/pay', paySubscription);
 router.get('/subscription/payment-history', getPaymentHistory);
+
+// ===================
+// UTILITY ROUTES
+// ===================
+router.post('/sync-store-count', syncStoreCount);
 
 module.exports = router;

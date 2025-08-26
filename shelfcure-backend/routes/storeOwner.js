@@ -24,7 +24,8 @@ const {
   createStaff,
   updateStaff,
   deleteStaff,
-  getStaffDetails
+  getStaffDetails,
+  getAllStaff
 } = require('../controllers/storeOwnerStaffControllerSimple');
 
 // Placeholder functions for features to be implemented
@@ -88,10 +89,15 @@ router.get('/stores/:id/analytics', getStoreAnalytics);
 // ===================
 // STAFF MANAGEMENT ROUTES
 // ===================
+// Get all staff across all stores
+router.get('/staff', getAllStaff);
+
+// Store-specific staff routes
 router.route('/stores/:storeId/staff')
   .get(getStoreStaff)
   .post(createStaff);
 
+// Individual staff routes
 router.route('/staff/:id')
   .get(getStaffDetails)
   .put(updateStaff)

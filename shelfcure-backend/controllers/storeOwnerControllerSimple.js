@@ -148,16 +148,17 @@ const getStores = async (req, res) => {
     const storeOwnerId = req.user.id;
     const { page = 1, limit = 10, search, status } = req.query;
 
-    // Build query
-    let query = { owner: storeOwnerId };
-    
+    // Build query - by default only show active stores
+    let query = { owner: storeOwnerId, isActive: true };
+
     if (search) {
       query.$or = [
         { name: { $regex: search, $options: 'i' } },
         { code: { $regex: search, $options: 'i' } }
       ];
     }
-    
+
+    // Allow overriding the active filter with status parameter
     if (status) {
       query.isActive = status === 'active';
     }
@@ -256,6 +257,25 @@ const createStore = async (req, res) => {
     });
   } catch (error) {
     console.error('Create store error:', error);
+
+    // Handle duplicate key error specifically
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyValue)[0];
+      const value = error.keyValue[field];
+
+      if (field === 'business.licenseNumber') {
+        return res.status(400).json({
+          success: false,
+          message: `A store with license number "${value}" already exists. Please use a different license number (e.g., ${value}1, ${value}A, etc.) or contact support if you believe this is an error.`
+        });
+      }
+
+      return res.status(400).json({
+        success: false,
+        message: `Duplicate value for ${field}: ${value}`
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Server error while creating store'
@@ -367,6 +387,158 @@ const getStoreStaff = async (req, res) => {
   }
 };
 
+// @desc    Update store
+// @route   PUT /api/store-owner/stores/:id
+// @access  Private (Store Owner only)
+const updateStore = async (req, res) => {
+  try {
+    const storeOwnerId = req.user.id;
+    const storeId = req.params.id;
+
+    // Find the store and verify ownership
+    const store = await Store.findOne({ _id: storeId, owner: storeOwnerId });
+
+    if (!store) {
+      return res.status(404).json({
+        success: false,
+        message: 'Store not found or you do not have permission to update this store'
+      });
+    }
+
+    // Update allowed fields
+    const allowedFields = [
+      'name', 'description', 'contact', 'address', 'business',
+      'settings', 'isActive', 'theme'
+    ];
+
+    allowedFields.forEach(field => {
+      if (req.body[field] !== undefined) {
+        if (typeof req.body[field] === 'object' && req.body[field] !== null) {
+          store[field] = { ...store[field], ...req.body[field] };
+        } else {
+          store[field] = req.body[field];
+        }
+      }
+    });
+
+    store.updatedBy = storeOwnerId;
+    await store.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Store updated successfully',
+      data: store
+    });
+  } catch (error) {
+    console.error('Update store error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while updating store'
+    });
+  }
+};
+
+// @desc    Delete store
+// @route   DELETE /api/store-owner/stores/:id
+// @access  Private (Store Owner only)
+const deleteStore = async (req, res) => {
+  try {
+    const storeOwnerId = req.user.id;
+    const storeId = req.params.id;
+
+    // Find the store and verify ownership
+    const store = await Store.findOne({ _id: storeId, owner: storeOwnerId });
+
+    if (!store) {
+      return res.status(404).json({
+        success: false,
+        message: 'Store not found or you do not have permission to delete this store'
+      });
+    }
+
+    // Check if store is already deleted
+    if (!store.isActive) {
+      return res.status(400).json({
+        success: false,
+        message: 'Store is already deleted'
+      });
+    }
+
+    // Get user's subscription to decrement store count
+    const user = await User.findById(storeOwnerId).populate('subscription');
+    if (!user || !user.subscription) {
+      return res.status(400).json({
+        success: false,
+        message: 'User subscription not found'
+      });
+    }
+
+    // Soft delete the store
+    store.isActive = false;
+    store.updatedBy = storeOwnerId;
+    await store.save();
+
+    // Decrement the subscription store count
+    await user.subscription.decrementStoreCount();
+
+    res.status(200).json({
+      success: true,
+      message: 'Store deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete store error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while deleting store'
+    });
+  }
+};
+
+// @desc    Sync subscription store count with actual active stores
+// @route   POST /api/store-owner/sync-store-count
+// @access  Private (Store Owner only)
+const syncStoreCount = async (req, res) => {
+  try {
+    const storeOwnerId = req.user.id;
+
+    // Get user's subscription
+    const user = await User.findById(storeOwnerId).populate('subscription');
+    if (!user || !user.subscription) {
+      return res.status(400).json({
+        success: false,
+        message: 'User subscription not found'
+      });
+    }
+
+    // Count actual active stores
+    const activeStoreCount = await Store.countDocuments({
+      owner: storeOwnerId,
+      isActive: true
+    });
+
+    // Update subscription store count
+    const oldCount = user.subscription.currentStoreCount;
+    user.subscription.currentStoreCount = activeStoreCount;
+    await user.subscription.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Store count synchronized successfully',
+      data: {
+        oldCount,
+        newCount: activeStoreCount,
+        activeStores: activeStoreCount
+      }
+    });
+  } catch (error) {
+    console.error('Sync store count error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while syncing store count'
+    });
+  }
+};
+
 module.exports = {
   getDashboardData,
   getStoreOwnerAnalytics,
@@ -375,5 +547,8 @@ module.exports = {
   generateStoreCode,
   createStore,
   getStore,
-  getStoreStaff
+  updateStore,
+  deleteStore,
+  getStoreStaff,
+  syncStoreCount
 };

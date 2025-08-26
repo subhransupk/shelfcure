@@ -48,8 +48,13 @@ import AffiliateSettingsPage from './pages/AffiliateSettingsPage';
 // Store Owner Pages
 import StoreOwnerDashboard from './pages/StoreOwnerDashboard';
 import StoreOwnerStoresPage from './pages/StoreOwnerStoresPage';
+import StoreOwnerStaffPage from './pages/StoreOwnerStaffPage';
+import StoreOwnerAnalyticsPage from './pages/StoreOwnerAnalyticsPage';
+import StoreOwnerSubscriptionPage from './pages/StoreOwnerSubscriptionPage';
 import StoreOwnerSettingsPage from './pages/StoreOwnerSettingsPage';
 import CreateStorePage from './pages/CreateStorePage';
+import StoreOwnerViewStorePage from './pages/StoreOwnerViewStorePage';
+import StoreOwnerEditStorePage from './pages/StoreOwnerEditStorePage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import AdminSettingsPage from './pages/AdminSettingsPage';
 import AdminCustomPricingPage from './pages/AdminCustomPricingPage';
@@ -114,6 +119,11 @@ function App() {
           <Route path="/store-owner/dashboard" element={<StoreOwnerDashboard />} />
           <Route path="/store-owner/stores" element={<StoreOwnerStoresPage />} />
           <Route path="/store-owner/stores/create" element={<CreateStorePage />} />
+          <Route path="/store-owner/stores/:id" element={<StoreOwnerViewStorePage />} />
+          <Route path="/store-owner/stores/:id/edit" element={<StoreOwnerEditStorePage />} />
+          <Route path="/store-owner/staff" element={<StoreOwnerStaffPage />} />
+          <Route path="/store-owner/analytics" element={<StoreOwnerAnalyticsPage />} />
+          <Route path="/store-owner/subscription" element={<StoreOwnerSubscriptionPage />} />
           <Route path="/store-owner/settings" element={<StoreOwnerSettingsPage />} />
         </Routes>
       </Router>

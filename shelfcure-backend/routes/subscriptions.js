@@ -12,6 +12,103 @@ const Invoice = require('../models/Invoice');
 // @access  Private/Admin
 router.get('/plans/admin', protect, authorize('superadmin', 'admin'), async (req, res) => {
   try {
+    // Check if database is available
+    if (!global.isDatabaseConnected) {
+      console.log('Database not available for subscription plans, using mock data');
+
+      const mockPlans = [
+        {
+          _id: '1',
+          name: 'Basic Plan',
+          description: 'Perfect for small pharmacies just getting started',
+          planType: 'basic',
+          pricing: {
+            monthly: 999,
+            yearly: 9999,
+            currency: 'INR'
+          },
+          features: {
+            maxStores: 1,
+            maxUsers: 3,
+            inventoryManagement: true,
+            billingSystem: true,
+            basicReports: true,
+            customerSupport: 'email',
+            whatsappIntegration: false,
+            ocrBillScanning: false,
+            advancedAnalytics: false,
+            multiStoreManagement: false,
+            affiliateProgram: false
+          },
+          isActive: true,
+          sortOrder: 1,
+          createdBy: { name: 'System Admin' },
+          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 90)
+        },
+        {
+          _id: '2',
+          name: 'Premium Plan',
+          description: 'Advanced features for growing pharmacy businesses',
+          planType: 'premium',
+          pricing: {
+            monthly: 2999,
+            yearly: 29999,
+            currency: 'INR'
+          },
+          features: {
+            maxStores: 3,
+            maxUsers: 10,
+            inventoryManagement: true,
+            billingSystem: true,
+            basicReports: true,
+            customerSupport: 'phone',
+            whatsappIntegration: true,
+            ocrBillScanning: true,
+            advancedAnalytics: true,
+            multiStoreManagement: true,
+            affiliateProgram: false
+          },
+          isActive: true,
+          sortOrder: 2,
+          createdBy: { name: 'System Admin' },
+          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 90)
+        },
+        {
+          _id: '3',
+          name: 'Enterprise Plan',
+          description: 'Complete solution for large pharmacy chains',
+          planType: 'enterprise',
+          pricing: {
+            monthly: 4999,
+            yearly: 49999,
+            currency: 'INR'
+          },
+          features: {
+            maxStores: 10,
+            maxUsers: 50,
+            inventoryManagement: true,
+            billingSystem: true,
+            basicReports: true,
+            customerSupport: 'priority',
+            whatsappIntegration: true,
+            ocrBillScanning: true,
+            advancedAnalytics: true,
+            multiStoreManagement: true,
+            affiliateProgram: true
+          },
+          isActive: true,
+          sortOrder: 3,
+          createdBy: { name: 'System Admin' },
+          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 90)
+        }
+      ];
+
+      return res.status(200).json({
+        success: true,
+        data: mockPlans
+      });
+    }
+
     const plans = await SubscriptionPlan.find()
       .populate('createdBy', 'name')
       .populate('updatedBy', 'name')
@@ -303,6 +400,9 @@ router.get('/admin', protect, authorize('superadmin', 'admin'), async (req, res)
       subscriptionQuery.plan = req.query.plan;
     }
 
+    // Add filter to only get subscriptions with valid store owners
+    subscriptionQuery.storeOwner = { $ne: null };
+
     const subscriptions = await Subscription.find(subscriptionQuery)
       .populate('storeOwner', 'name email phone createdAt')
       .sort({ endDate: 1 })
@@ -311,43 +411,47 @@ router.get('/admin', protect, authorize('superadmin', 'admin'), async (req, res)
 
     const total = await Subscription.countDocuments(subscriptionQuery);
 
-    console.log('Found subscriptions:', subscriptions.length);
-    console.log('Total subscriptions:', total);
-    if (subscriptions.length > 0) {
-      console.log('First subscription:', JSON.stringify(subscriptions[0], null, 2));
-    }
+    // Filter out subscriptions where storeOwner population failed
+    const validSubscriptions = subscriptions.filter(sub => sub.storeOwner && sub.storeOwner._id);
 
-    // Transform data to match frontend expectations
-    const transformedData = subscriptions.map(subscription => ({
-      id: subscription._id,
-      userId: subscription.storeOwner._id,
-      userName: subscription.storeOwner.name,
-      userEmail: subscription.storeOwner.email,
-      userPhone: subscription.storeOwner.phone,
-      plan: subscription.plan.charAt(0).toUpperCase() + subscription.plan.slice(1),
-      status: subscription.status,
-      startDate: subscription.startDate,
-      endDate: subscription.endDate,
-      amount: subscription.pricing.totalAmount,
-      billingCycle: subscription.billingDuration,
-      storeCount: subscription.currentStoreCount,
-      storeLimit: subscription.storeCountLimit,
-      nextBilling: subscription.endDate,
-      paymentMethod: 'Online Payment', // Default
-      paymentStatus: subscription.paymentStatus,
-      remainingDays: subscription.remainingDays,
-      isActive: subscription.isActive,
-      features: subscription.features,
-      createdAt: subscription.createdAt
-    }));
+    // Transform data to match frontend expectations - only include valid subscriptions
+    const transformedData = validSubscriptions
+      .map(subscription => {
+        const storeOwner = subscription.storeOwner;
+        return {
+          id: subscription._id,
+          userId: storeOwner._id,
+          userName: storeOwner.name,
+          userEmail: storeOwner.email,
+          userPhone: storeOwner.phone,
+          plan: subscription.plan.charAt(0).toUpperCase() + subscription.plan.slice(1),
+          status: subscription.status,
+          startDate: subscription.startDate,
+          endDate: subscription.endDate,
+          amount: subscription.pricing.totalAmount,
+          billingCycle: subscription.billingDuration,
+          storeCount: subscription.currentStoreCount,
+          storeLimit: subscription.storeCountLimit,
+          nextBilling: subscription.endDate,
+          paymentMethod: 'Online Payment', // Default
+          paymentStatus: subscription.paymentStatus,
+          remainingDays: subscription.remainingDays,
+          isActive: subscription.isActive,
+          features: subscription.features,
+          createdAt: subscription.createdAt
+        };
+      });
+
+    // Use the actual count of valid subscriptions for pagination
+    const validTotal = validSubscriptions.length;
 
     res.status(200).json({
       success: true,
       data: transformedData,
       pagination: {
         currentPage: page,
-        totalPages: Math.ceil(total / limit),
-        totalItems: total,
+        totalPages: Math.ceil(validTotal / limit),
+        totalItems: validTotal,
         itemsPerPage: limit
       }
     });

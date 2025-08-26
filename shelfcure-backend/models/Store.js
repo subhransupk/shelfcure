@@ -75,8 +75,8 @@ const storeSchema = new mongoose.Schema({
   business: {
     licenseNumber: {
       type: String,
-      required: [true, 'Please add license number'],
-      unique: true
+      required: [true, 'Please add license number']
+      // Removed unique constraint to allow store recreation
     },
     gstNumber: {
       type: String,
@@ -305,7 +305,7 @@ storeSchema.statics.generateUniqueCode = async function() {
 // Indexes
 storeSchema.index({ code: 1 });
 storeSchema.index({ owner: 1 });
-storeSchema.index({ 'business.licenseNumber': 1 });
+// License number index removed - no longer unique to allow store recreation
 // Subscription index removed - now managed at Store Owner level
 storeSchema.index({ isActive: 1 });
 

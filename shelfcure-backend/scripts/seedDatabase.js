@@ -159,7 +159,7 @@ const seedDatabase = async () => {
         email: `owner${i}@pharmacy${i}.com`,
         phone: `+91 98765 4321${i}`,
         password: 'password123', // Let the User model hash this automatically
-        role: 'manager',
+        role: 'store_owner',
         isActive: true,
         isEmailVerified: true
       });

@@ -21,8 +21,8 @@ const storeOwnerOnly = async (req, res, next) => {
     }
 
     // Check if store owner has an active subscription
-    const subscription = await Subscription.findOne({ 
-      storeOwner: req.user.id 
+    const subscription = await Subscription.findOne({
+      storeOwner: req.user.id
     });
 
     if (!subscription) {
@@ -58,7 +58,7 @@ const storeOwnerOnly = async (req, res, next) => {
 
     // Add subscription info to request for use in controllers
     req.subscription = subscription;
-    
+
     next();
   } catch (error) {
     console.error('Store owner auth error:', error);

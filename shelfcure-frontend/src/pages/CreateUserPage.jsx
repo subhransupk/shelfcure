@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AdminLayout from '../components/admin/AdminLayout';
-import { API_ENDPOINTS } from '../config/api';
+import { API_ENDPOINTS, makeAuthenticatedRequest } from '../config/api';
 import { ArrowLeft, Eye, EyeOff, RefreshCw } from 'lucide-react';
 
 const CreateUserPage = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [subscriptionPlans, setSubscriptionPlans] = useState([
+    { value: '', label: 'Select Plan' }
+  ]);
+  const [plansLoading, setPlansLoading] = useState(false);
   
   const [formData, setFormData] = useState({
     // Basic Information
@@ -49,13 +53,7 @@ const CreateUserPage = () => {
     { value: 'admin', label: 'Admin' },
   ];
 
-  const subscriptionPlans = [
-    { value: '', label: 'Select Plan' },
-    { value: 'basic', label: 'Basic Plan - ₹999/month' },
-    { value: 'standard', label: 'Standard Plan - ₹1999/month' },
-    { value: 'premium', label: 'Premium Plan - ₹2999/month' },
-    { value: 'enterprise', label: 'Enterprise Plan - ₹4999/month' },
-  ];
+
 
   const storeLimit = [
     { value: '', label: 'Select Limit' },
@@ -72,6 +70,37 @@ const CreateUserPage = () => {
     { value: 'quarterly', label: 'Quarterly (3 months)' },
     { value: 'yearly', label: 'Yearly (12 months)' },
   ];
+
+  // Fetch subscription plans on component mount
+  useEffect(() => {
+    const fetchSubscriptionPlans = async () => {
+      try {
+        setPlansLoading(true);
+        const response = await makeAuthenticatedRequest(API_ENDPOINTS.ADMIN_SUBSCRIPTION_PLANS);
+
+        if (response.success && response.data) {
+          const planOptions = [
+            { value: '', label: 'Select Plan' },
+            ...response.data.map(plan => ({
+              value: plan.planType || plan._id,
+              label: `${plan.name} - ₹${plan.pricing?.monthly || 0}/month`
+            }))
+          ];
+          setSubscriptionPlans(planOptions);
+        } else {
+          console.error('Failed to fetch subscription plans:', response.message);
+          // Keep default option if API fails
+        }
+      } catch (error) {
+        console.error('Error fetching subscription plans:', error);
+        // Keep default option if API fails
+      } finally {
+        setPlansLoading(false);
+      }
+    };
+
+    fetchSubscriptionPlans();
+  }, []);
 
   const generatePassword = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
@@ -122,7 +151,14 @@ const CreateUserPage = () => {
         billingDuration: formData.billingDuration
       });
 
-      const response = await fetch(`${API_ENDPOINTS.ADMIN_USERS}`, {
+      // Use different endpoint based on role - store owners need subscription creation
+      const endpoint = formData.role === 'store_owner'
+        ? API_ENDPOINTS.ADMIN_CREATE_USER_WITH_SUBSCRIPTION
+        : API_ENDPOINTS.ADMIN_USERS;
+
+      console.log('Using endpoint:', endpoint);
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -477,11 +513,16 @@ const CreateUserPage = () => {
                             required={isStoreOwner}
                             value={formData.subscriptionPlan}
                             onChange={(e) => handleInputChange('subscriptionPlan', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            disabled={plansLoading}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
                           >
-                            {subscriptionPlans.map(plan => (
-                              <option key={plan.value} value={plan.value}>{plan.label}</option>
-                            ))}
+                            {plansLoading ? (
+                              <option value="">Loading plans...</option>
+                            ) : (
+                              subscriptionPlans.map(plan => (
+                                <option key={plan.value} value={plan.value}>{plan.label}</option>
+                              ))
+                            )}
                           </select>
                         </div>
 

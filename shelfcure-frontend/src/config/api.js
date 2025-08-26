@@ -18,6 +18,7 @@ export const API_ENDPOINTS = {
   
   // User management endpoints
   ADMIN_USERS: `${API_BASE_URL}/api/admin/users`,
+  ADMIN_CREATE_USER_WITH_SUBSCRIPTION: `${API_BASE_URL}/api/auth/admin/users`,
   
   // Store management endpoints
   ADMIN_STORES: `${API_BASE_URL}/api/stores/admin/all`,

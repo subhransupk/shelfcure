@@ -766,14 +766,20 @@ router.delete('/users/:id', protect, authorize('superadmin', 'admin'), async (re
       });
     }
 
+    // Delete associated subscriptions first (hard delete even for soft user delete)
+    const Subscription = require('../models/Subscription');
+    const deletedSubscriptions = await Subscription.deleteMany({ storeOwner: user._id });
+    console.log(`Deleted ${deletedSubscriptions.deletedCount} subscriptions for user ${user.email}`);
+
     // Soft delete - set isActive to false instead of actually deleting
     user.isActive = false;
+    user.subscription = null; // Clear subscription reference
     user.updatedBy = req.user._id;
     await user.save();
 
     res.status(200).json({
       success: true,
-      message: 'User deleted successfully'
+      message: 'User and associated subscriptions deleted successfully'
     });
   } catch (error) {
     console.error('Admin delete user error:', error);
