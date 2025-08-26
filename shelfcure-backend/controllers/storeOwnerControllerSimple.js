@@ -222,6 +222,8 @@ const generateStoreCode = async (req, res) => {
 const createStore = async (req, res) => {
   try {
     const storeOwnerId = req.user.id;
+    console.log('Creating store for owner:', storeOwnerId);
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
 
     // Check subscription limits
     let subscription = await Subscription.findOne({ storeOwner: storeOwnerId });
@@ -274,6 +276,21 @@ const createStore = async (req, res) => {
     });
   } catch (error) {
     console.error('Create store error:', error);
+    console.error('Error details:', {
+      name: error.name,
+      message: error.message,
+      errors: error.errors,
+      stack: error.stack
+    });
+
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const validationErrors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: `Validation error: ${validationErrors.join(', ')}`
+      });
+    }
 
     // Handle duplicate key error specifically
     if (error.code === 11000) {
@@ -295,7 +312,8 @@ const createStore = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: 'Server error while creating store'
+      message: 'Server error while creating store',
+      error: error.message
     });
   }
 };

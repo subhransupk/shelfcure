@@ -184,20 +184,29 @@ const AddMasterMedicinePage = () => {
   const handleCsvFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      // Validate file type
       if (file.type !== 'text/csv' && !file.name.toLowerCase().endsWith('.csv')) {
         alert('Please select a CSV file');
+        e.target.value = ''; // Clear the input
         return;
       }
-      if (file.size > 10 * 1024 * 1024) { // 10MB limit
+
+      // Validate file size (10MB limit)
+      if (file.size > 10 * 1024 * 1024) {
         alert('File size must be less than 10MB');
+        e.target.value = ''; // Clear the input
         return;
       }
+
       setCsvFile(file);
+    } else {
+      setCsvFile(null);
     }
   };
 
   const handleCsvImport = async () => {
-    if (!csvFile) {
+    // Validate file selection
+    if (!csvFile || !(csvFile instanceof File)) {
       alert('Please select a CSV file first');
       return;
     }
@@ -206,16 +215,26 @@ const AddMasterMedicinePage = () => {
     setImportResults(null);
 
     try {
+      // Create FormData and append the file
       const formData = new FormData();
-      formData.append('csvFile', csvFile);
+      formData.append('csvFile', csvFile, csvFile.name);
 
+      // Make the API request
       const response = await fetch(`${API_ENDPOINTS.ADMIN_MEDICINES}/import`, {
         method: 'POST',
         body: formData,
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+          // Note: Do NOT set Content-Type header when using FormData
+          // The browser will set it automatically with the correct boundary
         }
       });
+
+      // Check if response is ok
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Unknown error occurred' }));
+        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+      }
 
       const data = await response.json();
 
@@ -226,12 +245,15 @@ const AddMasterMedicinePage = () => {
         // Reset file input
         const fileInput = document.getElementById('csvFileInput');
         if (fileInput) fileInput.value = '';
+
+        // Show success message
+        alert(`Import completed successfully! ${data.data.summary.successful} medicines imported.`);
       } else {
-        alert(`Import failed: ${data.message}`);
+        throw new Error(data.message || 'Import failed');
       }
     } catch (error) {
       console.error('CSV import error:', error);
-      alert('Error importing CSV file. Please try again.');
+      alert(`Error importing CSV file: ${error.message}`);
     } finally {
       setCsvImporting(false);
     }
@@ -407,6 +429,9 @@ const AddMasterMedicinePage = () => {
           <div className="mt-4 p-3 bg-blue-50 rounded-lg">
             <p className="text-sm text-blue-700 text-left">
               Selected file: <span className="font-medium">{csvFile.name}</span> ({(csvFile.size / 1024).toFixed(1)} KB)
+            </p>
+            <p className="text-xs text-blue-600 text-left mt-1">
+              File type: {csvFile.type || 'text/csv'} • Last modified: {new Date(csvFile.lastModified).toLocaleString()}
             </p>
           </div>
         )}

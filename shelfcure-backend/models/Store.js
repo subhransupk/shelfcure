@@ -80,7 +80,14 @@ const storeSchema = new mongoose.Schema({
     },
     gstNumber: {
       type: String,
-      match: [/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/, 'Please add a valid GST number']
+      validate: {
+        validator: function(v) {
+          // If GST number is provided, it should match the pattern
+          if (!v || v.trim() === '') return true; // Allow empty/undefined
+          return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(v);
+        },
+        message: 'Please add a valid GST number (15 characters: 2 digits + 5 letters + 4 digits + 1 letter + 1 alphanumeric + Z + 1 alphanumeric)'
+      }
     },
     drugLicenseNumber: String,
     establishmentYear: {

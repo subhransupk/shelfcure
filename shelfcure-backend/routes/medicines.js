@@ -37,23 +37,37 @@ const upload = multer({
 
 // Helper function to parse CSV content
 const parseCSV = (csvContent) => {
+  console.log('=== PARSING CSV ===');
   const lines = csvContent.split('\n').filter(line => line.trim());
+  console.log('Total lines after filtering:', lines.length);
+
   if (lines.length < 2) {
+    console.log('ERROR: Not enough lines in CSV');
     throw new Error('CSV file must contain at least a header row and one data row');
   }
 
   const headers = lines[0].split(',').map(header => header.trim().replace(/"/g, ''));
+  console.log('Headers found:', headers);
+  console.log('Headers count:', headers.length);
+
   const medicines = [];
+  console.log('Processing data rows...');
 
   for (let i = 1; i < lines.length; i++) {
+    console.log(`Processing row ${i}: "${lines[i]}"`);
     const values = lines[i].split(',').map(value => value.trim().replace(/"/g, ''));
+    console.log(`Values found: [${values.join(', ')}]`);
+    console.log(`Values count: ${values.length}, Headers count: ${headers.length}`);
+
     if (values.length !== headers.length) {
+      console.log(`SKIPPING row ${i}: Column count mismatch`);
       continue; // Skip malformed rows
     }
 
     const medicine = {};
     headers.forEach((header, index) => {
       const value = values[index];
+      console.log(`Mapping header "${header}" -> value "${value}"`);
 
       // Map CSV headers to medicine schema fields
       switch (header.toLowerCase()) {
@@ -168,7 +182,18 @@ const parseCSV = (csvContent) => {
     });
 
     // Set default values for required fields if not provided
-    if (!medicine.name) continue; // Skip if no name
+    console.log(`Medicine before validation:`, {
+      name: medicine.name,
+      composition: medicine.composition,
+      manufacturer: medicine.manufacturer,
+      category: medicine.category
+    });
+
+    if (!medicine.name) {
+      console.log(`SKIPPING medicine: No name found`);
+      continue; // Skip if no name
+    }
+
     if (!medicine.composition) medicine.composition = 'Not specified';
     if (!medicine.manufacturer) medicine.manufacturer = 'Not specified';
     if (!medicine.category) medicine.category = 'Other';
@@ -187,9 +212,13 @@ const parseCSV = (csvContent) => {
     if (medicine.requiresPrescription === undefined) medicine.requiresPrescription = false;
     if (medicine.isActive === undefined) medicine.isActive = true;
 
+    console.log(`ADDING medicine: ${medicine.name}`);
     medicines.push(medicine);
   }
 
+  console.log(`=== PARSING COMPLETE ===`);
+  console.log(`Total medicines created: ${medicines.length}`);
+  console.log(`========================`);
   return medicines;
 };
 
@@ -485,11 +514,27 @@ router.post('/admin/master/import', protect, authorize('superadmin', 'admin'), u
     // Read the uploaded CSV file
     const csvContent = fs.readFileSync(req.file.path, 'utf8');
 
+    console.log('=== CSV UPLOAD DEBUG ===');
+    console.log('File name:', req.file.originalname);
+    console.log('File size:', req.file.size);
+    console.log('CSV content (first 500 chars):');
+    console.log(csvContent.substring(0, 500));
+    console.log('CSV lines:');
+    const debugLines = csvContent.split('\n');
+    debugLines.forEach((line, index) => {
+      if (index < 5) { // Show first 5 lines
+        console.log(`Line ${index + 1}: "${line}"`);
+      }
+    });
+    console.log('========================');
+
     // Parse CSV content
     let medicines;
     try {
       medicines = parseCSV(csvContent);
+      console.log('Successfully parsed medicines:', medicines.length);
     } catch (parseError) {
+      console.log('CSV parsing failed:', parseError.message);
       // Clean up uploaded file
       fs.unlinkSync(req.file.path);
       return res.status(400).json({
