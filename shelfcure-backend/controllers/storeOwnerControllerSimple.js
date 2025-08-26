@@ -224,9 +224,26 @@ const createStore = async (req, res) => {
     const storeOwnerId = req.user.id;
 
     // Check subscription limits
-    const subscription = await Subscription.findOne({ storeOwner: storeOwnerId });
-    
-    if (!subscription || !subscription.isActive) {
+    let subscription = await Subscription.findOne({ storeOwner: storeOwnerId });
+
+    // If no subscription exists, create a basic trial subscription
+    if (!subscription) {
+      console.log('No subscription found for store owner, creating basic trial subscription');
+      subscription = await Subscription.create({
+        storeOwner: storeOwnerId,
+        plan: 'basic',
+        status: 'trial',
+        storeCountLimit: 1,
+        currentStoreCount: 0,
+        endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days trial
+        pricing: {
+          amount: 0,
+          totalAmount: 0
+        }
+      });
+    }
+
+    if (!subscription.isActive) {
       return res.status(400).json({
         success: false,
         message: 'Active subscription required to create stores'

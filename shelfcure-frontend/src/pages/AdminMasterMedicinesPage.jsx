@@ -5,7 +5,8 @@ import { API_ENDPOINTS, makeAuthenticatedRequest } from '../config/api';
 import {
   Pill, Search, Eye, Plus, Edit, Trash2,
   ChevronLeft, ChevronRight, CheckCircle, DollarSign,
-  AlertTriangle, MoreVertical, RefreshCw, Building, Loader, AlertCircle
+  AlertTriangle, MoreVertical, RefreshCw, Building, Loader, AlertCircle,
+  Check, X
 } from 'lucide-react';
 
 const AdminMasterMedicinesPage = () => {
@@ -19,6 +20,9 @@ const AdminMasterMedicinesPage = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [stats, setStats] = useState({});
   const [error, setError] = useState(null);
+  const [selectedMedicines, setSelectedMedicines] = useState([]);
+  const [selectAll, setSelectAll] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const itemsPerPage = 10;
 
@@ -71,6 +75,8 @@ const AdminMasterMedicinesPage = () => {
         });
         if (data.success) {
           fetchMedicines(); // Refresh the list
+          // Remove from selected if it was selected
+          setSelectedMedicines(prev => prev.filter(id => id !== medicineId));
         } else {
           alert(`Failed to delete medicine: ${data.message}`);
         }
@@ -80,6 +86,76 @@ const AdminMasterMedicinesPage = () => {
       }
     }
   };
+
+  const handleSelectMedicine = (medicineId) => {
+    setSelectedMedicines(prev => {
+      if (prev.includes(medicineId)) {
+        return prev.filter(id => id !== medicineId);
+      } else {
+        return [...prev, medicineId];
+      }
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectAll) {
+      setSelectedMedicines([]);
+      setSelectAll(false);
+    } else {
+      setSelectedMedicines(medicines.map(medicine => medicine._id));
+      setSelectAll(true);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedMedicines.length === 0) {
+      alert('Please select medicines to delete');
+      return;
+    }
+
+    const confirmMessage = `Are you sure you want to delete ${selectedMedicines.length} selected medicine${selectedMedicines.length > 1 ? 's' : ''}? This action cannot be undone.`;
+
+    if (window.confirm(confirmMessage)) {
+      try {
+        setBulkDeleting(true);
+        const token = localStorage.getItem('adminToken');
+
+        // Delete medicines one by one (since there's no bulk delete endpoint)
+        const deletePromises = selectedMedicines.map(medicineId =>
+          makeAuthenticatedRequest(`${API_ENDPOINTS.ADMIN_MEDICINES}/${medicineId}`, {
+            method: 'DELETE'
+          })
+        );
+
+        const results = await Promise.allSettled(deletePromises);
+
+        // Count successful deletions
+        const successCount = results.filter(result => result.status === 'fulfilled' && result.value.success).length;
+        const failCount = selectedMedicines.length - successCount;
+
+        if (successCount > 0) {
+          alert(`Successfully deleted ${successCount} medicine${successCount > 1 ? 's' : ''}${failCount > 0 ? `. Failed to delete ${failCount} medicine${failCount > 1 ? 's' : ''}.` : '.'}`);
+          fetchMedicines(); // Refresh the list
+          setSelectedMedicines([]);
+          setSelectAll(false);
+        } else {
+          alert('Failed to delete any medicines');
+        }
+      } catch (error) {
+        console.error('Error in bulk delete:', error);
+        alert('Error occurred during bulk delete');
+      } finally {
+        setBulkDeleting(false);
+      }
+    }
+  };
+
+  // Update selectAll state when medicines or selectedMedicines change
+  useEffect(() => {
+    if (medicines.length > 0) {
+      setSelectAll(selectedMedicines.length === medicines.length);
+    }
+  }, [selectedMedicines, medicines]);
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-IN', {
@@ -233,6 +309,22 @@ const AdminMasterMedicinesPage = () => {
             </div>
 
             <div className="flex space-x-2">
+              {selectedMedicines.length > 0 && (
+                <button
+                  onClick={handleBulkDelete}
+                  disabled={bulkDeleting}
+                  className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                >
+                  {bulkDeleting ? (
+                    <Loader className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-4 h-4" />
+                  )}
+                  <span>
+                    {bulkDeleting ? 'Deleting...' : `Delete Selected (${selectedMedicines.length})`}
+                  </span>
+                </button>
+              )}
               <button
                 onClick={() => navigate('/admin/master-medicines/create')}
                 className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center space-x-2"
@@ -251,12 +343,47 @@ const AdminMasterMedicinesPage = () => {
           </div>
         </div>
 
+        {/* Selection Summary */}
+        {selectedMedicines.length > 0 && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <CheckCircle className="h-5 w-5 text-blue-600 mr-2" />
+                <span className="text-sm font-medium text-blue-800">
+                  {selectedMedicines.length} medicine{selectedMedicines.length > 1 ? 's' : ''} selected
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  setSelectedMedicines([]);
+                  setSelectAll(false);
+                }}
+                className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center"
+              >
+                <X className="h-4 w-4 mr-1" />
+                Clear Selection
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Medicines Table */}
         <div className="bg-white rounded-lg shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={selectAll}
+                        onChange={handleSelectAll}
+                        className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                      />
+                      <span className="ml-2">Select All</span>
+                    </div>
+                  </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Medicine Details
                   </th>
@@ -283,6 +410,14 @@ const AdminMasterMedicinesPage = () => {
               <tbody className="bg-white divide-y divide-gray-200">
                 {medicines.map((medicine) => (
                   <tr key={medicine._id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <input
+                        type="checkbox"
+                        checked={selectedMedicines.includes(medicine._id)}
+                        onChange={() => handleSelectMedicine(medicine._id)}
+                        className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                      />
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-left">
                         <div className="text-sm font-medium text-gray-900">{medicine.name}</div>
