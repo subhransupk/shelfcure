@@ -202,6 +202,22 @@ const seedDatabase = async () => {
       owner.stores = [store._id];
       await owner.save();
 
+      // Create a store manager for the first store
+      if (i === 1) {
+        const manager = await User.create({
+          name: 'Store Manager',
+          email: 'manager@shelfcure.com',
+          phone: '+91 98765 43210',
+          password: 'manager123',
+          role: 'store_manager',
+          currentStore: store._id,
+          stores: [store._id],
+          isActive: true,
+          isEmailVerified: true
+        });
+        console.log('Created store manager:', manager.email);
+      }
+
       stores.push(store);
     }
     console.log(`Created ${stores.length} stores`);
@@ -217,6 +233,11 @@ const seedDatabase = async () => {
         category: 'Tablet',
         form: 'Tablet',
         type: 'over-the-counter',
+        unitTypes: {
+          hasStrips: true,
+          hasIndividual: true,
+          unitsPerStrip: 10
+        },
         stripInfo: {
           purchasePrice: 15,
           sellingPrice: 20,
@@ -245,6 +266,11 @@ const seedDatabase = async () => {
         category: 'Capsule',
         form: 'Capsule',
         type: 'prescription',
+        unitTypes: {
+          hasStrips: true,
+          hasIndividual: true,
+          unitsPerStrip: 10
+        },
         stripInfo: {
           purchasePrice: 45,
           sellingPrice: 60,
@@ -273,6 +299,11 @@ const seedDatabase = async () => {
         category: 'Syrup',
         form: 'Syrup',
         type: 'over-the-counter',
+        unitTypes: {
+          hasStrips: false,
+          hasIndividual: true,
+          unitsPerStrip: 1
+        },
         individualInfo: {
           purchasePrice: 85,
           sellingPrice: 110,

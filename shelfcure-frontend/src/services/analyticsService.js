@@ -1,6 +1,27 @@
 import { API_ENDPOINTS } from '../config/api';
 
 class AnalyticsService {
+  // Base API URL
+  static BASE_URL = 'http://localhost:5000/api';
+
+  // Helper method to get auth headers
+  static getAuthHeaders() {
+    const token = localStorage.getItem('adminToken') || localStorage.getItem('token');
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    };
+  }
+
+  // Helper method to handle API responses
+  static async handleResponse(response) {
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+    }
+    return await response.json();
+  }
+
   /**
    * Get comprehensive dashboard analytics
    */
@@ -13,14 +34,18 @@ class AnalyticsService {
         userGrowth,
         subscriptionAnalytics,
         affiliateAnalytics,
-        recentActivities
+        salesAnalytics,
+        inventoryAnalytics,
+        customerAnalytics
       ] = await Promise.all([
         this.getDashboardStats(),
         this.getRevenueAnalytics(period),
         this.getUserGrowthAnalytics(period),
         this.getSubscriptionAnalytics(),
         this.getAffiliateAnalytics(period),
-        this.getRecentActivities()
+        this.getSalesAnalytics(period),
+        this.getInventoryAnalytics(),
+        this.getCustomerAnalytics()
       ]);
 
       return {
@@ -31,7 +56,9 @@ class AnalyticsService {
           userGrowth: userGrowth.data,
           subscriptionAnalytics: subscriptionAnalytics.data,
           affiliateAnalytics: affiliateAnalytics.data,
-          recentActivities: recentActivities.data
+          salesAnalytics: salesAnalytics.data,
+          inventoryAnalytics: inventoryAnalytics.data,
+          customerAnalytics: customerAnalytics.data
         }
       };
     } catch (error) {
@@ -45,16 +72,12 @@ class AnalyticsService {
    */
   static async getDashboardStats() {
     try {
-      const response = await fetch(API_ENDPOINTS.DASHBOARD_STATS, {
+      const response = await fetch(`${this.BASE_URL}/analytics/admin/dashboard-stats`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-        }
+        headers: this.getAuthHeaders()
       });
 
-      const data = await response.json();
-      return data;
+      return await this.handleResponse(response);
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
       throw error;
@@ -66,16 +89,12 @@ class AnalyticsService {
    */
   static async getRevenueAnalytics(period = 'monthly', year = new Date().getFullYear()) {
     try {
-      const response = await fetch(`${API_ENDPOINTS.ADMIN_REVENUE_ANALYTICS}?period=${period}&year=${year}`, {
+      const response = await fetch(`${this.BASE_URL}/analytics/admin/revenue?period=${period}&year=${year}`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-        }
+        headers: this.getAuthHeaders()
       });
 
-      const data = await response.json();
-      return data;
+      return await this.handleResponse(response);
     } catch (error) {
       console.error('Error fetching revenue analytics:', error);
       throw error;
@@ -87,18 +106,65 @@ class AnalyticsService {
    */
   static async getUserGrowthAnalytics(period = 'monthly', year = new Date().getFullYear()) {
     try {
-      const response = await fetch(`${API_ENDPOINTS.ADMIN_USER_GROWTH}?period=${period}&year=${year}`, {
+      const response = await fetch(`${this.BASE_URL}/analytics/admin/user-growth?period=${period}&year=${year}`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-        }
+        headers: this.getAuthHeaders()
       });
 
-      const data = await response.json();
-      return data;
+      return await this.handleResponse(response);
     } catch (error) {
       console.error('Error fetching user growth analytics:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get sales analytics
+   */
+  static async getSalesAnalytics(period = 'monthly', year = new Date().getFullYear()) {
+    try {
+      const response = await fetch(`${this.BASE_URL}/analytics/admin/sales?period=${period}&year=${year}`, {
+        method: 'GET',
+        headers: this.getAuthHeaders()
+      });
+
+      return await this.handleResponse(response);
+    } catch (error) {
+      console.error('Error fetching sales analytics:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get inventory analytics
+   */
+  static async getInventoryAnalytics() {
+    try {
+      const response = await fetch(`${this.BASE_URL}/analytics/admin/inventory`, {
+        method: 'GET',
+        headers: this.getAuthHeaders()
+      });
+
+      return await this.handleResponse(response);
+    } catch (error) {
+      console.error('Error fetching inventory analytics:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get customer analytics
+   */
+  static async getCustomerAnalytics() {
+    try {
+      const response = await fetch(`${this.BASE_URL}/analytics/admin/customers`, {
+        method: 'GET',
+        headers: this.getAuthHeaders()
+      });
+
+      return await this.handleResponse(response);
+    } catch (error) {
+      console.error('Error fetching customer analytics:', error);
       throw error;
     }
   }
@@ -108,16 +174,12 @@ class AnalyticsService {
    */
   static async getSubscriptionAnalytics() {
     try {
-      const response = await fetch(API_ENDPOINTS.ADMIN_SUBSCRIPTION_ANALYTICS, {
+      const response = await fetch(`${this.BASE_URL}/analytics/admin/subscription-analytics`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-        }
+        headers: this.getAuthHeaders()
       });
 
-      const data = await response.json();
-      return data;
+      return await this.handleResponse(response);
     } catch (error) {
       console.error('Error fetching subscription analytics:', error);
       throw error;
@@ -127,18 +189,14 @@ class AnalyticsService {
   /**
    * Get affiliate analytics
    */
-  static async getAffiliateAnalytics(period = 'thisMonth') {
+  static async getAffiliateAnalytics(period = 'monthly', year = new Date().getFullYear()) {
     try {
-      const response = await fetch(`${API_ENDPOINTS.ADMIN_AFFILIATES}/analytics?period=${period}`, {
+      const response = await fetch(`${this.BASE_URL}/analytics/admin/affiliate-analytics?period=${period}&year=${year}`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-        }
+        headers: this.getAuthHeaders()
       });
 
-      const data = await response.json();
-      return data;
+      return await this.handleResponse(response);
     } catch (error) {
       console.error('Error fetching affiliate analytics:', error);
       throw error;
@@ -332,6 +390,207 @@ class AnalyticsService {
       return (num / 1000).toFixed(1) + 'K';
     }
     return num.toString();
+  }
+  // ===================
+  // ENHANCED DATA FORMATTING UTILITIES
+  // ===================
+
+  /**
+   * Format sales chart data for Chart.js
+   */
+  static formatSalesChartData(salesData) {
+    const labels = salesData.map(item => {
+      if (item.date) {
+        return new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      }
+      return `Period ${item._id.period || item._id.month}`;
+    });
+
+    return {
+      labels,
+      datasets: [
+        {
+          label: 'Sales Amount (₹)',
+          data: salesData.map(item => item.totalSales || 0),
+          backgroundColor: 'rgba(59, 130, 246, 0.8)',
+          borderColor: 'rgba(59, 130, 246, 1)',
+          borderWidth: 1,
+          yAxisID: 'y'
+        },
+        {
+          label: 'Orders',
+          data: salesData.map(item => item.totalOrders || 0),
+          backgroundColor: 'rgba(168, 85, 247, 0.8)',
+          borderColor: 'rgba(168, 85, 247, 1)',
+          borderWidth: 1,
+          yAxisID: 'y1'
+        }
+      ]
+    };
+  }
+
+  /**
+   * Format inventory chart data for Chart.js
+   */
+  static formatInventoryChartData(inventoryData) {
+    if (!inventoryData || !inventoryData.categoryDistribution) {
+      return { labels: [], datasets: [{ data: [], backgroundColor: [] }] };
+    }
+
+    const colors = [
+      'rgba(59, 130, 246, 0.8)',
+      'rgba(16, 185, 129, 0.8)',
+      'rgba(245, 158, 11, 0.8)',
+      'rgba(239, 68, 68, 0.8)',
+      'rgba(168, 85, 247, 0.8)',
+      'rgba(6, 182, 212, 0.8)'
+    ];
+
+    return {
+      labels: inventoryData.categoryDistribution.map(item => item._id || 'Unknown'),
+      datasets: [{
+        data: inventoryData.categoryDistribution.map(item => item.count || 0),
+        backgroundColor: colors.slice(0, inventoryData.categoryDistribution.length),
+        borderWidth: 1
+      }]
+    };
+  }
+
+  /**
+   * Format customer segments data for Chart.js
+   */
+  static formatCustomerSegmentsData(customerData) {
+    if (!customerData || !customerData.customerSegments) {
+      return { labels: [], datasets: [{ data: [], backgroundColor: [] }] };
+    }
+
+    const colors = [
+      'rgba(239, 68, 68, 0.8)',   // Low Value - Red
+      'rgba(245, 158, 11, 0.8)',  // Regular - Orange
+      'rgba(16, 185, 129, 0.8)',  // High Value - Green
+      'rgba(168, 85, 247, 0.8)'   // Premium - Purple
+    ];
+
+    return {
+      labels: customerData.customerSegments.map(item => item.segment),
+      datasets: [{
+        data: customerData.customerSegments.map(item => item.count || 0),
+        backgroundColor: colors.slice(0, customerData.customerSegments.length),
+        borderWidth: 1
+      }]
+    };
+  }
+
+  /**
+   * Format percentage values
+   */
+  static formatPercentage(value) {
+    return `${(value || 0).toFixed(1)}%`;
+  }
+
+
+
+  /**
+   * Get chart options for revenue charts
+   */
+  static getRevenueChartOptions() {
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: false
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              return `Revenue: ${AnalyticsService.formatCurrency(context.parsed.y)}`;
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            callback: function(value) {
+              return AnalyticsService.formatCurrency(value);
+            }
+          }
+        }
+      }
+    };
+  }
+
+  /**
+   * Get chart options for sales charts with dual y-axis
+   */
+  static getSalesChartOptions() {
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'top'
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              if (context.datasetIndex === 0) {
+                return `Sales: ${AnalyticsService.formatCurrency(context.parsed.y)}`;
+              }
+              return `Orders: ${context.parsed.y}`;
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          type: 'linear',
+          display: true,
+          position: 'left',
+          beginAtZero: true,
+          ticks: {
+            callback: function(value) {
+              return AnalyticsService.formatCurrency(value);
+            }
+          }
+        },
+        y1: {
+          type: 'linear',
+          display: true,
+          position: 'right',
+          beginAtZero: true,
+          grid: {
+            drawOnChartArea: false,
+          },
+        }
+      }
+    };
+  }
+
+  /**
+   * Get chart options for pie/doughnut charts
+   */
+  static getPieChartOptions() {
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'bottom'
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              const total = context.dataset.data.reduce((a, b) => a + b, 0);
+              const percentage = ((context.parsed / total) * 100).toFixed(1);
+              return `${context.label}: ${context.parsed} (${percentage}%)`;
+            }
+          }
+        }
+      }
+    };
   }
 }
 

@@ -55,11 +55,36 @@ import StoreOwnerSettingsPage from './pages/StoreOwnerSettingsPage';
 import CreateStorePage from './pages/CreateStorePage';
 import StoreOwnerViewStorePage from './pages/StoreOwnerViewStorePage';
 import StoreOwnerEditStorePage from './pages/StoreOwnerEditStorePage';
+
+// Store Manager (Store Panel) Pages
+import StoreManagerDashboard from './pages/StoreManagerDashboard';
+import StoreManagerInventory from './pages/StoreManagerInventory';
+import StoreManagerSales from './pages/StoreManagerSales';
+import StoreManagerCustomers from './pages/StoreManagerCustomers';
+import CustomerPurchaseHistory from './pages/CustomerPurchaseHistory';
+import StoreManagerSuppliers from './pages/StoreManagerSuppliers';
+import SupplierPurchaseHistory from './pages/SupplierPurchaseHistory';
+import StoreManagerAnalytics from './pages/StoreManagerAnalytics';
+import StoreManagerSettings from './pages/StoreManagerSettings';
+import StoreManagerPurchases from './pages/StoreManagerPurchases';
+import StoreManagerDoctors from './pages/StoreManagerDoctors';
+import StoreManagerStaff from './pages/StoreManagerStaff';
+import StoreManagerNotifications from './pages/StoreManagerNotifications';
+import StoreManagerRackManagement from './pages/StoreManagerRackManagement';
+import StoreManagerExpiryAlerts from './pages/StoreManagerExpiryAlerts';
+import StoreManagerLowStock from './pages/StoreManagerLowStock';
+import StaffMedicineSearch from './pages/StaffMedicineSearch';
+import AddMedicineRequestPage from './pages/AddMedicineRequestPage';
+import MedicineDetailsPage from './pages/MedicineDetailsPage';
+import StoreManagerReturns from './pages/StoreManagerReturns';
+
 import AnalyticsPage from './pages/AnalyticsPage';
 import AdminSettingsPage from './pages/AdminSettingsPage';
 import AdminCustomPricingPage from './pages/AdminCustomPricingPage';
 import AdminAssignSubscriptionPage from './pages/AdminAssignSubscriptionPage';
+import ProtectedRoute from './components/ProtectedRoute';
 import './App.css';
+import './styles/store-panel.css';
 
 function App() {
   return (
@@ -125,6 +150,31 @@ function App() {
           <Route path="/store-owner/analytics" element={<StoreOwnerAnalyticsPage />} />
           <Route path="/store-owner/subscription" element={<StoreOwnerSubscriptionPage />} />
           <Route path="/store-owner/settings" element={<StoreOwnerSettingsPage />} />
+
+          {/* Store Manager (Store Panel) Routes */}
+          <Route path="/store-panel/dashboard" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerDashboard /></ProtectedRoute>} />
+          <Route path="/store-panel/inventory" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerInventory /></ProtectedRoute>} />
+          <Route path="/store-panel/inventory/medicine/:medicineId" element={<ProtectedRoute requiredRole="store_manager"><MedicineDetailsPage /></ProtectedRoute>} />
+          <Route path="/store-panel/low-stock" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerLowStock /></ProtectedRoute>} />
+          <Route path="/store-panel/rack-management" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerRackManagement /></ProtectedRoute>} />
+          <Route path="/store-panel/sales" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerSales /></ProtectedRoute>} />
+          <Route path="/store-panel/returns" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerReturns /></ProtectedRoute>} />
+          <Route path="/store-panel/add-medicine-request" element={<ProtectedRoute requiredRole="store_manager"><AddMedicineRequestPage /></ProtectedRoute>} />
+          <Route path="/store-panel/customers" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerCustomers /></ProtectedRoute>} />
+          <Route path="/store-panel/customers/:customerId/history" element={<ProtectedRoute requiredRole="store_manager"><CustomerPurchaseHistory /></ProtectedRoute>} />
+          <Route path="/store-panel/suppliers" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerSuppliers /></ProtectedRoute>} />
+          <Route path="/store-panel/suppliers/:supplierId/purchase-history" element={<ProtectedRoute requiredRole="store_manager"><SupplierPurchaseHistory /></ProtectedRoute>} />
+          <Route path="/store-panel/purchases" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerPurchases /></ProtectedRoute>} />
+          <Route path="/store-panel/expiry-alerts" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerExpiryAlerts /></ProtectedRoute>} />
+          <Route path="/store-panel/doctors" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerDoctors /></ProtectedRoute>} />
+          <Route path="/store-panel/staff" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerStaff /></ProtectedRoute>} />
+          <Route path="/store-panel/analytics" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerAnalytics /></ProtectedRoute>} />
+          <Route path="/store-panel/reports" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerAnalytics /></ProtectedRoute>} />
+          <Route path="/store-panel/notifications" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerNotifications /></ProtectedRoute>} />
+          <Route path="/store-panel/settings" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerSettings /></ProtectedRoute>} />
+
+          {/* Staff Routes (for medicine location search) */}
+          <Route path="/staff/medicine-search" element={<StaffMedicineSearch />} />
         </Routes>
       </Router>
     </div>

@@ -12,6 +12,7 @@ const AdminLayout = ({
   const navigate = useNavigate();
   const [adminUser, setAdminUser] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     // Check if user is logged in and is admin
@@ -36,6 +37,27 @@ const AdminLayout = ({
     }
   }, [navigate]);
 
+  // Restore persisted sidebar collapsed state
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('adminSidebarCollapsed');
+      if (stored !== null) {
+        setSidebarCollapsed(stored === 'true');
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+
+  // Persist sidebar collapsed state
+  useEffect(() => {
+    try {
+      localStorage.setItem('adminSidebarCollapsed', String(sidebarCollapsed));
+    } catch (e) {
+      // ignore
+    }
+  }, [sidebarCollapsed]);
+
   const handleLogout = () => {
     localStorage.removeItem('adminToken');
     localStorage.removeItem('adminUser');
@@ -58,6 +80,8 @@ const AdminLayout = ({
         setSidebarOpen={setSidebarOpen}
         adminUser={adminUser}
         onLogout={handleLogout}
+        collapsed={sidebarCollapsed}
+        setCollapsed={setSidebarCollapsed}
       />
 
       {/* Main Content */}

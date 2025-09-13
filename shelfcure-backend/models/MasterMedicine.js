@@ -150,6 +150,11 @@ masterMedicineSchema.statics.findByCategory = function(category) {
 
 // Pre-save middleware
 masterMedicineSchema.pre('save', function(next) {
+  // Normalize empty barcode to undefined so unique index on barcode doesn't clash on ""
+  if (typeof this.barcode === 'string' && this.barcode.trim() === '') {
+    this.barcode = undefined;
+  }
+
   // Ensure proper data structure
   if (!this.unitTypes) {
     this.unitTypes = {
@@ -158,11 +163,11 @@ masterMedicineSchema.pre('save', function(next) {
       unitsPerStrip: 10
     };
   }
-  
+
   if (!this.dosage) {
     this.dosage = {};
   }
-  
+
   next();
 });
 

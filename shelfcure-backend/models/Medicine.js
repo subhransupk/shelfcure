@@ -154,12 +154,54 @@ const medicineSchema = new mongoose.Schema({
     trim: true
   },
   
-  // Storage and location
+  // Storage and location (legacy - kept for backward compatibility)
   storageLocation: {
     rack: String,
     shelf: String,
     position: String
   },
+
+  // New rack locations system - supports multiple locations per medicine
+  rackLocations: [{
+    rack: {
+      type: mongoose.Schema.ObjectId,
+      ref: 'Rack',
+      required: true
+    },
+    shelf: {
+      type: String,
+      required: true
+    },
+    position: {
+      type: String,
+      required: true
+    },
+    // Quantity stored at this specific location
+    stripQuantity: {
+      type: Number,
+      default: 0,
+      min: [0, 'Strip quantity cannot be negative']
+    },
+    individualQuantity: {
+      type: Number,
+      default: 0,
+      min: [0, 'Individual quantity cannot be negative']
+    },
+    // Location metadata
+    assignedDate: {
+      type: Date,
+      default: Date.now
+    },
+    assignedBy: {
+      type: mongoose.Schema.ObjectId,
+      ref: 'User'
+    },
+    notes: String,
+    isActive: {
+      type: Boolean,
+      default: true
+    }
+  }],
   storageConditions: {
     temperature: {
       min: Number,
@@ -187,9 +229,9 @@ const medicineSchema = new mongoose.Schema({
   contraindications: [String],
   interactions: [String],
   
-  // Business information
+  // Business information  
   supplier: {
-    type: mongoose.Schema.ObjectId,
+    type: mongoose.Schema.Types.Mixed, // Can be ObjectId (ref to Supplier) or String (for custom medicines)
     ref: 'Supplier'
   },
   store: {
@@ -221,9 +263,19 @@ const medicineSchema = new mongoose.Schema({
     type: mongoose.Schema.ObjectId,
     ref: 'User'
   },
+  addedBy: {
+    type: mongoose.Schema.ObjectId,
+    ref: 'User'
+  },
   updatedBy: {
     type: mongoose.Schema.ObjectId,
     ref: 'User'
+  },
+  
+  // Custom medicine flag
+  isCustom: {
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: true,
@@ -233,14 +285,33 @@ const medicineSchema = new mongoose.Schema({
 
 // Virtuals for calculated fields
 medicineSchema.virtual('totalStock').get(function() {
-  let total = 0;
-  if (this.unitTypes.hasStrips) {
-    total += (this.stripInfo.stock || 0) * (this.unitTypes.unitsPerStrip || 1);
-  }
-  if (this.unitTypes.hasIndividual) {
-    total += this.individualInfo.stock || 0;
-  }
-  return total;
+  // Corrected: Don't convert strips to individual units
+  // Individual stock represents only cut medicines, not convertible units
+  return {
+    strips: this.unitTypes?.hasStrips ? (this.stripInfo.stock || 0) : 0,
+    individual: this.unitTypes?.hasIndividual ? (this.individualInfo.stock || 0) : 0
+  };
+});
+
+// Virtual for total rack locations stock
+medicineSchema.virtual('totalRackStock').get(function() {
+  if (!this.rackLocations || this.rackLocations.length === 0) return { strips: 0, individual: 0 };
+
+  return this.rackLocations.reduce((total, location) => {
+    if (location.isActive) {
+      total.strips += location.stripQuantity || 0;
+      total.individual += location.individualQuantity || 0;
+    }
+    return total;
+  }, { strips: 0, individual: 0 });
+});
+
+// Virtual for primary rack location
+medicineSchema.virtual('primaryRackLocation').get(function() {
+  if (!this.rackLocations || this.rackLocations.length === 0) return null;
+  return this.rackLocations.find(location =>
+    location.isActive && location.priority === 'primary'
+  ) || this.rackLocations.find(location => location.isActive);
 });
 
 medicineSchema.virtual('totalValue').get(function() {
@@ -255,14 +326,23 @@ medicineSchema.virtual('totalValue').get(function() {
 });
 
 medicineSchema.virtual('isLowStock').get(function() {
-  let lowStock = false;
-  if (this.unitTypes.hasStrips) {
-    lowStock = lowStock || (this.stripInfo.stock <= this.stripInfo.minStock);
+  // Corrected logic: Low stock calculation based on enabled unit types
+  const hasStrips = this.unitTypes?.hasStrips;
+  const hasIndividual = this.unitTypes?.hasIndividual;
+
+  if (hasStrips && hasIndividual) {
+    // Both enabled: Low stock based on STRIP STOCK ONLY
+    // Individual stock is just cut medicines, not used for low stock calculation
+    return (this.stripInfo.stock <= this.stripInfo.minStock);
+  } else if (hasStrips) {
+    // Only strips enabled
+    return (this.stripInfo.stock <= this.stripInfo.minStock);
+  } else if (hasIndividual) {
+    // Only individual enabled: Use individual stock for low stock calculation
+    return (this.individualInfo.stock <= this.individualInfo.minStock);
   }
-  if (this.unitTypes.hasIndividual) {
-    lowStock = lowStock || (this.individualInfo.stock <= this.individualInfo.minStock);
-  }
-  return lowStock;
+
+  return false;
 });
 
 medicineSchema.virtual('daysToExpiry').get(function() {
@@ -271,6 +351,27 @@ medicineSchema.virtual('daysToExpiry').get(function() {
   const expiry = new Date(this.expiryDate);
   const diffTime = expiry - today;
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+});
+
+// Virtual fields for backward compatibility with frontend
+medicineSchema.virtual('inventory').get(function() {
+  return {
+    stripQuantity: this.stripInfo?.stock || 0,
+    individualQuantity: this.individualInfo?.stock || 0,
+    stripMinimumStock: this.stripInfo?.minStock || 0,
+    individualMinimumStock: this.individualInfo?.minStock || 0
+  };
+});
+
+medicineSchema.virtual('pricing').get(function() {
+  return {
+    stripSellingPrice: this.stripInfo?.sellingPrice || 0,
+    individualSellingPrice: this.individualInfo?.sellingPrice || 0,
+    stripPurchasePrice: this.stripInfo?.purchasePrice || 0,
+    individualPurchasePrice: this.individualInfo?.purchasePrice || 0,
+    stripMrp: this.stripInfo?.mrp || 0,
+    individualMrp: this.individualInfo?.mrp || 0
+  };
 });
 
 // Indexes for performance
@@ -323,7 +424,7 @@ medicineSchema.statics.findLowStock = function(storeId) {
 medicineSchema.statics.findExpiring = function(storeId, days = 30) {
   const futureDate = new Date();
   futureDate.setDate(futureDate.getDate() + days);
-  
+
   return this.find({
     store: storeId,
     isActive: true,
@@ -332,6 +433,47 @@ medicineSchema.statics.findExpiring = function(storeId, days = 30) {
       $lte: futureDate
     }
   });
+};
+
+// Static method to search medicines by rack location
+medicineSchema.statics.findByRackLocation = function(storeId, rackId, shelf, position) {
+  return this.find({
+    store: storeId,
+    isActive: true,
+    'rackLocations.rack': rackId,
+    'rackLocations.shelf': shelf,
+    'rackLocations.position': position,
+    'rackLocations.isActive': true
+  }).populate('rackLocations.rack', 'rackNumber name');
+};
+
+// Static method to find medicines without rack locations
+medicineSchema.statics.findWithoutRackLocation = function(storeId) {
+  return this.find({
+    store: storeId,
+    isActive: true,
+    $or: [
+      { rackLocations: { $size: 0 } },
+      { rackLocations: { $exists: false } },
+      { 'rackLocations.isActive': { $ne: true } }
+    ]
+  });
+};
+
+// Static method to search medicines with rack location info
+medicineSchema.statics.searchWithLocations = function(storeId, query) {
+  const searchRegex = new RegExp(query, 'i');
+  return this.find({
+    store: storeId,
+    isActive: true,
+    $or: [
+      { name: searchRegex },
+      { genericName: searchRegex },
+      { manufacturer: searchRegex },
+      { composition: searchRegex },
+      { barcode: searchRegex }
+    ]
+  }).populate('rackLocations.rack', 'rackNumber name category');
 };
 
 module.exports = mongoose.model('Medicine', medicineSchema);

@@ -394,12 +394,6 @@ const AdminMasterMedicinesPage = () => {
                     Category
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Pricing (Strip/Individual)
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Stock Info
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Status
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -431,44 +425,6 @@ const AdminMasterMedicinesPage = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{medicine.category || 'N/A'}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-left">
-                        {medicine.stripInfo?.sellingPrice ? (
-                          <div className="text-sm text-gray-900">
-                            Strip: {formatCurrency(medicine.stripInfo.sellingPrice)}
-                          </div>
-                        ) : null}
-                        {medicine.individualInfo?.sellingPrice ? (
-                          <div className="text-sm text-gray-900">
-                            Individual: {formatCurrency(medicine.individualInfo.sellingPrice)}
-                          </div>
-                        ) : null}
-                        <div className="text-xs text-gray-500">
-                          MRP: {formatCurrency(medicine.stripInfo?.mrp || medicine.individualInfo?.mrp || 0)}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-left">
-                        {medicine.stripInfo?.stock !== undefined ? (
-                          <div className="text-sm text-gray-900">
-                            Strips: {medicine.stripInfo.stock}
-                          </div>
-                        ) : null}
-                        {medicine.individualInfo?.stock !== undefined ? (
-                          <div className="text-sm text-gray-900">
-                            Individual: {medicine.individualInfo.stock}
-                          </div>
-                        ) : null}
-                        {(medicine.stripInfo?.stock < medicine.stripInfo?.minStock ||
-                          medicine.individualInfo?.stock < medicine.individualInfo?.minStock) && (
-                          <div className="text-xs text-red-600 flex items-center">
-                            <AlertTriangle className="w-3 h-3 mr-1" />
-                            Low Stock
-                          </div>
-                        )}
-                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${

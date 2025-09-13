@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import AdminLayout from '../components/admin/AdminLayout';
 import AnalyticsService from '../services/analyticsService';
+import { MetricCard, ChartContainer, DataTable, FilterBar } from '../components/analytics';
 import {
   DollarSign, TrendingUp, Store, Users, BarChart3, PieChart,
-  MapPin, Award, Target, ArrowUpRight, ArrowDownRight,
+  ShoppingCart, Package, UserCheck, AlertTriangle,
   Activity, Clock, CheckCircle, XCircle, Pause,
-  Download, RefreshCw, Star, AlertCircle
+  Download, RefreshCw, Star, AlertCircle, Eye,
+  TrendingDown, Calendar, Filter, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
 import {
   Chart as ChartJS,
@@ -42,6 +44,7 @@ const AnalyticsPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [analytics, setAnalytics] = useState(null);
+  const [activeTab, setActiveTab] = useState('overview');
 
   // Load analytics data on component mount and when filter changes
   useEffect(() => {
@@ -68,18 +71,26 @@ const AnalyticsPage = () => {
     }
   };
 
+  // Handle refresh
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadAnalyticsData();
+    setRefreshing(false);
+  };
+
+  // Handle export
+  const handleExport = () => {
+    // Implementation for exporting analytics data
+    console.log('Exporting analytics data...');
+  };
+
+  // Format currency
   const formatCurrency = (amount) => {
     return AnalyticsService.formatCurrency(amount);
   };
 
   const formatNumber = (num) => {
     return AnalyticsService.formatNumber(num);
-  };
-
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await loadAnalyticsData();
-    setRefreshing(false);
   };
 
   const getColorClasses = (color) => {
@@ -196,462 +207,501 @@ const AnalyticsPage = () => {
     );
   }
 
+  // Tab configuration
+  const tabs = [
+    { id: 'overview', label: 'Overview', icon: BarChart3 },
+    { id: 'sales', label: 'Sales', icon: ShoppingCart },
+    { id: 'inventory', label: 'Inventory', icon: Package },
+    { id: 'customers', label: 'Customers', icon: Users },
+    { id: 'stores', label: 'Stores', icon: Store }
+  ];
+
   return (
     <AdminLayout
       title="Analytics Dashboard"
-      subtitle="Business performance metrics and insights"
-      rightHeaderContent={
-        <div className="flex items-center gap-3">
-          <select
-            value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-            disabled={loading || refreshing}
-          >
-            <option value="today">Today</option>
-            <option value="thisWeek">This Week</option>
-            <option value="thisMonth">This Month</option>
-            <option value="thisQuarter">This Quarter</option>
-            <option value="thisYear">This Year</option>
-          </select>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing || loading}
-            className="flex items-center gap-2 px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-            {refreshing ? 'Refreshing...' : 'Refresh'}
-          </button>
-          <button className="flex items-center gap-2 px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-            <Download className="w-4 h-4" />
-            Export
-          </button>
-        </div>
-      }
+      subtitle="Comprehensive business performance metrics and insights"
     >
-      <div className="space-y-6">
-        {/* Key Metrics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <MetricCard
-            title="Total Revenue"
-            value={formatCurrency(analytics.revenueAnalytics?.summary?.currentYearTotal || 0)}
-            subtitle={`Growth: ${analytics.revenueAnalytics?.summary?.growthPercentage || 0}%`}
-            icon={DollarSign}
-            trend={analytics.revenueAnalytics?.summary?.growthPercentage > 0 ? "up" : analytics.revenueAnalytics?.summary?.growthPercentage < 0 ? "down" : "neutral"}
-            trendValue={`${analytics.revenueAnalytics?.summary?.growthPercentage || 0}% vs last year`}
-            color="green"
-          />
+      {/* Filter Bar */}
+      <FilterBar
+        dateFilter={dateFilter}
+        onDateFilterChange={setDateFilter}
+        onRefresh={handleRefresh}
+        onExport={handleExport}
+        loading={loading || refreshing}
+      />
 
-          <MetricCard
-            title="Active Stores"
-            value={analytics.dashboardStats?.activeStores || 0}
-            subtitle={`Total: ${analytics.dashboardStats?.totalStores || 0}`}
-            icon={Store}
-            trend={analytics.dashboardStats?.storeGrowth > 0 ? "up" : analytics.dashboardStats?.storeGrowth < 0 ? "down" : "neutral"}
-            trendValue={`${analytics.dashboardStats?.storeGrowth || 0}% this month`}
-            color="blue"
-          />
-
-          <MetricCard
-            title="Total Users"
-            value={analytics.dashboardStats?.totalUsers || 0}
-            subtitle={`New this month: ${analytics.dashboardStats?.newUsersThisMonth || 0}`}
-            icon={Users}
-            trend={analytics.dashboardStats?.userGrowth > 0 ? "up" : analytics.dashboardStats?.userGrowth < 0 ? "down" : "neutral"}
-            trendValue={`${analytics.dashboardStats?.userGrowth || 0}% growth`}
-            color="purple"
-          />
-
-          <MetricCard
-            title="Active Affiliates"
-            value={analytics.dashboardStats?.activeAffiliates || 0}
-            subtitle={`Total: ${analytics.dashboardStats?.totalAffiliates || 0}`}
-            icon={Award}
-            trend={analytics.dashboardStats?.affiliateGrowth > 0 ? "up" : analytics.dashboardStats?.affiliateGrowth < 0 ? "down" : "neutral"}
-            trendValue={`${analytics.dashboardStats?.affiliateGrowth || 0}% this month`}
-            color="orange"
-          />
-        </div>
-
-        {/* Charts Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Monthly Revenue Trend */}
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 text-left">Monthly Revenue Trend</h3>
-              <BarChart3 className="w-5 h-5 text-gray-400" />
-            </div>
-            <div className="h-64">
-              <Bar
-                data={AnalyticsService.formatRevenueChartData(analytics.revenueAnalytics?.revenueData || [])}
-                options={{
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  plugins: {
-                    legend: {
-                      display: false
-                    },
-                    tooltip: {
-                      callbacks: {
-                        label: function(context) {
-                          return `Revenue: ₹${context.parsed.y.toLocaleString()}`;
-                        }
-                      }
-                    }
-                  },
-                  scales: {
-                    y: {
-                      beginAtZero: true,
-                      ticks: {
-                        callback: function(value) {
-                          return '₹' + (value / 1000) + 'K';
-                        }
-                      }
-                    }
-                  }
-                }}
-              />
-            </div>
-          </div>
-
-          {/* User Growth */}
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 text-left">User Growth</h3>
-              <TrendingUp className="w-5 h-5 text-gray-400" />
-            </div>
-            <div className="h-64">
-              <Line
-                data={AnalyticsService.formatUserGrowthChartData(analytics.userGrowth?.userGrowthData || [])}
-                options={{
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  plugins: {
-                    legend: {
-                      display: false
-                    },
-                    tooltip: {
-                      callbacks: {
-                        label: function(context) {
-                          return `Users: ${context.parsed.y}`;
-                        }
-                      }
-                    }
-                  },
-                  scales: {
-                    y: {
-                      beginAtZero: true,
-                      ticks: {
-                        stepSize: 5
-                      }
-                    }
-                  }
-                }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Store Network Growth & Subscription Status */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Store Network Growth */}
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 text-left">Store Network Growth</h3>
-              <Store className="w-5 h-5 text-gray-400" />
-            </div>
-            <div className="h-64">
-              <Line
-                data={AnalyticsService.formatUserGrowthChartData(analytics.userGrowth?.userGrowthData || [])}
-                options={{
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  plugins: {
-                    legend: {
-                      display: false
-                    },
-                    tooltip: {
-                      callbacks: {
-                        label: function(context) {
-                          return `Users: ${context.parsed.y}`;
-                        }
-                      }
-                    }
-                  },
-                  scales: {
-                    y: {
-                      beginAtZero: true,
-                      ticks: {
-                        stepSize: 5
-                      }
-                    }
-                  }
-                }}
-              />
-            </div>
-          </div>
-
-          {/* Subscription Status */}
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 text-left">Subscription Status</h3>
-              <PieChart className="w-5 h-5 text-gray-400" />
-            </div>
-            <div className="space-y-4">
-              {analytics.subscriptionAnalytics?.statusDistribution?.map((status, index) => {
-                const statusConfig = {
-                  'active': { icon: CheckCircle, color: 'green', label: 'Active' },
-                  'trial': { icon: Clock, color: 'blue', label: 'Trial' },
-                  'expired': { icon: XCircle, color: 'red', label: 'Expired' },
-                  'suspended': { icon: Pause, color: 'yellow', label: 'Suspended' },
-                  'cancelled': { icon: XCircle, color: 'gray', label: 'Cancelled' }
-                };
-
-                const config = statusConfig[status._id] || statusConfig['active'];
-                const IconComponent = config.icon;
-
-                return (
-                  <div key={status._id} className={`flex items-center justify-between p-3 bg-${config.color}-50 rounded-lg`}>
-                    <div className="flex items-center gap-3">
-                      <IconComponent className={`w-5 h-5 text-${config.color}-600`} />
-                      <span className="text-sm font-medium text-gray-900">{config.label}</span>
-                    </div>
-                    <span className={`text-lg font-bold text-${config.color}-600`}>{status.count || 0}</span>
-                  </div>
-                );
-              }) || (
-                <div className="text-center py-4 text-gray-500">
-                  No subscription data available
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Plan Popularity & Top Performing Stores */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Plan Popularity */}
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 text-left">Plan Popularity</h3>
-              <Award className="w-5 h-5 text-gray-400" />
-            </div>
-            <div className="space-y-4">
-              {analytics.subscriptionAnalytics?.planDistribution?.map((plan, index) => {
-                const totalPlans = analytics.subscriptionAnalytics.planDistribution.reduce((sum, p) => sum + (p.count || 0), 0);
-                const percentage = totalPlans > 0 ? Math.round((plan.count / totalPlans) * 100) : 0;
-
-                return (
-                  <div key={plan._id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-3 h-3 rounded-full ${
-                        index === 0 ? 'bg-blue-500' :
-                        index === 1 ? 'bg-purple-500' :
-                        index === 2 ? 'bg-orange-500' :
-                        'bg-gray-500'
-                      }`}></div>
-                      <div className="text-left">
-                        <div className="text-sm font-medium text-gray-900">{plan._id || 'Unknown'} Plan</div>
-                        <div className="text-xs text-gray-500">{plan.count || 0} subscriptions</div>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-sm font-bold text-gray-900">{percentage}%</div>
-                      <div className="text-xs text-gray-500">{plan.activeCount || 0} active</div>
-                    </div>
-                  </div>
-                );
-              }) || (
-                <div className="text-center py-4 text-gray-500">
-                  No plan data available
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-gray-500 mt-4 text-left">Most popular subscription plans</p>
-          </div>
-
-          {/* Top Performing Stores */}
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 text-left">Top Performing Stores</h3>
-              <Star className="w-5 h-5 text-gray-400" />
-            </div>
-            <div className="space-y-4">
-              {analytics.recentActivities?.recentStores?.slice(0, 3).map((store, index) => (
-                <div key={store._id} className="flex items-center justify-between p-4 bg-gradient-to-r from-green-50 to-green-100 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                      {index + 1}
-                    </div>
-                    <div className="text-left">
-                      <div className="text-sm font-medium text-gray-900">{store.name}</div>
-                      <div className="text-xs text-gray-600">{store.owner?.name || 'N/A'}</div>
-                      <div className="text-xs text-gray-500">{store.subscription?.plan || 'N/A'} Plan</div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="flex items-center gap-4 text-sm">
-                      <div className="text-center">
-                        <div className="font-bold text-blue-600">{store.subscription?.status || 'N/A'}</div>
-                        <div className="text-xs text-gray-500">status</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="font-bold text-purple-600">{store.code}</div>
-                        <div className="text-xs text-gray-500">code</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )) || (
-                <div className="text-center py-4 text-gray-500">
-                  No store data available
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-gray-500 mt-4 text-left">Stores with highest sales activity</p>
-          </div>
-        </div>
-
-        {/* Geographic Distribution & Revenue by Plan */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Geographic Distribution */}
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 text-left">Geographic Distribution</h3>
-              <MapPin className="w-5 h-5 text-gray-400" />
-            </div>
-            <div className="space-y-4">
-              {analytics.recentActivities?.recentStores?.slice(0, 5).map((store, index) => (
-                <div key={store._id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <MapPin className="w-5 h-5 text-blue-600" />
-                    <div className="text-left">
-                      <div className="text-sm font-medium text-gray-900">{store.name}</div>
-                      <div className="text-xs text-gray-500">{store.code}</div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-lg font-bold text-blue-600">{store.subscription?.plan || 'N/A'}</div>
-                    <div className="text-xs text-gray-500">plan</div>
-                  </div>
-                </div>
-              )) || (
-                <div className="text-center py-4 text-gray-500">
-                  No geographic data available
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-gray-500 mt-4 text-left">Store locations across regions</p>
-          </div>
-
-          {/* Revenue by Subscription Plan */}
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 text-left">Revenue by Subscription Plan</h3>
-              <PieChart className="w-5 h-5 text-gray-400" />
-            </div>
-            <div className="h-64">
-              <Doughnut
-                data={AnalyticsService.formatSubscriptionPlanChartData(analytics.subscriptionAnalytics?.planDistribution || [])}
-                options={{
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  plugins: {
-                    legend: {
-                      position: 'bottom',
-                      labels: {
-                        padding: 20,
-                        usePointStyle: true,
-                      }
-                    },
-                    tooltip: {
-                      callbacks: {
-                        label: function(context) {
-                          const plan = analytics.planPopularity[context.dataIndex];
-                          return `${context.label}: ₹${context.parsed.toLocaleString()} (${plan.percentage}%)`;
-                        }
-                      }
-                    }
-                  },
-                  cutout: '60%'
-                }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Key Performance Indicators */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900 text-left">Key Performance Indicators</h3>
-            <Target className="w-5 h-5 text-gray-400" />
-          </div>
-          <p className="text-sm text-gray-600 mb-6 text-left">Important business metrics</p>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="text-center p-6 bg-gradient-to-r from-green-50 to-green-100 rounded-lg">
-              <div className="text-3xl font-bold text-green-600">{formatCurrency(analytics.dashboardStats?.monthlyRevenue || 0)}</div>
-              <div className="text-sm font-medium text-gray-900 mt-2">Monthly Revenue</div>
-              <div className="text-xs text-gray-600">Current month revenue</div>
-            </div>
-
-            <div className="text-center p-6 bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg">
-              <div className="text-3xl font-bold text-blue-600">{analytics.dashboardStats?.revenueGrowth || 0}%</div>
-              <div className="text-sm font-medium text-gray-900 mt-2">Revenue Growth</div>
-              <div className="text-xs text-gray-600">Month over month growth</div>
-            </div>
-
-            <div className="text-center p-6 bg-gradient-to-r from-purple-50 to-purple-100 rounded-lg">
-              <div className="text-3xl font-bold text-purple-600">{analytics.dashboardStats?.newStoresThisMonth || 0}</div>
-              <div className="text-sm font-medium text-gray-900 mt-2">New Stores</div>
-              <div className="text-xs text-gray-600">New stores this month</div>
-            </div>
-
-            <div className="text-center p-6 bg-gradient-to-r from-orange-50 to-orange-100 rounded-lg">
-              <div className="text-3xl font-bold text-orange-600">{analytics.dashboardStats?.newAffiliatesThisMonth || 0}</div>
-              <div className="text-sm font-medium text-gray-900 mt-2">New Affiliates</div>
-              <div className="text-xs text-gray-600">New affiliates this month</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Additional Insights */}
-        <div className="bg-gradient-to-r from-primary-50 to-primary-100 rounded-lg p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <Activity className="w-5 h-5 text-primary-600" />
-            <h3 className="text-lg font-semibold text-primary-900 text-left">Business Insights</h3>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white/50 rounded-lg p-4">
-              <div className="text-sm font-medium text-primary-900 text-left">Platform Status</div>
-              <div className="text-lg font-bold text-green-600">
-                {analytics.dashboardStats?.storeGrowth > 0 ? 'Growing' :
-                 analytics.dashboardStats?.storeGrowth < 0 ? 'Declining' : 'Stable'}
-              </div>
-              <div className="text-xs text-primary-700">
-                {analytics.dashboardStats?.newStoresThisMonth || 0} new stores this month
-              </div>
-            </div>
-
-            <div className="bg-white/50 rounded-lg p-4">
-              <div className="text-sm font-medium text-primary-900 text-left">Total Revenue</div>
-              <div className="text-lg font-bold text-blue-600">
-                {formatCurrency(analytics.revenueAnalytics?.summary?.currentYearTotal || 0)}
-              </div>
-              <div className="text-xs text-primary-700">Current year total</div>
-            </div>
-
-            <div className="bg-white/50 rounded-lg p-4">
-              <div className="text-sm font-medium text-primary-900 text-left">Growth Rate</div>
-              <div className="text-lg font-bold text-purple-600">
-                {analytics.revenueAnalytics?.summary?.growthPercentage || 0}%
-              </div>
-              <div className="text-xs text-primary-700">Year over year growth</div>
-            </div>
-          </div>
+      {/* Tab Navigation */}
+      <div className="bg-white rounded-lg shadow-sm mb-6">
+        <div className="border-b border-gray-200">
+          <nav className="flex space-x-8 px-6">
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center space-x-2 py-4 px-1 border-b-2 font-medium text-sm ${
+                    activeTab === tab.id
+                      ? 'border-green-500 text-green-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </nav>
         </div>
       </div>
+
+      {/* Tab Content */}
+      {activeTab === 'overview' && (
+        <div className="space-y-6">
+          {/* Key Metrics Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <MetricCard
+              title="Total Revenue"
+              value={formatCurrency(analytics?.revenueAnalytics?.summary?.currentYearTotal || 0)}
+              subtitle={`Growth: ${analytics?.revenueAnalytics?.summary?.growthPercentage || 0}%`}
+              icon={DollarSign}
+              trend={
+                (analytics?.revenueAnalytics?.summary?.growthPercentage || 0) > 0 ? "up" :
+                (analytics?.revenueAnalytics?.summary?.growthPercentage || 0) < 0 ? "down" : "neutral"
+              }
+              trendValue={`${analytics?.revenueAnalytics?.summary?.growthPercentage || 0}% vs last year`}
+              color="green"
+              loading={loading}
+            />
+
+            <MetricCard
+              title="Active Stores"
+              value={analytics?.dashboardStats?.activeStores || 0}
+              subtitle={`Total: ${analytics?.dashboardStats?.totalStores || 0}`}
+              icon={Store}
+              trend={
+                (analytics?.dashboardStats?.storeGrowth || 0) > 0 ? "up" :
+                (analytics?.dashboardStats?.storeGrowth || 0) < 0 ? "down" : "neutral"
+              }
+              trendValue={`${analytics?.dashboardStats?.storeGrowth || 0} new this month`}
+              color="blue"
+              loading={loading}
+            />
+
+            <MetricCard
+              title="Total Users"
+              value={analytics?.dashboardStats?.totalUsers || 0}
+              subtitle={`New this month: ${analytics?.dashboardStats?.newUsersThisMonth || 0}`}
+              icon={Users}
+              trend={
+                (analytics?.dashboardStats?.userGrowth || 0) > 0 ? "up" :
+                (analytics?.dashboardStats?.userGrowth || 0) < 0 ? "down" : "neutral"
+              }
+              trendValue={`${analytics?.dashboardStats?.userGrowth || 0}% growth`}
+              color="purple"
+              loading={loading}
+            />
+
+            <MetricCard
+              title="Total Sales"
+              value={analytics?.dashboardStats?.totalSales || 0}
+              subtitle={`Monthly: ${analytics?.dashboardStats?.monthlyRevenue ? formatCurrency(analytics.dashboardStats.monthlyRevenue) : '₹0'}`}
+              icon={ShoppingCart}
+              trend={
+                (analytics?.dashboardStats?.revenueGrowth || 0) > 0 ? "up" :
+                (analytics?.dashboardStats?.revenueGrowth || 0) < 0 ? "down" : "neutral"
+              }
+              trendValue={`${analytics?.dashboardStats?.revenueGrowth || 0}% vs last month`}
+              color="orange"
+              loading={loading}
+            />
+          </div>
+
+          {/* Charts Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Monthly Revenue Trend */}
+            <ChartContainer
+              title="Monthly Revenue Trend"
+              subtitle="Revenue performance over time"
+              loading={loading}
+              onRefresh={handleRefresh}
+              onExport={() => console.log('Export revenue chart')}
+            >
+              <Bar
+                data={AnalyticsService.formatRevenueChartData(analytics?.revenueAnalytics?.revenueData || [])}
+                options={AnalyticsService.getRevenueChartOptions()}
+              />
+            </ChartContainer>
+
+            {/* User Growth Chart */}
+            <ChartContainer
+              title="User Growth"
+              subtitle="New user registrations over time"
+              loading={loading}
+              onRefresh={handleRefresh}
+              onExport={() => console.log('Export user growth chart')}
+            >
+              <Line
+                data={AnalyticsService.formatUserGrowthChartData(analytics?.userGrowth?.userGrowthData || [])}
+                options={{
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                      callbacks: {
+                        label: function(context) {
+                          return `New Users: ${context.parsed.y}`;
+                        }
+                      }
+                    }
+                  },
+                  scales: {
+                    y: { beginAtZero: true }
+                  }
+                }}
+              />
+            </ChartContainer>
+          </div>
+
+          {/* Subscription Distribution and Top Stores */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Subscription Plans Distribution */}
+            <ChartContainer
+              title="Subscription Plans Distribution"
+              subtitle="Distribution of active subscription plans"
+              loading={loading}
+            >
+              <Doughnut
+                data={AnalyticsService.formatSubscriptionPlanChartData(analytics?.subscriptionAnalytics?.planDistribution || [])}
+                options={AnalyticsService.getPieChartOptions()}
+              />
+            </ChartContainer>
+
+            {/* Recent Activities */}
+            <div className="bg-white rounded-lg shadow-sm p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4 text-left">Recent Activities</h3>
+              <div className="space-y-3">
+                {loading ? (
+                  [...Array(5)].map((_, i) => (
+                    <div key={i} className="flex items-center space-x-3 animate-pulse">
+                      <div className="w-8 h-8 bg-gray-200 rounded-full"></div>
+                      <div className="flex-1">
+                        <div className="h-4 bg-gray-200 rounded w-3/4 mb-1"></div>
+                        <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <>
+                    <div className="flex items-center space-x-3">
+                      <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                        <CheckCircle className="w-4 h-4 text-green-600" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-gray-900 text-left">New store registered</p>
+                        <p className="text-xs text-gray-500 text-left">2 hours ago</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-3">
+                      <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                        <Users className="w-4 h-4 text-blue-600" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-gray-900 text-left">5 new users joined</p>
+                        <p className="text-xs text-gray-500 text-left">4 hours ago</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-3">
+                      <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center">
+                        <DollarSign className="w-4 h-4 text-orange-600" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-gray-900 text-left">Payment received</p>
+                        <p className="text-xs text-gray-500 text-left">6 hours ago</p>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sales Tab */}
+      {activeTab === 'sales' && (
+        <div className="space-y-6">
+          {/* Sales Metrics */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <MetricCard
+              title="Total Sales"
+              value={formatCurrency(analytics?.salesAnalytics?.summary?.totalSales || 0)}
+              subtitle="All time sales"
+              icon={ShoppingCart}
+              color="green"
+              loading={loading}
+            />
+            <MetricCard
+              title="Total Orders"
+              value={analytics?.salesAnalytics?.summary?.totalOrders || 0}
+              subtitle="Number of orders"
+              icon={Package}
+              color="blue"
+              loading={loading}
+            />
+            <MetricCard
+              title="Average Order Value"
+              value={formatCurrency(analytics?.salesAnalytics?.summary?.averageOrderValue || 0)}
+              subtitle="Per order average"
+              icon={TrendingUp}
+              color="purple"
+              loading={loading}
+            />
+          </div>
+
+          {/* Sales Chart */}
+          <ChartContainer
+            title="Sales Performance"
+            subtitle="Sales amount and order count over time"
+            loading={loading}
+            onRefresh={handleRefresh}
+          >
+            <Bar
+              data={AnalyticsService.formatSalesChartData(analytics?.salesAnalytics?.salesData || [])}
+              options={AnalyticsService.getSalesChartOptions()}
+            />
+          </ChartContainer>
+
+          {/* Top Performing Stores */}
+          <DataTable
+            title="Top Performing Stores"
+            data={analytics?.salesAnalytics?.topStores || []}
+            columns={[
+              { key: 'storeName', label: 'Store Name' },
+              {
+                key: 'totalSales',
+                label: 'Total Sales',
+                render: (value) => formatCurrency(value)
+              },
+              { key: 'totalOrders', label: 'Orders' },
+              {
+                key: 'averageOrderValue',
+                label: 'Avg Order Value',
+                render: (value) => formatCurrency(value)
+              }
+            ]}
+            loading={loading}
+            searchable={true}
+            sortable={true}
+          />
+        </div>
+      )}
+
+      {/* Inventory Tab */}
+      {activeTab === 'inventory' && (
+        <div className="space-y-6">
+          {/* Inventory Metrics */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <MetricCard
+              title="Total Medicines"
+              value={analytics?.inventoryAnalytics?.totalMedicines || 0}
+              subtitle="Active medicines"
+              icon={Package}
+              color="blue"
+              loading={loading}
+            />
+            <MetricCard
+              title="Low Stock Items"
+              value={analytics?.inventoryAnalytics?.lowStockItems || 0}
+              subtitle="Need restocking"
+              icon={AlertTriangle}
+              color="orange"
+              loading={loading}
+            />
+            <MetricCard
+              title="Expired Items"
+              value={analytics?.inventoryAnalytics?.expiredItems || 0}
+              subtitle="Expired medicines"
+              icon={XCircle}
+              color="red"
+              loading={loading}
+            />
+            <MetricCard
+              title="Inventory Value"
+              value={formatCurrency(analytics?.inventoryAnalytics?.totalValue || 0)}
+              subtitle="Total stock value"
+              icon={DollarSign}
+              color="green"
+              loading={loading}
+            />
+          </div>
+
+          {/* Inventory Distribution Chart */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <ChartContainer
+              title="Medicine Categories Distribution"
+              subtitle="Distribution by medicine categories"
+              loading={loading}
+            >
+              <Doughnut
+                data={AnalyticsService.formatInventoryChartData(analytics?.inventoryAnalytics || {})}
+                options={AnalyticsService.getPieChartOptions()}
+              />
+            </ChartContainer>
+
+            {/* Top Medicines by Value */}
+            <DataTable
+              title="Top Medicines by Stock Value"
+              data={analytics?.inventoryAnalytics?.topMedicines || []}
+              columns={[
+                { key: 'name', label: 'Medicine Name' },
+                { key: 'stock', label: 'Stock' },
+                {
+                  key: 'value',
+                  label: 'Value',
+                  render: (value) => formatCurrency(value)
+                }
+              ]}
+              loading={loading}
+              searchable={false}
+              sortable={false}
+              className="h-96"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Customers Tab */}
+      {activeTab === 'customers' && (
+        <div className="space-y-6">
+          {/* Customer Metrics */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <MetricCard
+              title="Total Customers"
+              value={analytics?.customerAnalytics?.totalCustomers || 0}
+              subtitle="All registered customers"
+              icon={Users}
+              color="blue"
+              loading={loading}
+            />
+            <MetricCard
+              title="New Customers"
+              value={analytics?.customerAnalytics?.newCustomersThisMonth || 0}
+              subtitle="This month"
+              icon={UserCheck}
+              color="green"
+              loading={loading}
+            />
+            <MetricCard
+              title="Active Customers"
+              value={analytics?.customerAnalytics?.activeCustomers || 0}
+              subtitle="Currently active"
+              icon={Activity}
+              color="purple"
+              loading={loading}
+            />
+            <MetricCard
+              title="Average Spending"
+              value={formatCurrency(analytics?.customerAnalytics?.averageSpending || 0)}
+              subtitle="Per customer"
+              icon={DollarSign}
+              color="orange"
+              loading={loading}
+            />
+          </div>
+
+          {/* Customer Segments and Top Customers */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <ChartContainer
+              title="Customer Segments"
+              subtitle="Customer distribution by spending"
+              loading={loading}
+            >
+              <Doughnut
+                data={AnalyticsService.formatCustomerSegmentsData(analytics?.customerAnalytics || {})}
+                options={AnalyticsService.getPieChartOptions()}
+              />
+            </ChartContainer>
+
+            <DataTable
+              title="Top Customers"
+              data={analytics?.customerAnalytics?.topCustomers || []}
+              columns={[
+                { key: 'name', label: 'Customer Name' },
+                {
+                  key: 'totalSpent',
+                  label: 'Total Spent',
+                  render: (value) => formatCurrency(value)
+                },
+                { key: 'visitCount', label: 'Visits' }
+              ]}
+              loading={loading}
+              searchable={false}
+              sortable={false}
+              className="h-96"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Stores Tab */}
+      {activeTab === 'stores' && (
+        <div className="space-y-6">
+          {/* Store Metrics */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <MetricCard
+              title="Total Stores"
+              value={analytics?.dashboardStats?.totalStores || 0}
+              subtitle="All registered stores"
+              icon={Store}
+              color="blue"
+              loading={loading}
+            />
+            <MetricCard
+              title="Active Stores"
+              value={analytics?.dashboardStats?.activeStores || 0}
+              subtitle="Currently active"
+              icon={CheckCircle}
+              color="green"
+              loading={loading}
+            />
+            <MetricCard
+              title="New Stores"
+              value={analytics?.dashboardStats?.storeGrowth || 0}
+              subtitle="This month"
+              icon={TrendingUp}
+              color="purple"
+              loading={loading}
+            />
+          </div>
+
+          {/* Store Performance Table */}
+          <DataTable
+            title="Store Performance Overview"
+            data={analytics?.salesAnalytics?.topStores || []}
+            columns={[
+              { key: 'storeName', label: 'Store Name' },
+              {
+                key: 'totalSales',
+                label: 'Total Sales',
+                render: (value) => formatCurrency(value)
+              },
+              { key: 'totalOrders', label: 'Total Orders' },
+              {
+                key: 'averageOrderValue',
+                label: 'Avg Order Value',
+                render: (value) => formatCurrency(value)
+              }
+            ]}
+            loading={loading}
+            searchable={true}
+            sortable={true}
+            exportable={true}
+            onExport={() => console.log('Export store performance data')}
+          />
+        </div>
+      )}
     </AdminLayout>
   );
 };

@@ -431,6 +431,17 @@ app.use('/api/chat', require('./routes/chat'));
 // Store Owner Routes
 app.use('/api/store-owner', require('./routes/storeOwnerClean'));
 
+// Store Manager Routes
+app.use('/api/store-manager', require('./routes/storeManager'));
+app.use('/api/store-manager/suppliers', require('./routes/suppliers'));
+app.use('/api/store-manager/purchases', require('./routes/purchases'));
+app.use('/api/store-manager/medicine-requests', require('./routes/medicineRequests'));
+app.use('/api/store-manager/expiry-alerts', require('./routes/expiryAlerts'));
+app.use('/api/store-manager/returns', require('./routes/returns'));
+
+// Medicine Location Routes (accessible to store staff for read-only operations)
+app.use('/api/medicine-locations', require('./routes/medicineLocation'));
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.status(200).json({
@@ -438,6 +449,16 @@ app.get('/api/health', (req, res) => {
     message: 'ShelfCure API is running',
     timestamp: new Date().toISOString(),
     version: '1.0.0'
+  });
+});
+
+// Test endpoint for debugging
+app.get('/api/test', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    message: 'Test endpoint working',
+    timestamp: new Date().toISOString(),
+    headers: req.headers
   });
 });
 

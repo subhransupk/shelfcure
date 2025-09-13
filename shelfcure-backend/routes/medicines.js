@@ -35,10 +35,13 @@ const upload = multer({
   }
 });
 
-// Helper function to parse CSV content
+// Helper function to parse CSV content with basic support for quoted fields
 const parseCSV = (csvContent) => {
   console.log('=== PARSING CSV ===');
-  const lines = csvContent.split('\n').filter(line => line.trim());
+
+  // Normalize line endings and strip BOM if present
+  const normalized = csvContent.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+  const lines = normalized.split('\n').filter(line => line.trim().length > 0);
   console.log('Total lines after filtering:', lines.length);
 
   if (lines.length < 2) {
@@ -46,7 +49,39 @@ const parseCSV = (csvContent) => {
     throw new Error('CSV file must contain at least a header row and one data row');
   }
 
-  const headers = lines[0].split(',').map(header => header.trim().replace(/"/g, ''));
+  const splitCSVLine = (line) => {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') {
+        // If next char is also a quote, it's an escaped quote
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"';
+          i++; // skip next quote
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === ',' && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    result.push(current.trim());
+    // Remove wrapping quotes
+    return result.map(field => {
+      const trimmed = field.trim();
+      if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+        return trimmed.slice(1, -1);
+      }
+      return trimmed;
+    });
+  };
+
+  const headers = splitCSVLine(lines[0]).map(h => h.replace(/^\"|\"$/g, '').trim());
   console.log('Headers found:', headers);
   console.log('Headers count:', headers.length);
 
@@ -55,18 +90,26 @@ const parseCSV = (csvContent) => {
 
   for (let i = 1; i < lines.length; i++) {
     console.log(`Processing row ${i}: "${lines[i]}"`);
-    const values = lines[i].split(',').map(value => value.trim().replace(/"/g, ''));
+    let values = splitCSVLine(lines[i]);
     console.log(`Values found: [${values.join(', ')}]`);
     console.log(`Values count: ${values.length}, Headers count: ${headers.length}`);
 
     if (values.length !== headers.length) {
-      console.log(`SKIPPING row ${i}: Column count mismatch`);
-      continue; // Skip malformed rows
+      console.log(`Row ${i}: Column count mismatch (values=${values.length}, headers=${headers.length}). Attempting to normalize.`);
+      if (values.length < headers.length) {
+        // Pad missing columns with empty strings
+        while (values.length < headers.length) values.push('');
+      } else if (values.length > headers.length) {
+        // Merge extras into the last column to avoid data loss
+        const merged = values.slice(headers.length - 1).join(',');
+        values = values.slice(0, headers.length - 1).concat([merged]);
+      }
     }
 
     const medicine = {};
     headers.forEach((header, index) => {
-      const value = values[index];
+      const valueRaw = values[index] || '';
+      const value = valueRaw.replace(/^\"|\"$/g, '').trim();
       console.log(`Mapping header "${header}" -> value "${value}"`);
 
       // Map CSV headers to medicine schema fields
@@ -151,21 +194,28 @@ const parseCSV = (csvContent) => {
           if (!medicine.unitTypes) medicine.unitTypes = {};
           medicine.unitTypes.unitsPerStrip = parseInt(value) || 10;
           break;
-        case 'barcode':
-          medicine.barcode = value;
+        case 'barcode': {
+          const b = (value || '').trim();
+          if (b) {
+            medicine.barcode = b;
+          } else {
+            // Ensure empty barcode is treated as missing to avoid unique index conflicts
+            delete medicine.barcode;
+          }
           break;
+        }
         case 'tags':
-          medicine.tags = value ? value.split(';').map(tag => tag.trim()) : [];
+          medicine.tags = value ? value.split(';').map(tag => tag.trim()).filter(Boolean) : [];
           break;
         case 'side effects':
         case 'sideeffects':
-          medicine.sideEffects = value ? value.split(';').map(effect => effect.trim()) : [];
+          medicine.sideEffects = value ? value.split(';').map(effect => effect.trim()).filter(Boolean) : [];
           break;
         case 'contraindications':
-          medicine.contraindications = value ? value.split(';').map(contra => contra.trim()) : [];
+          medicine.contraindications = value ? value.split(';').map(contra => contra.trim()).filter(Boolean) : [];
           break;
         case 'interactions':
-          medicine.interactions = value ? value.split(';').map(interaction => interaction.trim()) : [];
+          medicine.interactions = value ? value.split(';').map(interaction => interaction.trim()).filter(Boolean) : [];
           break;
         case 'notes':
           medicine.notes = value;
@@ -514,13 +564,17 @@ router.post('/admin/master/import', protect, authorize('superadmin', 'admin'), u
     // Read the uploaded CSV file
     const csvContent = fs.readFileSync(req.file.path, 'utf8');
 
+    // Compute total data rows (for summary) based on raw CSV, regardless of parsing skips
+    const normalizedForCount = csvContent.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+    const dataRowsCount = normalizedForCount.split('\n').filter((line, idx) => idx !== 0 && line.trim().length > 0).length;
+
     console.log('=== CSV UPLOAD DEBUG ===');
     console.log('File name:', req.file.originalname);
     console.log('File size:', req.file.size);
     console.log('CSV content (first 500 chars):');
     console.log(csvContent.substring(0, 500));
     console.log('CSV lines:');
-    const debugLines = csvContent.split('\n');
+    const debugLines = normalizedForCount.split('\n');
     debugLines.forEach((line, index) => {
       if (index < 5) { // Show first 5 lines
         console.log(`Line ${index + 1}: "${line}"`);
@@ -572,7 +626,26 @@ router.post('/admin/master/import', protect, authorize('superadmin', 'admin'), u
             // No store field - master medicines are global templates
           };
 
-          // Check for duplicates by name and manufacturer
+          // If barcode is empty string, treat as missing to avoid unique index conflicts
+          if (processedMedicine.barcode !== undefined) {
+            const b = (processedMedicine.barcode || '').trim();
+            if (!b) delete processedMedicine.barcode; else processedMedicine.barcode = b;
+          }
+
+          // Check for duplicates by barcode if provided
+          if (processedMedicine.barcode) {
+            const existingByBarcode = await MasterMedicine.findOne({ barcode: processedMedicine.barcode });
+            if (existingByBarcode) {
+              results.duplicates.push({
+                name: processedMedicine.name,
+                manufacturer: processedMedicine.manufacturer,
+                reason: 'Duplicate barcode (already exists)'
+              });
+              continue;
+            }
+          }
+
+          // Check for duplicates by name and manufacturer (common in master database)
           const existingMedicine = await MasterMedicine.findOne({
             name: processedMedicine.name,
             manufacturer: processedMedicine.manufacturer
@@ -582,7 +655,7 @@ router.post('/admin/master/import', protect, authorize('superadmin', 'admin'), u
             results.duplicates.push({
               name: processedMedicine.name,
               manufacturer: processedMedicine.manufacturer,
-              reason: 'Master medicine with same name and manufacturer already exists'
+              reason: 'Medicine with the same name and manufacturer already exists'
             });
             continue;
           }
@@ -598,10 +671,20 @@ router.post('/admin/master/import', protect, authorize('superadmin', 'admin'), u
           });
 
         } catch (error) {
+          let reason = 'Could not import this item';
+          const msg = (error && error.message) ? String(error.message) : '';
+          if (msg.includes('E11000') && msg.includes('barcode')) {
+            reason = 'Duplicate barcode (already exists)';
+          } else if (msg.includes('E11000')) {
+            reason = 'Duplicate record';
+          } else if (msg.toLowerCase().includes('validation')) {
+            reason = 'Missing or invalid required fields';
+          }
+
           results.failed.push({
             name: medicineData.name || 'Unknown',
             manufacturer: medicineData.manufacturer || 'Unknown',
-            reason: error.message
+            reason
           });
         }
       }
@@ -615,7 +698,7 @@ router.post('/admin/master/import', protect, authorize('superadmin', 'admin'), u
       message: `Import completed. ${results.successful.length} medicines imported successfully.`,
       data: {
         summary: {
-          total: medicines.length,
+          total: dataRowsCount, // show total data lines in the CSV
           successful: results.successful.length,
           failed: results.failed.length,
           duplicates: results.duplicates.length

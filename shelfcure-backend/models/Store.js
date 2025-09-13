@@ -152,6 +152,121 @@ const storeSchema = new mongoose.Schema({
       type: Boolean,
       default: true
     },
+
+    // GST Settings
+    gstEnabled: {
+      type: Boolean,
+      default: true
+    },
+    gstNumber: {
+      type: String,
+      trim: true,
+      uppercase: true
+    },
+
+    // Discount Settings
+    allowDiscounts: {
+      type: Boolean,
+      default: true
+    },
+    maxDiscountPercent: {
+      type: Number,
+      default: 50,
+      min: [0, 'Discount percentage cannot be negative'],
+      max: [100, 'Discount percentage cannot exceed 100%']
+    },
+    // Optional absolute cap for total discount per bill (in currency). 0 or null means no cap.
+    maxDiscountAmountPerBill: {
+      type: Number,
+      default: 0,
+      min: [0, 'Max discount amount per bill cannot be negative']
+    },
+    requireManagerApproval: {
+      type: Boolean,
+      default: true
+    },
+    discountOnMRP: {
+      type: Boolean,
+      default: true
+    },
+
+    // Auto-apply Discount Rules
+    autoApplyDiscounts: {
+      type: Boolean,
+      default: false
+    },
+    autoDiscountRules: [{
+      minOrderAmount: { type: Number, required: true, min: 0 },
+      type: { type: String, enum: ['percentage', 'amount'], required: true },
+      value: { type: Number, required: true, min: 0 },
+      maxDiscountAmount: { type: Number, default: 0, min: 0 }, // optional per-rule cap
+      isActive: { type: Boolean, default: true }
+    }],
+
+    // Discount Types
+    discountTypes: [{
+      name: {
+        type: String,
+        required: true
+      },
+      type: {
+        type: String,
+        enum: ['percentage', 'amount', 'festival', 'bulk', 'customer'],
+        required: true
+      },
+      value: {
+        type: Number,
+        required: true,
+        min: 0
+      },
+      maxValue: {
+        type: Number,
+        required: true,
+        min: 0
+      },
+      isActive: {
+        type: Boolean,
+        default: true
+      },
+      description: String,
+      conditions: {
+        minQuantity: Number,
+        customerType: String,
+        validFrom: Date,
+        validTo: Date,
+        applicableCategories: [String]
+      }
+    }],
+
+    // Tax Types
+    taxTypes: [{
+      name: {
+        type: String,
+        required: true
+      },
+      type: {
+        type: String,
+        enum: ['gst', 'cgst', 'sgst', 'igst', 'cess', 'local'],
+        required: true
+      },
+      rate: {
+        type: Number,
+        required: true,
+        min: 0,
+        max: 100
+      },
+      isActive: {
+        type: Boolean,
+        default: true
+      },
+      description: String,
+      category: {
+        type: String,
+        enum: ['standard', 'essential', 'lifesaving', 'split', 'interstate'],
+        default: 'standard'
+      },
+      applicableCategories: [String]
+    }],
     
     // Currency and Formatting
     currency: {

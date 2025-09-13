@@ -231,11 +231,22 @@ const CreateSubscriptionPlanPage = () => {
         alert('Subscription plan created successfully!');
         navigate('/admin/subscription-plans');
       } else {
-        alert(`Failed to create plan: ${data.message}`);
+        // Handle validation errors
+        if (response.status === 400 && data.errors) {
+          // Show validation errors
+          const errorMessage = data.errors.join('\n');
+          alert(`Validation failed:\n${errorMessage}`);
+        } else {
+          alert(`Failed to create plan: ${data.message}`);
+        }
       }
     } catch (error) {
       console.error('Error creating plan:', error);
-      alert('Error creating plan. Please try again.');
+      if (error.message.includes('400')) {
+        alert('Please fill in all required fields correctly.');
+      } else {
+        alert('Error creating plan. Please try again.');
+      }
     } finally {
       setLoading(false);
     }

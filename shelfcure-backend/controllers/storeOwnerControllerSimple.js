@@ -14,9 +14,9 @@ const getDashboardData = async (req, res) => {
   try {
     const storeOwnerId = req.user.id;
     
-    // Get store owner's stores
-    const stores = await Store.find({ owner: storeOwnerId, isActive: true })
-      .select('name code stats')
+    // Get store owner's stores (including inactive ones for accurate count)
+    const stores = await Store.find({ owner: storeOwnerId })
+      .select('name code stats isActive')
       .lean();
 
     // Get subscription details
@@ -46,10 +46,12 @@ const getDashboardData = async (req, res) => {
           subscriptionPlan: subscription?.plan || 'none'
         },
         stores: stores.map(store => ({
+          _id: store._id,
           id: store._id,
           name: store.name,
           code: store.code,
-          stats: store.stats
+          stats: store.stats,
+          isActive: store.isActive
         })),
         subscription: {
           plan: subscription?.plan,
@@ -148,8 +150,8 @@ const getStores = async (req, res) => {
     const storeOwnerId = req.user.id;
     const { page = 1, limit = 10, search, status } = req.query;
 
-    // Build query - by default only show active stores
-    let query = { owner: storeOwnerId, isActive: true };
+    // Build query - show all stores owned by this store owner
+    let query = { owner: storeOwnerId };
 
     if (search) {
       query.$or = [
@@ -491,11 +493,11 @@ const deleteStore = async (req, res) => {
       });
     }
 
-    // Check if store is already deleted
+    // If store is already inactive, we can still "delete" it (no-op)
     if (!store.isActive) {
-      return res.status(400).json({
-        success: false,
-        message: 'Store is already deleted'
+      return res.status(200).json({
+        success: true,
+        message: 'Store was already inactive and has been removed from your list'
       });
     }
 

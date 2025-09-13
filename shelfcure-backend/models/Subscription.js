@@ -63,7 +63,10 @@ const subscriptionSchema = new mongoose.Schema({
     customReports: { type: Boolean, default: false },
     inventoryManagement: { type: Boolean, default: true },
     customerManagement: { type: Boolean, default: true },
-    staffManagement: { type: Boolean, default: true }
+    staffManagement: { type: Boolean, default: true },
+    purchaseManagement: { type: Boolean, default: true },
+    salesManagement: { type: Boolean, default: true },
+    doctorManagement: { type: Boolean, default: true }
   },
   
   // Limits based on plan
@@ -161,7 +164,10 @@ subscriptionSchema.statics.getPlanFeatures = function(plan) {
         customReports: false,
         inventoryManagement: true,
         customerManagement: true,
-        staffManagement: true
+        staffManagement: true,
+        purchaseManagement: true,
+        salesManagement: true,
+        doctorManagement: true
       },
       limits: {
         maxUsers: 5,
@@ -181,7 +187,10 @@ subscriptionSchema.statics.getPlanFeatures = function(plan) {
         customReports: false,
         inventoryManagement: true,
         customerManagement: true,
-        staffManagement: true
+        staffManagement: true,
+        purchaseManagement: true,
+        salesManagement: true,
+        doctorManagement: true
       },
       limits: {
         maxUsers: 15,
@@ -201,7 +210,10 @@ subscriptionSchema.statics.getPlanFeatures = function(plan) {
         customReports: true,
         inventoryManagement: true,
         customerManagement: true,
-        staffManagement: true
+        staffManagement: true,
+        purchaseManagement: true,
+        salesManagement: true,
+        doctorManagement: true
       },
       limits: {
         maxUsers: 50,
@@ -221,7 +233,10 @@ subscriptionSchema.statics.getPlanFeatures = function(plan) {
         customReports: true,
         inventoryManagement: true,
         customerManagement: true,
-        staffManagement: true
+        staffManagement: true,
+        purchaseManagement: true,
+        salesManagement: true,
+        doctorManagement: true
       },
       limits: {
         maxUsers: 999,

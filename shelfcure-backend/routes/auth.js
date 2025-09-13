@@ -62,8 +62,14 @@ router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    console.log('=== LOGIN ATTEMPT ===');
+    console.log('Email:', email);
+    console.log('Password provided:', !!password);
+    console.log('Request body:', req.body);
+
     // Validate email and password
     if (!email || !password) {
+      console.log('❌ Missing email or password');
       return res.status(400).json({
         success: false,
         message: 'Please provide email and password'
@@ -76,7 +82,20 @@ router.post('/login', async (req, res) => {
       .populate('currentStore', 'name')
       .populate('stores', 'name');
 
+    console.log('User found:', !!user);
+    if (user) {
+      console.log('User details:', {
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isActive: user.isActive,
+        isLocked: user.isLocked,
+        loginAttempts: user.loginAttempts
+      });
+    }
+
     if (!user) {
+      console.log('❌ User not found');
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -100,9 +119,12 @@ router.post('/login', async (req, res) => {
     }
 
     // Check if password matches
+    console.log('Testing password match...');
     const isMatch = await user.matchPassword(password);
+    console.log('Password match result:', isMatch);
 
     if (!isMatch) {
+      console.log('❌ Password does not match');
       // Increment login attempts
       user.loginAttempts += 1;
 
@@ -120,13 +142,16 @@ router.post('/login', async (req, res) => {
     }
 
     // Reset login attempts on successful login
+    console.log('✅ Password matches! Proceeding with login...');
     user.loginAttempts = 0;
     user.lockUntil = undefined;
     user.lastLogin = new Date();
     await user.save();
 
     // Generate JWT token
+    console.log('Generating JWT token...');
     const token = user.getSignedJwtToken();
+    console.log('Token generated:', !!token);
 
     // Remove password from response
     user.password = undefined;

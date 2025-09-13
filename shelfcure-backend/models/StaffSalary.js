@@ -1,23 +1,23 @@
 const mongoose = require('mongoose');
 
 const staffSalarySchema = new mongoose.Schema({
-  // Staff Information
+  // Staff Information - Reference to Staff collection
   staff: {
     type: mongoose.Schema.ObjectId,
-    ref: 'User',
+    ref: 'Staff',
     required: [true, 'Staff member is required'],
+    index: true
+  },
+  // Also keep user reference for backward compatibility
+  user: {
+    type: mongoose.Schema.ObjectId,
+    ref: 'User',
     index: true
   },
   store: {
     type: mongoose.Schema.ObjectId,
     ref: 'Store',
     required: [true, 'Store is required'],
-    index: true
-  },
-  storeOwner: {
-    type: mongoose.Schema.ObjectId,
-    ref: 'User',
-    required: [true, 'Store owner is required'],
     index: true
   },
   
@@ -259,7 +259,7 @@ staffSalarySchema.virtual('attendancePercentage').get(function() {
 // Pre-save middleware to calculate totals
 staffSalarySchema.pre('save', function(next) {
   // Calculate total allowances
-  this.totalAllowances = 
+  this.totalAllowances =
     (this.allowances.hra || 0) +
     (this.allowances.da || 0) +
     (this.allowances.medical || 0) +
@@ -267,10 +267,10 @@ staffSalarySchema.pre('save', function(next) {
     (this.allowances.bonus || 0) +
     (this.allowances.incentive || 0) +
     (this.allowances.overtime.amount || 0) +
-    (this.allowances.other || []).reduce((sum, item) => sum + (item.amount || 0), 0);
+    (this.allowances.other && Array.isArray(this.allowances.other) ? this.allowances.other.reduce((sum, item) => sum + (item.amount || 0), 0) : 0);
   
   // Calculate total deductions
-  this.totalDeductions = 
+  this.totalDeductions =
     (this.deductions.pf || 0) +
     (this.deductions.esi || 0) +
     (this.deductions.tds || 0) +
@@ -278,7 +278,7 @@ staffSalarySchema.pre('save', function(next) {
     (this.deductions.loan || 0) +
     (this.deductions.fine || 0) +
     (this.deductions.absentDeduction.amount || 0) +
-    (this.deductions.other || []).reduce((sum, item) => sum + (item.amount || 0), 0);
+    (this.deductions.other && Array.isArray(this.deductions.other) ? this.deductions.other.reduce((sum, item) => sum + (item.amount || 0), 0) : 0);
   
   // Calculate gross salary
   this.grossSalary = this.baseSalary + this.totalAllowances;

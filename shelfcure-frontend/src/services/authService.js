@@ -214,7 +214,7 @@ export const redirectAfterLogin = (user) => {
       window.location.href = '/store-owner/dashboard';
       break;
     case 'store_manager':
-      window.location.href = '/store/dashboard';
+      window.location.href = '/store-panel/dashboard';
       break;
     case 'staff':
     case 'cashier':

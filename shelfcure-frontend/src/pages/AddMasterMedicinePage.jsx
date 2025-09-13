@@ -15,6 +15,7 @@ const AddMasterMedicinePage = () => {
   const [csvFile, setCsvFile] = useState(null);
   const [importResults, setImportResults] = useState(null);
   const [showImportResults, setShowImportResults] = useState(false);
+  const [showImportDetails, setShowImportDetails] = useState(false);
 
   const [formData, setFormData] = useState({
     // Basic Medicine Information
@@ -22,33 +23,44 @@ const AddMasterMedicinePage = () => {
     genericName: '',
     composition: '',
     manufacturer: '',
-    
+
     // Classification
     categories: [],
     requiresPrescription: false,
-    
+
     // Unit Configuration
-    hasStrips: true,
-    hasIndividual: true,
-    unitsPerStrip: 10,
-    
+    unitTypes: {
+      hasStrips: true,
+      hasIndividual: true,
+      unitsPerStrip: 10
+    },
+
     // Dosage Information
-    strength: '',
-    form: '',
-    frequency: '',
-    
+    dosage: {
+      strength: '',
+      form: '',
+      frequency: ''
+    },
+
     // Storage Conditions (optional)
-    temperatureMin: '',
-    temperatureMax: '',
-    humidityMin: '',
-    humidityMax: '',
-    specialConditions: [],
-    
+    storageConditions: {
+      temperature: {
+        min: '',
+        max: '',
+        unit: 'celsius'
+      },
+      humidity: {
+        min: '',
+        max: ''
+      },
+      specialConditions: []
+    },
+
     // Medical Information (optional)
     sideEffects: '',
     contraindications: '',
     interactions: '',
-    
+
     // Additional Info
     barcode: '',
     tags: '',
@@ -58,18 +70,109 @@ const AddMasterMedicinePage = () => {
 
   const [errors, setErrors] = useState({});
 
+  // Expanded medical categories (merged existing + requested)
   const categories = [
+    // Existing
     'Antibiotics', 'Pain Relief', 'Fever Reducer', 'Anti-inflammatory',
     'Vitamins & Supplements', 'Antacid', 'Cough & Cold', 'Diabetes Care',
     'Heart & Blood Pressure', 'Digestive Health', 'Respiratory', 'Skin Care',
     'Eye Care', 'Ear Care', 'Mental Health', 'Hormonal', 'Allergy Relief',
-    'Bone & Joint Care', 'Kidney & Urinary', 'Liver Care', 'Other'
+    'Bone & Joint Care', 'Kidney & Urinary', 'Liver Care', 'Other',
+
+    // New additions
+    'Analgesic', 'Antipyretic', 'Antibiotic', 'Antiviral', 'Antifungal', 'Antiparasitic',
+    'Antihistamine', 'Decongestant', 'Expectorant', 'Bronchodilator', 'Antitussive', 'Antiemetic',
+    'Antidiarrheal', 'Laxative', 'Proton Pump Inhibitor', 'H2 Receptor Antagonist', 'Antidiabetic',
+    'Antihypertensive', 'Antiarrhythmic', 'Beta-blocker', 'Calcium Channel Blocker', 'ACE Inhibitor',
+    'Diuretic', 'Statin', 'Anticoagulant', 'Thrombolytic', 'Hormonal Therapy', 'Hormonal Contraceptive',
+    'Thyroid Hormone', 'Corticosteroid', 'Sex Hormone', 'Antidepressant', 'Antipsychotic', 'Mood Stabilizer',
+    'Anxiolytic', 'Sedative / Hypnotic', 'Stimulant', 'Anticonvulsant', 'Muscle Relaxant',
+    'Immunosuppressant', 'Antineoplastic', 'Immunomodulator', 'Vaccine', 'Dermatological',
+    'Ophthalmic Solution', 'Otic', 'Gastrointestinal', 'Genitourinary', 'Nutritional Supplement',
+    'Electrolyte Solution', 'Diagnostic Agent', 'Anesthetic', 'Antidote', 'Miscellaneous',
+    'GI Motility Regulator', 'ARB (Angiotensin Receptor Blocker)', 'Antiplatelet', 'Bisphosphonate',
+    'Biologic Therapy', 'Skincare', 'Otic Preparation', 'Respiratory Medicine', 'Gastrointestinal Medicine',
+    'Digestive Aid', 'Genitourinary Medicine', 'Bone Health Therapy', 'Vitamin Supplement', 'Mineral Supplement',
+    'IV Fluid', 'Local Anesthetic', 'General Anesthetic', 'Emergency Medicine', 'Chemotherapy Agent',
+    'Targeted Therapy', 'Monoclonal Antibody', 'Radiopharmaceutical', 'Rare Disease Therapy',
+    'Miscellaneous Medicine', 'Tablet', 'NSAID', 'Supplement', 'Dermatology'
   ];
 
+  // Expanded dosage forms
   const forms = [
-    'Tablet', 'Capsule', 'Syrup', 'Injection', 'Drops', 'Cream', 'Ointment',
-    'Powder', 'Inhaler', 'Spray', 'Gel', 'Lotion', 'Solution', 'Suspension',
-    'Patch', 'Suppository', 'Other'
+    'Tablet',
+    'Capsule',
+    'Softgel Capsule',
+    'Caplet',
+    'Lozenge',
+    'Troche',
+    'Sublingual Tablet',
+    'Buccal Tablet',
+    'Chewable Tablet',
+    'Orally Disintegrating Tablet (ODT)',
+    'Film-Coated Tablet',
+    'Enteric-Coated Tablet',
+    'Extended-Release Tablet',
+    'Immediate-Release Tablet',
+    'Sustained-Release Tablet',
+    'Controlled-Release Tablet',
+    'Injection',
+    'Intravenous (IV) Infusion',
+    'Intramuscular Injection',
+    'Subcutaneous Injection',
+    'Intradermal Injection',
+    'Depot Injection',
+    'Implant',
+    'Powder for Solution',
+    'Powder for Suspension',
+    'Lyophilized Powder',
+    'Granules',
+    'Effervescent Tablet',
+    'Oral Solution',
+    'Oral Suspension',
+    'Oral Emulsion',
+    'Syrup',
+    'Elixir',
+    'Tincture',
+    'Mouthwash',
+    'Gargle Solution',
+    'Eye Drop',
+    'Ear Drop',
+    'Nasal Drop',
+    'Nasal Spray',
+    'Metered Dose Inhaler (MDI)',
+    'Dry Powder Inhaler (DPI)',
+    'Nebulizer Solution',
+    'Rectal Suppository',
+    'Vaginal Suppository',
+    'Rectal Enema',
+    'Vaginal Tablet',
+    'Transdermal Patch',
+    'Topical Cream',
+    'Topical Ointment',
+    'Topical Gel',
+    'Topical Lotion',
+    'Topical Paste',
+    'Topical Foam',
+    'Topical Spray',
+    'Shampoo',
+    'Nail Lacquer',
+    'Dental Paste',
+    'Medicated Powder',
+    'Intrathecal Injection',
+    'Intraarticular Injection',
+    'Intraperitoneal Injection',
+    'Inhalation Solution',
+    'Irrigation Solution',
+    'Concentrate for Solution',
+    'Concentrate for Suspension',
+    'Transmucosal Film',
+    'Sublingual Spray',
+    'Medicated Plaster',
+    'Nasal Gel',
+    'Mouth Dissolving Film',
+    'Sachets',
+    'Other'
   ];
 
   const specialConditionsOptions = [
@@ -84,16 +187,39 @@ const AddMasterMedicinePage = () => {
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : (type === 'number' ? parseFloat(value) || '' : value)
-    }));
+
+    // Handle nested properties
+    if (name.includes('.')) {
+      const keys = name.split('.');
+      setFormData(prev => {
+        const newData = { ...prev };
+        let current = newData;
+
+        // Navigate to the parent object
+        for (let i = 0; i < keys.length - 1; i++) {
+          if (!current[keys[i]]) current[keys[i]] = {};
+          current = current[keys[i]];
+        }
+
+        // Set the final value
+        const finalKey = keys[keys.length - 1];
+        current[finalKey] = type === 'checkbox' ? checked : (type === 'number' ? parseFloat(value) || '' : value);
+
+        return newData;
+      });
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [name]: type === 'checkbox' ? checked : (type === 'number' ? parseFloat(value) || '' : value)
+      }));
+    }
 
     // Clear error when user starts typing
-    if (errors[name]) {
+    const errorKey = name.includes('.') ? name.split('.')[0] : name;
+    if (errors[errorKey]) {
       setErrors(prev => ({
         ...prev,
-        [name]: ''
+        [errorKey]: ''
       }));
     }
   };
@@ -110,9 +236,12 @@ const AddMasterMedicinePage = () => {
   const handleSpecialConditionToggle = (condition) => {
     setFormData(prev => ({
       ...prev,
-      specialConditions: prev.specialConditions.includes(condition)
-        ? prev.specialConditions.filter(c => c !== condition)
-        : [...prev.specialConditions, condition]
+      storageConditions: {
+        ...prev.storageConditions,
+        specialConditions: prev.storageConditions.specialConditions.includes(condition)
+          ? prev.storageConditions.specialConditions.filter(c => c !== condition)
+          : [...prev.storageConditions.specialConditions, condition]
+      }
     }));
   };
 
@@ -131,16 +260,16 @@ const AddMasterMedicinePage = () => {
     if (formData.categories.length === 0) {
       newErrors.categories = 'Please select at least one category';
     }
-    if (!formData.strength.trim()) {
+    if (!formData.dosage.strength.trim()) {
       newErrors.strength = 'Strength is required';
     }
-    if (!formData.form.trim()) {
+    if (!formData.dosage.form.trim()) {
       newErrors.form = 'Form is required';
     }
-    if (formData.hasStrips && (!formData.unitsPerStrip || formData.unitsPerStrip < 1)) {
+    if (formData.unitTypes.hasStrips && (!formData.unitTypes.unitsPerStrip || formData.unitTypes.unitsPerStrip < 1)) {
       newErrors.unitsPerStrip = 'Units per strip must be at least 1';
     }
-    if (!formData.hasStrips && !formData.hasIndividual) {
+    if (!formData.unitTypes.hasStrips && !formData.unitTypes.hasIndividual) {
       newErrors.unitTypes = 'At least one unit type must be selected';
     }
 
@@ -302,12 +431,12 @@ const AddMasterMedicinePage = () => {
         </div>
       }
     >
-      {/* CSV Import Results Modal */}
+      {/* CSV Import Results Modal (simple summary, optional details) */}
       {showImportResults && importResults && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 text-left">Import Results</h3>
+              <h3 className="text-lg font-semibold text-gray-900 text-left">Import Summary</h3>
               <button
                 onClick={() => setShowImportResults(false)}
                 className="text-gray-400 hover:text-gray-600"
@@ -323,42 +452,54 @@ const AddMasterMedicinePage = () => {
                   <div className="text-2xl font-bold text-blue-800">{importResults.summary.total}</div>
                 </div>
                 <div className="bg-green-50 p-3 rounded-lg text-left">
-                  <div className="text-green-600 font-medium">Successful</div>
+                  <div className="text-green-600 font-medium">Imported</div>
                   <div className="text-2xl font-bold text-green-800">{importResults.summary.successful}</div>
                 </div>
                 <div className="bg-yellow-50 p-3 rounded-lg text-left">
-                  <div className="text-yellow-600 font-medium">Duplicates</div>
+                  <div className="text-yellow-600 font-medium">Skipped (Duplicates)</div>
                   <div className="text-2xl font-bold text-yellow-800">{importResults.summary.duplicates}</div>
                 </div>
                 <div className="bg-red-50 p-3 rounded-lg text-left">
-                  <div className="text-red-600 font-medium">Failed</div>
+                  <div className="text-red-600 font-medium">Couldn’t Import</div>
                   <div className="text-2xl font-bold text-red-800">{importResults.summary.failed}</div>
                 </div>
               </div>
 
-              {importResults.results.failed.length > 0 && (
-                <div>
-                  <h4 className="font-medium text-red-600 mb-2 text-left">Failed Imports:</h4>
-                  <div className="max-h-32 overflow-y-auto">
-                    {importResults.results.failed.map((item, index) => (
-                      <div key={index} className="text-sm text-red-600 text-left">
-                        {item.name} ({item.manufacturer}): {item.reason}
-                      </div>
-                    ))}
-                  </div>
+              {(importResults.results.failed.length > 0 || importResults.results.duplicates.length > 0) && (
+                <div className="text-left">
+                  <button
+                    type="button"
+                    onClick={() => setShowImportDetails(v => !v)}
+                    className="text-primary-600 hover:text-primary-700 text-sm underline"
+                  >
+                    {showImportDetails ? 'Hide details' : 'Show details'}
+                  </button>
                 </div>
               )}
 
-              {importResults.results.duplicates.length > 0 && (
-                <div>
-                  <h4 className="font-medium text-yellow-600 mb-2 text-left">Duplicate Medicines:</h4>
-                  <div className="max-h-32 overflow-y-auto">
-                    {importResults.results.duplicates.map((item, index) => (
-                      <div key={index} className="text-sm text-yellow-600 text-left">
-                        {item.name} ({item.manufacturer}): {item.reason}
-                      </div>
-                    ))}
-                  </div>
+              {showImportDetails && (
+                <div className="space-y-4 max-h-64 overflow-y-auto pr-2">
+                  {importResults.results.failed.length > 0 && (
+                    <div>
+                      <h4 className="font-medium text-red-600 mb-2 text-left">Couldn’t Import</h4>
+                      {importResults.results.failed.map((item, index) => (
+                        <div key={index} className="text-sm text-gray-700 text-left">
+                          • {item.name} ({item.manufacturer}) — {item.reason}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {importResults.results.duplicates.length > 0 && (
+                    <div>
+                      <h4 className="font-medium text-yellow-600 mb-2 text-left">Skipped (Duplicates)</h4>
+                      {importResults.results.duplicates.map((item, index) => (
+                        <div key={index} className="text-sm text-gray-700 text-left">
+                          • {item.name} ({item.manufacturer}) — {item.reason}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -614,8 +755,8 @@ const AddMasterMedicinePage = () => {
                       <input
                         type="checkbox"
                         id="hasStrips"
-                        name="hasStrips"
-                        checked={formData.hasStrips}
+                        name="unitTypes.hasStrips"
+                        checked={formData.unitTypes.hasStrips}
                         onChange={handleInputChange}
                         className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                       />
@@ -627,8 +768,8 @@ const AddMasterMedicinePage = () => {
                       <input
                         type="checkbox"
                         id="hasIndividual"
-                        name="hasIndividual"
-                        checked={formData.hasIndividual}
+                        name="unitTypes.hasIndividual"
+                        checked={formData.unitTypes.hasIndividual}
                         onChange={handleInputChange}
                         className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                       />
@@ -643,15 +784,15 @@ const AddMasterMedicinePage = () => {
                 </div>
 
                 {/* Units per Strip */}
-                {formData.hasStrips && (
+                {formData.unitTypes.hasStrips && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2 text-left">
                       Units per Strip/Pack *
                     </label>
                     <input
                       type="number"
-                      name="unitsPerStrip"
-                      value={formData.unitsPerStrip}
+                      name="unitTypes.unitsPerStrip"
+                      value={formData.unitTypes.unitsPerStrip}
                       onChange={handleInputChange}
                       min="1"
                       placeholder="e.g., 10"
@@ -682,8 +823,8 @@ const AddMasterMedicinePage = () => {
                   </label>
                   <input
                     type="text"
-                    name="strength"
-                    value={formData.strength}
+                    name="dosage.strength"
+                    value={formData.dosage.strength}
                     onChange={handleInputChange}
                     placeholder="e.g., 500mg"
                     className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${
@@ -701,8 +842,8 @@ const AddMasterMedicinePage = () => {
                     Form *
                   </label>
                   <select
-                    name="form"
-                    value={formData.form}
+                    name="dosage.form"
+                    value={formData.dosage.form}
                     onChange={handleInputChange}
                     className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${
                       errors.form ? 'border-red-300' : 'border-gray-300'
@@ -725,8 +866,8 @@ const AddMasterMedicinePage = () => {
                   </label>
                   <input
                     type="text"
-                    name="frequency"
-                    value={formData.frequency}
+                    name="dosage.frequency"
+                    value={formData.dosage.frequency}
                     onChange={handleInputChange}
                     placeholder="e.g., 3 times daily"
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -752,8 +893,8 @@ const AddMasterMedicinePage = () => {
                     <div>
                       <input
                         type="number"
-                        name="temperatureMin"
-                        value={formData.temperatureMin}
+                        name="storageConditions.temperature.min"
+                        value={formData.storageConditions.temperature.min}
                         onChange={handleInputChange}
                         placeholder="Min temp"
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -762,8 +903,8 @@ const AddMasterMedicinePage = () => {
                     <div>
                       <input
                         type="number"
-                        name="temperatureMax"
-                        value={formData.temperatureMax}
+                        name="storageConditions.temperature.max"
+                        value={formData.storageConditions.temperature.max}
                         onChange={handleInputChange}
                         placeholder="Max temp"
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -781,8 +922,8 @@ const AddMasterMedicinePage = () => {
                     <div>
                       <input
                         type="number"
-                        name="humidityMin"
-                        value={formData.humidityMin}
+                        name="storageConditions.humidity.min"
+                        value={formData.storageConditions.humidity.min}
                         onChange={handleInputChange}
                         placeholder="Min humidity"
                         min="0"
@@ -793,8 +934,8 @@ const AddMasterMedicinePage = () => {
                     <div>
                       <input
                         type="number"
-                        name="humidityMax"
-                        value={formData.humidityMax}
+                        name="storageConditions.humidity.max"
+                        value={formData.storageConditions.humidity.max}
                         onChange={handleInputChange}
                         placeholder="Max humidity"
                         min="0"
@@ -815,7 +956,7 @@ const AddMasterMedicinePage = () => {
                       <label key={condition} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
                         <input
                           type="checkbox"
-                          checked={formData.specialConditions.includes(condition)}
+                          checked={formData.storageConditions.specialConditions.includes(condition)}
                           onChange={() => handleSpecialConditionToggle(condition)}
                           className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                         />

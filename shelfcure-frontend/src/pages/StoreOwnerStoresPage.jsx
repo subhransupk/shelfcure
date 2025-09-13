@@ -55,7 +55,12 @@ const StoreOwnerStoresPage = () => {
   };
 
   const handleDeleteStore = async (storeId, storeName) => {
-    if (window.confirm(`Are you sure you want to delete "${storeName}"? This action cannot be undone.`)) {
+    const store = stores.find(s => s._id === storeId);
+    const confirmMessage = store?.isActive
+      ? `Are you sure you want to delete "${storeName}"? This will deactivate the store.`
+      : `Are you sure you want to remove "${storeName}" from your list?`;
+
+    if (window.confirm(confirmMessage)) {
       try {
         const token = localStorage.getItem('token');
         const response = await fetch(`/api/store-owner/stores/${storeId}`, {
@@ -67,9 +72,10 @@ const StoreOwnerStoresPage = () => {
         });
 
         if (response.ok) {
+          const responseData = await response.json();
           // Remove the deleted store from the list
           setStores(stores.filter(store => store._id !== storeId));
-          alert('Store deleted successfully');
+          alert(responseData.message || 'Store deleted successfully');
         } else {
           const errorData = await response.json();
           alert(`Failed to delete store: ${errorData.message || 'Unknown error'}`);
@@ -212,8 +218,12 @@ const StoreOwnerStoresPage = () => {
                         </button>
                         <button
                           onClick={() => handleDeleteStore(store._id, store.name)}
-                          className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50"
-                          title="Delete Store"
+                          className={`p-1 rounded ${
+                            store.isActive
+                              ? 'text-red-600 hover:text-red-800 hover:bg-red-50'
+                              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                          }`}
+                          title={store.isActive ? "Delete Store" : "Remove from List"}
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>

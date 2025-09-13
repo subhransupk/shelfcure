@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
 
 // Import Models
 const Store = require('../models/Store');
@@ -49,9 +48,7 @@ const createStaff = async (req, res) => {
     req.body.password = 'ShelfCure@123'; // Default password
   }
 
-  // Hash password
-  const salt = await bcrypt.genSalt(10);
-  req.body.password = await bcrypt.hash(req.body.password, salt);
+  // Note: Password will be hashed automatically by User model pre-save hook
 
   // Set role if not provided
   if (!req.body.role) {
@@ -206,10 +203,7 @@ const updateStaff = asyncHandler(async (req, res) => {
   }
 
   // Handle password update
-  if (req.body.password) {
-    const salt = await bcrypt.genSalt(10);
-    req.body.password = await bcrypt.hash(req.body.password, salt);
-  }
+  // Note: Password will be hashed automatically by User model pre-save hook if provided
 
   // Update user
   staff = await User.findByIdAndUpdate(staffId, req.body, {

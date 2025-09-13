@@ -148,7 +148,19 @@ router.post('/plans/admin', protect, authorize('superadmin', 'admin'), async (re
       data: plan
     });
   } catch (error) {
-    console.error('Create subscription plan error:', error);
+    console.error('Create subscription plan error:', error.message);
+
+    // Handle Mongoose validation errors
+    if (error.name === 'ValidationError') {
+      const validationErrors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: validationErrors
+      });
+    }
+
+    // Handle other errors
     res.status(500).json({
       success: false,
       message: 'Server error creating subscription plan',

@@ -1,23 +1,23 @@
 const mongoose = require('mongoose');
 
 const staffAttendanceSchema = new mongoose.Schema({
-  // Staff Information
+  // Staff Information - Reference to Staff collection
   staff: {
     type: mongoose.Schema.ObjectId,
-    ref: 'User',
+    ref: 'Staff',
     required: [true, 'Staff member is required'],
+    index: true
+  },
+  // Also keep user reference for backward compatibility
+  user: {
+    type: mongoose.Schema.ObjectId,
+    ref: 'User',
     index: true
   },
   store: {
     type: mongoose.Schema.ObjectId,
     ref: 'Store',
     required: [true, 'Store is required'],
-    index: true
-  },
-  storeOwner: {
-    type: mongoose.Schema.ObjectId,
-    ref: 'User',
-    required: [true, 'Store owner is required'],
     index: true
   },
   
@@ -163,7 +163,7 @@ const staffAttendanceSchema = new mongoose.Schema({
 // Compound indexes for efficient queries
 staffAttendanceSchema.index({ staff: 1, date: 1 }, { unique: true });
 staffAttendanceSchema.index({ store: 1, date: 1 });
-staffAttendanceSchema.index({ storeOwner: 1, month: 1, year: 1 });
+staffAttendanceSchema.index({ store: 1, month: 1, year: 1 });
 staffAttendanceSchema.index({ status: 1 });
 
 // Virtual for formatted date
