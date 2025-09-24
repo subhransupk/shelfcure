@@ -178,7 +178,7 @@ const customerSchema = new mongoose.Schema({
   // Customer status and notes
   status: {
     type: String,
-    enum: ['active', 'inactive', 'blocked'],
+    enum: ['active', 'blocked'],
     default: 'active'
   },
   customerType: {
@@ -369,17 +369,70 @@ customerSchema.methods.addLoyaltyPoints = function(points) {
 // Method to update credit balance
 customerSchema.methods.updateCreditBalance = function(amount) {
   this.creditBalance += amount;
-  
-  // Update credit status based on balance
-  if (this.creditBalance > this.creditLimit * 0.9) {
-    this.creditStatus = 'warning';
-  } else if (this.creditBalance > this.creditLimit) {
-    this.creditStatus = 'blocked';
-  } else {
-    this.creditStatus = 'good';
+
+  // Ensure balance doesn't go negative
+  if (this.creditBalance < 0) {
+    this.creditBalance = 0;
   }
-  
+
+  // Update credit status based on balance and limit
+  if (this.creditLimit === 0) {
+    // No credit limit set - status based on balance only
+    this.creditStatus = this.creditBalance > 0 ? 'warning' : 'good';
+  } else {
+    // Credit limit is set - status based on utilization
+    const utilization = this.creditBalance / this.creditLimit;
+
+    if (this.creditBalance > this.creditLimit) {
+      this.creditStatus = 'blocked';
+    } else if (utilization >= 0.9) {
+      this.creditStatus = 'warning';
+    } else {
+      this.creditStatus = 'good';
+    }
+  }
+
   return this.save();
+};
+
+// Method to check if customer can make credit purchase
+customerSchema.methods.canMakeCreditPurchase = function(amount) {
+  // Check if customer is blocked
+  if (this.creditStatus === 'blocked') {
+    return { allowed: false, reason: 'Customer credit is blocked' };
+  }
+
+  // Check if customer has credit facility enabled
+  if (this.creditLimit <= 0) {
+    return { allowed: false, reason: 'Customer does not have credit facility' };
+  }
+
+  // Check if credit limit would be exceeded
+  const newBalance = this.creditBalance + amount;
+  if (newBalance > this.creditLimit) {
+    return {
+      allowed: false,
+      reason: `Credit limit exceeded. Available credit: ₹${this.creditLimit - this.creditBalance}`
+    };
+  }
+
+  return { allowed: true };
+};
+
+// Method to get available credit
+customerSchema.methods.getAvailableCredit = function() {
+  if (this.creditLimit === 0) {
+    return Infinity; // No limit set
+  }
+  return Math.max(0, this.creditLimit - this.creditBalance);
+};
+
+// Method to get credit utilization percentage
+customerSchema.methods.getCreditUtilization = function() {
+  if (this.creditLimit === 0) {
+    return this.creditBalance > 0 ? 100 : 0;
+  }
+  return Math.round((this.creditBalance / this.creditLimit) * 100);
 };
 
 module.exports = mongoose.model('Customer', customerSchema);

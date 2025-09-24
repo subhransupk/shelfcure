@@ -147,6 +147,33 @@ const returnSchema = new mongoose.Schema({
         conversionRatio: Number,
         unitsPerStrip: Number
       }
+    },
+
+    // Inventory reversal tracking (when return is rejected)
+    inventoryReversed: {
+      type: Boolean,
+      default: false
+    },
+
+    // Reversal details (for audit trail)
+    reversalDetails: {
+      reversedAt: Date,
+      reversedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      },
+      stripQuantityReversed: {
+        type: Number,
+        default: 0
+      },
+      individualQuantityReversed: {
+        type: Number,
+        default: 0
+      },
+      reason: {
+        type: String,
+        default: 'Return rejected'
+      }
     }
   }],
 
@@ -262,7 +289,7 @@ const returnSchema = new mongoose.Schema({
   // Inventory restoration status
   inventoryRestorationStatus: {
     type: String,
-    enum: ['pending', 'partial', 'completed', 'failed', 'skipped'],
+    enum: ['pending', 'partial', 'completed', 'failed', 'skipped', 'reversed'],
     default: 'pending'
   },
 
@@ -495,7 +522,10 @@ returnSchema.methods.calculateReturnAmounts = function() {
 // Static method to get available items for return from a sale
 returnSchema.statics.getAvailableItemsForReturn = async function(saleId) {
   const Sale = mongoose.model('Sale');
-  const originalSale = await Sale.findById(saleId).populate('items.medicine');
+  const originalSale = await Sale.findById(saleId).populate({
+    path: 'items.medicine',
+    select: 'name genericName manufacturer category unitTypes stripInfo individualInfo pricing'
+  });
 
   if (!originalSale) {
     throw new Error('Original sale not found');

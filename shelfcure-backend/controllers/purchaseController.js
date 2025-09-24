@@ -1,7 +1,140 @@
 const Purchase = require('../models/Purchase');
 const Supplier = require('../models/Supplier');
 const Medicine = require('../models/Medicine');
+const SupplierTransaction = require('../models/SupplierTransaction');
 const { validationResult } = require('express-validator');
+
+// Helper function to update inventory when purchase is received/completed
+const updateInventoryForPurchase = async (purchase, userId) => {
+  try {
+    console.log('🔄 Starting inventory update for purchase:', purchase.purchaseOrderNumber);
+
+    for (const item of purchase.items) {
+      if (!item.medicine) {
+        console.log(`⏭️ Skipping item ${item.medicineName} - no medicine ID`);
+        continue;
+      }
+
+      try {
+        console.log(`🔍 Processing item: ${item.medicineName}, Medicine ID: ${item.medicine}`);
+        const medicine = await Medicine.findById(item.medicine);
+
+        if (!medicine) {
+          console.error(`❌ Medicine not found with ID: ${item.medicine}`);
+          continue;
+        }
+
+        console.log(`📦 Found medicine: ${medicine.name}`);
+        console.log(`📊 Current stock - Strip: ${medicine.stripInfo?.stock || 'N/A'}, Individual: ${medicine.individualInfo?.stock || 'N/A'}`);
+        console.log(`📥 Adding ${item.quantity} ${item.unitType}(s)`);
+
+        // Update stock based on unit type
+        if (item.unitType === 'strip' && medicine.stripInfo) {
+          const oldQuantity = medicine.stripInfo.stock || 0;
+          medicine.stripInfo.stock = oldQuantity + item.quantity;
+
+          // Update legacy stock field for compatibility
+          medicine.stock = medicine.stripInfo.stock;
+
+          // Update legacy inventory object if it exists
+          if (medicine.inventory) {
+            medicine.inventory.stripQuantity = medicine.stripInfo.stock;
+          }
+
+          console.log(`✅ Updated strip stock: ${medicine.name} from ${oldQuantity} to ${medicine.stripInfo.stock} strips`);
+
+        } else if (item.unitType === 'individual' && medicine.individualInfo) {
+          const oldQuantity = medicine.individualInfo.stock || 0;
+          medicine.individualInfo.stock = oldQuantity + item.quantity;
+
+          // Update legacy inventory object if it exists
+          if (medicine.inventory) {
+            medicine.inventory.individualQuantity = medicine.individualInfo.stock;
+          }
+
+          console.log(`✅ Updated individual stock: ${medicine.name} from ${oldQuantity} to ${medicine.individualInfo.stock} units`);
+
+        } else {
+          console.log(`⚠️ Unit type ${item.unitType} not supported or medicine structure incomplete for ${medicine.name}`);
+          continue;
+        }
+
+        // Update last purchase info
+        medicine.lastPurchaseDate = new Date();
+        medicine.lastPurchasePrice = item.unitCost;
+
+        console.log(`💾 Saving medicine: ${medicine.name}`);
+        await medicine.save();
+        console.log(`✅ Stock updated successfully for: ${medicine.name}`);
+
+        // Log inventory change for audit trail
+        await logInventoryChange({
+          medicine: medicine._id,
+          store: medicine.store,
+          changeType: 'purchase',
+          unitType: item.unitType,
+          quantityChanged: item.quantity, // Positive because it's an increase
+          previousStock: item.unitType === 'strip' ?
+            (medicine.stripInfo?.stock || 0) - item.quantity :
+            (medicine.individualInfo?.stock || 0) - item.quantity,
+          newStock: item.unitType === 'strip' ?
+            (medicine.stripInfo?.stock || 0) :
+            (medicine.individualInfo?.stock || 0),
+          reference: {
+            type: 'Purchase',
+            id: purchase._id,
+            purchaseOrderNumber: purchase.purchaseOrderNumber
+          },
+          performedBy: userId,
+          notes: `Purchase ${purchase.status} - automatic inventory update`
+        });
+
+      } catch (updateError) {
+        console.error(`❌ Error updating stock for medicine ${item.medicineName}:`, updateError);
+      }
+    }
+
+    console.log('✅ Inventory update completed for purchase:', purchase.purchaseOrderNumber);
+
+  } catch (error) {
+    console.error('❌ Error in updateInventoryForPurchase:', error);
+    throw error;
+  }
+};
+
+// Helper function to log inventory changes for audit trail
+const logInventoryChange = async (changeData) => {
+  try {
+    // Create inventory change log entry
+    const InventoryLog = require('../models/InventoryLog');
+
+    const logEntry = {
+      medicine: changeData.medicine,
+      store: changeData.store,
+      changeType: changeData.changeType,
+      unitType: changeData.unitType,
+      quantityChanged: changeData.quantityChanged,
+      previousStock: changeData.previousStock,
+      newStock: changeData.newStock,
+      reference: changeData.reference,
+      performedBy: changeData.performedBy,
+      notes: changeData.notes,
+      timestamp: new Date()
+    };
+
+    // If InventoryLog model exists, save the log
+    if (InventoryLog) {
+      await InventoryLog.create(logEntry);
+      console.log('📋 Inventory change logged successfully');
+    } else {
+      // Fallback: log to console for now
+      console.log('📋 Inventory Change Log:', JSON.stringify(logEntry, null, 2));
+    }
+  } catch (error) {
+    console.error('❌ Inventory logging error:', error);
+    // Don't throw error - logging failure shouldn't break the main process
+  }
+};
 
 // @desc    Get medicines that need reordering
 // @route   GET /api/store-manager/purchases/reorder-suggestions
@@ -24,25 +157,61 @@ const getReorderSuggestions = async (req, res) => {
       const hasStrips = medicine.unitTypes?.hasStrips;
       const hasIndividual = medicine.unitTypes?.hasIndividual;
 
+      let needsReorder = false;
+      let debugInfo = {
+        name: medicine.name,
+        hasStrips,
+        hasIndividual
+      };
+
       if (hasStrips && hasIndividual) {
         // Both enabled: Reorder based on STRIP STOCK ONLY
         // Individual stock is just cut medicines, not used for reorder calculation
-        const stripStock = medicine.stripInfo.stock || 0;
-        const stripReorderLevel = medicine.stripInfo.reorderLevel || 0;
-        return stripStock <= stripReorderLevel;
+        const stripStock = Number(medicine.stripInfo?.stock || 0);
+        const stripReorderLevel = Number(medicine.stripInfo?.reorderLevel || 0);
+        needsReorder = stripStock <= stripReorderLevel;
+        debugInfo.stripStock = stripStock;
+        debugInfo.stripReorderLevel = stripReorderLevel;
+        debugInfo.needsReorder = needsReorder;
+        debugInfo.stripStockType = typeof medicine.stripInfo?.stock;
+        debugInfo.stripReorderType = typeof medicine.stripInfo?.reorderLevel;
       } else if (hasStrips) {
         // Only strips enabled
-        const stripStock = medicine.stripInfo.stock || 0;
-        const stripReorderLevel = medicine.stripInfo.reorderLevel || 0;
-        return stripStock <= stripReorderLevel;
+        const stripStock = Number(medicine.stripInfo?.stock || 0);
+        const stripReorderLevel = Number(medicine.stripInfo?.reorderLevel || 0);
+        needsReorder = stripStock <= stripReorderLevel;
+        debugInfo.stripStock = stripStock;
+        debugInfo.stripReorderLevel = stripReorderLevel;
+        debugInfo.needsReorder = needsReorder;
+        debugInfo.stripStockType = typeof medicine.stripInfo?.stock;
+        debugInfo.stripReorderType = typeof medicine.stripInfo?.reorderLevel;
       } else if (hasIndividual) {
         // Only individual enabled: Use individual stock for reorder calculation
-        const individualStock = medicine.individualInfo.stock || 0;
-        const individualReorderLevel = medicine.individualInfo.reorderLevel || 0;
-        return individualStock <= individualReorderLevel;
+        const individualStock = Number(medicine.individualInfo?.stock || 0);
+        const individualReorderLevel = Number(medicine.individualInfo?.reorderLevel || 0);
+        needsReorder = individualStock <= individualReorderLevel;
+        debugInfo.individualStock = individualStock;
+        debugInfo.individualReorderLevel = individualReorderLevel;
+        debugInfo.needsReorder = needsReorder;
+        debugInfo.individualStockType = typeof medicine.individualInfo?.stock;
+        debugInfo.individualReorderType = typeof medicine.individualInfo?.reorderLevel;
       }
 
-      return false;
+      // Log medicines that are being included in reorder suggestions
+      if (needsReorder) {
+        console.log('🔍 Medicine included in reorder:', debugInfo);
+      } else if (debugInfo.stripStock > 0 || debugInfo.individualStock > 0) {
+        // Log medicines with stock that are NOT being included (for debugging)
+        console.log('❌ Medicine with stock NOT included:', debugInfo);
+      }
+
+      return needsReorder;
+    });
+
+    console.log(`📊 Reorder filtering results:`, {
+      totalMedicines: allMedicines.length,
+      lowStockMedicines: lowStockMedicines.length,
+      medicineNames: lowStockMedicines.map(m => m.name)
     });
 
     // Manually populate suppliers for medicines that have valid supplier IDs
@@ -345,6 +514,7 @@ const createPurchase = async (req, res) => {
       purchaseOrderNumber,
       invoiceNumber,
       items,
+      paymentMethod,
       paymentTerms,
       expectedDeliveryDate,
       notes,
@@ -352,18 +522,21 @@ const createPurchase = async (req, res) => {
       deliveryAddress
     } = req.body;
 
-    // Verify supplier exists and belongs to store
-    const supplierDoc = await Supplier.findOne({
-      _id: supplier,
-      store: store._id,
-      isActive: true
-    });
-
-    if (!supplierDoc) {
-      return res.status(400).json({
-        success: false,
-        message: 'Supplier not found or inactive'
+    // Verify supplier exists and belongs to store (if supplier is provided)
+    let supplierDoc = null;
+    if (supplier) {
+      supplierDoc = await Supplier.findOne({
+        _id: supplier,
+        store: store._id,
+        isActive: true
       });
+
+      if (!supplierDoc) {
+        return res.status(400).json({
+          success: false,
+          message: 'Supplier not found or inactive'
+        });
+      }
     }
 
     // Validate items and calculate amounts
@@ -462,7 +635,7 @@ const createPurchase = async (req, res) => {
 
     const purchaseData = {
       store: store._id,
-      supplier: supplier,
+      ...(supplier && { supplier: supplier }), // Only include supplier if provided
       purchaseOrderNumber: purchaseOrderNumber.trim(),
       invoiceNumber: invoiceNumber?.trim() || '',
       items: processedItems,
@@ -470,7 +643,10 @@ const createPurchase = async (req, res) => {
       totalDiscount,
       totalTax,
       totalAmount,
-      paymentTerms: paymentTerms || supplierDoc.paymentTerms,
+      paymentMethod: paymentMethod || 'cash',
+      paymentTerms: paymentTerms || (supplierDoc?.paymentTerms) || '30 days',
+      creditAmount: paymentMethod === 'credit' ? totalAmount : 0,
+      balanceAmount: paymentMethod === 'credit' ? totalAmount : 0,
       expectedDeliveryDate: expectedDeliveryDate ? new Date(expectedDeliveryDate) : null,
       notes: notes?.trim() || '',
       internalNotes: internalNotes?.trim() || '',
@@ -480,8 +656,45 @@ const createPurchase = async (req, res) => {
     };
 
     const purchase = await Purchase.create(purchaseData);
-    await purchase.populate('supplier', 'name contactPerson phone email address');
+    if (purchase.supplier) {
+      await purchase.populate('supplier', 'name contactPerson phone email address');
+    }
     await purchase.populate('createdBy', 'name email');
+
+    // Handle supplier transaction if payment method is credit
+    if (paymentMethod === 'credit' && supplierDoc) {
+      try {
+        // Calculate due date based on payment terms
+        let dueDate = new Date();
+        if (supplierDoc.paymentTerms) {
+          const days = parseInt(supplierDoc.paymentTerms.match(/\d+/)?.[0] || '30');
+          dueDate.setDate(dueDate.getDate() + days);
+        }
+
+        // Create supplier transaction record
+        await SupplierTransaction.createTransaction({
+          store: store._id,
+          supplier: supplierDoc._id,
+          transactionType: 'purchase_credit',
+          amount: totalAmount,
+          balanceChange: totalAmount, // Positive because it increases outstanding balance
+          reference: {
+            type: 'Purchase',
+            id: purchase._id,
+            number: purchase.purchaseOrderNumber
+          },
+          description: `Credit purchase - PO ${purchase.purchaseOrderNumber}`,
+          notes: notes || '',
+          processedBy: storeManager._id,
+          dueDate: dueDate
+        });
+
+        console.log(`💳 Created supplier credit transaction for ₹${totalAmount}`);
+      } catch (transactionError) {
+        console.error('❌ Error creating supplier transaction:', transactionError);
+        // Don't fail the entire purchase creation for transaction error
+      }
+    }
 
     // Update stock for existing medicines and create new medicines for customer requested items
     const createdMedicines = [];
@@ -678,8 +891,15 @@ const createPurchase = async (req, res) => {
 // @access  Private (Store Manager only)
 const updatePurchase = async (req, res) => {
   try {
+    console.log('Update purchase request:', {
+      purchaseId: req.params.id,
+      body: req.body,
+      storeId: req.store?._id
+    });
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.log('Validation errors:', errors.array());
       return res.status(400).json({
         success: false,
         message: 'Validation failed',
@@ -706,11 +926,17 @@ const updatePurchase = async (req, res) => {
     });
 
     if (!purchase) {
+      console.log('Purchase not found:', req.params.id, 'for store:', store._id);
       return res.status(404).json({
         success: false,
         message: 'Purchase not found'
       });
     }
+
+    console.log('Current purchase status:', purchase.status, '-> New status:', status);
+
+    // Store previous status for inventory logic
+    const previousStatus = purchase.status;
 
     // Update allowed fields
     if (status) purchase.status = status;
@@ -728,7 +954,25 @@ const updatePurchase = async (req, res) => {
       purchase.orderDate = new Date();
     }
 
+    // Set received date when status changes to 'received'
+    if (status === 'received' && previousStatus !== 'received') {
+      purchase.receivedDate = new Date();
+    }
+
+    // Process inventory updates when status changes to 'received' or 'completed'
+    if (status && ['received', 'completed'].includes(status) && !['received', 'completed'].includes(previousStatus) && !purchase.inventoryUpdated) {
+      console.log('🔄 Processing inventory updates for purchase status change to:', status);
+      await updateInventoryForPurchase(purchase, req.user._id);
+
+      // Mark inventory as updated
+      purchase.inventoryUpdated = true;
+      purchase.inventoryUpdateDate = new Date();
+      purchase.inventoryUpdateBy = req.user._id;
+    }
+
     await purchase.save();
+    console.log('Purchase saved with new status:', purchase.status);
+
     await purchase.populate('supplier', 'name contactPerson phone email address');
     await purchase.populate('createdBy', 'name email');
     await purchase.populate('receivedBy', 'name email');
@@ -742,7 +986,8 @@ const updatePurchase = async (req, res) => {
     console.error('Update purchase error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error while updating purchase'
+      message: 'Server error while updating purchase',
+      error: error.message
     });
   }
 };
@@ -1036,6 +1281,85 @@ const generateReorderReport = async (req, res) => {
   }
 };
 
+// @desc    Get delivery tracking information
+// @route   GET /api/store-manager/purchases/deliveries
+// @access  Private (Store Manager only)
+const getDeliveryTracking = async (req, res) => {
+  try {
+    const store = req.store;
+    const { status, dateFrom, dateTo, supplier } = req.query;
+
+    // Build query for purchases with delivery information
+    const query = {
+      store: store._id,
+      status: { $in: ['ordered', 'confirmed', 'shipped', 'received'] } // Only purchases that can have delivery status
+    };
+
+    // Add filters
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+
+    if (dateFrom || dateTo) {
+      query.expectedDeliveryDate = {};
+      if (dateFrom) query.expectedDeliveryDate.$gte = new Date(dateFrom);
+      if (dateTo) query.expectedDeliveryDate.$lte = new Date(dateTo);
+    }
+
+    if (supplier) {
+      query.supplier = supplier;
+    }
+
+    // Get purchases with delivery information
+    const deliveries = await Purchase.find(query)
+      .populate('supplier', 'name contactPerson phone email')
+      .populate('createdBy', 'name')
+      .populate('receivedBy', 'name')
+      .select('purchaseOrderNumber invoiceNumber status expectedDeliveryDate deliveryDate orderDate totalAmount supplier createdBy receivedBy deliveryAddress notes')
+      .sort({ expectedDeliveryDate: 1, createdAt: -1 })
+      .limit(100);
+
+    // Calculate delivery statistics
+    const stats = {
+      total: deliveries.length,
+      pending: deliveries.filter(d => ['ordered', 'confirmed'].includes(d.status)).length,
+      shipped: deliveries.filter(d => d.status === 'shipped').length,
+      delivered: deliveries.filter(d => d.status === 'received').length,
+      overdue: deliveries.filter(d =>
+        d.expectedDeliveryDate &&
+        new Date(d.expectedDeliveryDate) < new Date() &&
+        !['received'].includes(d.status)
+      ).length
+    };
+
+    // Group deliveries by status for better organization
+    const groupedDeliveries = {
+      pending: deliveries.filter(d => ['ordered', 'confirmed'].includes(d.status)),
+      shipped: deliveries.filter(d => d.status === 'shipped'),
+      delivered: deliveries.filter(d => d.status === 'received'),
+      overdue: deliveries.filter(d =>
+        d.expectedDeliveryDate &&
+        new Date(d.expectedDeliveryDate) < new Date() &&
+        !['received'].includes(d.status)
+      )
+    };
+
+    res.status(200).json({
+      success: true,
+      data: deliveries,
+      grouped: groupedDeliveries,
+      stats
+    });
+
+  } catch (error) {
+    console.error('Get delivery tracking error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching delivery information'
+    });
+  }
+};
+
 module.exports = {
   getReorderSuggestions,
   generateReorderReport,
@@ -1044,5 +1368,6 @@ module.exports = {
   createPurchase,
   updatePurchase,
   deletePurchase,
-  getPurchaseAnalytics
+  getPurchaseAnalytics,
+  getDeliveryTracking
 };

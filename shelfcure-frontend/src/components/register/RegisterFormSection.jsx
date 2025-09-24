@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { User, Mail, Phone, Lock, Eye, EyeOff, Gift, ArrowRight, AlertCircle, CheckCircle, Building, MapPin, Calendar } from 'lucide-react';
+import { createPhoneInputHandler } from '../../utils/inputValidation';
 
 const RegisterFormSection = () => {
   const [currentStep, setCurrentStep] = useState(1);
@@ -257,7 +258,9 @@ const RegisterFormSection = () => {
                       type="tel"
                       name="phone"
                       value={personalData.phone}
-                      onChange={handlePersonalDataChange}
+                      onChange={createPhoneInputHandler(
+                        (value) => setPersonalData(prev => ({ ...prev, phone: value }))
+                      )}
                       className={`w-full px-4 py-4 border rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200 bg-white ${
                         errors.phone ? 'border-red-300' : 'border-gray-300'
                       }`}

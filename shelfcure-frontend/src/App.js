@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Homepage from './components/Homepage';
+import './styles/affiliate-panel-mobile.css';
 import AboutPage from './pages/AboutPage';
 import FeaturesPage from './pages/FeaturesPage';
 import HowItWorksPage from './pages/HowItWorksPage';
@@ -77,6 +78,29 @@ import StaffMedicineSearch from './pages/StaffMedicineSearch';
 import AddMedicineRequestPage from './pages/AddMedicineRequestPage';
 import MedicineDetailsPage from './pages/MedicineDetailsPage';
 import StoreManagerReturns from './pages/StoreManagerReturns';
+import StoreManagerPurchaseReturns from './pages/StoreManagerPurchaseReturns';
+
+// Affiliate Panel Pages
+import AffiliateRegistrationPage from './pages/AffiliateRegistrationPage';
+import AffiliateLoginPage from './pages/AffiliateLoginPage';
+import AffiliateDashboard from './pages/AffiliateDashboard';
+import AffiliateMyReferrals from './pages/AffiliateMyReferrals';
+import AffiliateCommissionHistory from './pages/AffiliateCommissionHistory';
+import AffiliatePaymentSettings from './pages/AffiliatePaymentSettings';
+import AffiliateEditProfile from './pages/AffiliateEditProfile';
+import AffiliateMarketingResources from './pages/AffiliateMarketingResources';
+import AffiliateLinksQR from './pages/AffiliateLinksQR';
+import AffiliateSalesAnalytics from './pages/AffiliateSalesAnalytics';
+import AffiliatePharmacyOnboarding from './pages/AffiliatePharmacyOnboarding';
+import AffiliateRenewalManagement from './pages/AffiliateRenewalManagement';
+import AffiliateNotificationSettings from './pages/AffiliateNotificationSettings';
+import AffiliateSupport from './pages/AffiliateSupport';
+import AffiliateTraining from './pages/AffiliateTraining';
+import AffiliateReferralDashboard from './pages/AffiliateReferralDashboard';
+import AffiliateReferralInvite from './pages/AffiliateReferralInvite';
+import AffiliateReferralList from './pages/AffiliateReferralList';
+import AffiliateReferralAnalytics from './pages/AffiliateReferralAnalytics';
+import AffiliateReferralMaterials from './pages/AffiliateReferralMaterials';
 
 import AnalyticsPage from './pages/AnalyticsPage';
 import AdminSettingsPage from './pages/AdminSettingsPage';
@@ -165,6 +189,7 @@ function App() {
           <Route path="/store-panel/suppliers" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerSuppliers /></ProtectedRoute>} />
           <Route path="/store-panel/suppliers/:supplierId/purchase-history" element={<ProtectedRoute requiredRole="store_manager"><SupplierPurchaseHistory /></ProtectedRoute>} />
           <Route path="/store-panel/purchases" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerPurchases /></ProtectedRoute>} />
+          <Route path="/store-panel/purchase-returns" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerPurchaseReturns /></ProtectedRoute>} />
           <Route path="/store-panel/expiry-alerts" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerExpiryAlerts /></ProtectedRoute>} />
           <Route path="/store-panel/doctors" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerDoctors /></ProtectedRoute>} />
           <Route path="/store-panel/staff" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerStaff /></ProtectedRoute>} />
@@ -175,6 +200,30 @@ function App() {
 
           {/* Staff Routes (for medicine location search) */}
           <Route path="/staff/medicine-search" element={<StaffMedicineSearch />} />
+
+          {/* Affiliate Panel Routes */}
+          <Route path="/affiliate-register" element={<AffiliateRegistrationPage />} />
+          <Route path="/affiliate-login" element={<AffiliateLoginPage />} />
+          <Route path="/affiliate-panel/dashboard" element={<AffiliateDashboard />} />
+          <Route path="/affiliate-panel/referrals" element={<AffiliateReferralDashboard />} />
+          <Route path="/affiliate-panel/commissions" element={<AffiliateCommissionHistory />} />
+          <Route path="/affiliate-panel/payment-settings" element={<AffiliatePaymentSettings />} />
+          <Route path="/affiliate-panel/profile" element={<AffiliateEditProfile />} />
+          <Route path="/affiliate-panel/marketing-resources" element={<AffiliateMarketingResources />} />
+          <Route path="/affiliate-panel/links-qr" element={<AffiliateLinksQR />} />
+          <Route path="/affiliate-panel/analytics" element={<AffiliateSalesAnalytics />} />
+          <Route path="/affiliate-panel/pharmacy-onboarding" element={<AffiliatePharmacyOnboarding />} />
+          <Route path="/affiliate-panel/renewals" element={<AffiliateRenewalManagement />} />
+          <Route path="/affiliate-panel/notifications" element={<AffiliateNotificationSettings />} />
+          <Route path="/affiliate-panel/support" element={<AffiliateSupport />} />
+          <Route path="/affiliate-panel/training" element={<AffiliateTraining />} />
+
+          {/* Affiliate Referral Management Routes */}
+          <Route path="/affiliate-panel/referral-management" element={<AffiliateReferralDashboard />} />
+          <Route path="/affiliate-panel/referrals/invite" element={<AffiliateReferralInvite />} />
+          <Route path="/affiliate-panel/referrals/list" element={<AffiliateReferralList />} />
+          <Route path="/affiliate-panel/referrals/analytics" element={<AffiliateReferralAnalytics />} />
+          <Route path="/affiliate-panel/referrals/materials" element={<AffiliateReferralMaterials />} />
         </Routes>
       </Router>
     </div>

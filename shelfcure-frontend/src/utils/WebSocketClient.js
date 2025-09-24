@@ -8,6 +8,8 @@ class WebSocketClient {
     this.maxReconnectAttempts = 5;
     this.reconnectDelay = 1000;
     this.listeners = new Map();
+    this.currentStoreId = null;
+    this.pendingStoreId = null;
   }
 
   connect(url = 'http://localhost:5000') {
@@ -44,6 +46,12 @@ class WebSocketClient {
       console.log('✅ WebSocket connected:', this.socket.id);
       this.isConnected = true;
       this.reconnectAttempts = 0;
+
+      // Join pending store if any
+      if (this.pendingStoreId) {
+        this.joinStore(this.pendingStoreId);
+        this.pendingStoreId = null;
+      }
 
       // Emit custom event for UI to handle
       if (this.listeners.has('connection-status')) {
@@ -115,8 +123,18 @@ class WebSocketClient {
   joinStore(storeId) {
     if (this.socket && this.isConnected) {
       this.socket.emit('join-store', storeId);
+      this.currentStoreId = storeId;
       console.log('🏪 Joined store room:', storeId);
+    } else {
+      console.warn('⚠️ Cannot join store - WebSocket not connected');
+      // Store the storeId to join later when connected
+      this.pendingStoreId = storeId;
     }
+  }
+
+  // Get current store ID
+  getCurrentStoreId() {
+    return this.currentStoreId;
   }
 
   // Leave a room

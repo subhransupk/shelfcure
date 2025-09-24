@@ -1,16 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  ArrowLeft, 
-  Package, 
-  MapPin, 
-  Info, 
-  Edit, 
+import {
+  ArrowLeft,
+  Package,
+  MapPin,
+  Info,
+  Edit,
   Plus,
   AlertCircle,
   CheckCircle,
-  Clock
+  Clock,
+  Search,
+  X
 } from 'lucide-react';
-import { getRackLayout, getStockStatusColor, formatLocationString } from '../../services/rackService';
+import {
+  getRackLayout,
+  getStockStatusColor,
+  formatLocationString,
+  getUnassignedMedicines,
+  assignMedicineToLocation
+} from '../../services/rackService';
 import { hasPermission, RACK_PERMISSIONS } from '../../utils/rolePermissions';
 import { getCurrentUser } from '../../services/authService';
 
@@ -21,6 +29,11 @@ const RackLayout = ({ rackId, onBack, onAssignMedicine, onEditLocation }) => {
   const [error, setError] = useState('');
   const [selectedPosition, setSelectedPosition] = useState(null);
   const [showPositionDetails, setShowPositionDetails] = useState(false);
+  const [showMedicineSelector, setShowMedicineSelector] = useState(false);
+  const [assignmentPosition, setAssignmentPosition] = useState(null);
+  const [unassignedMedicines, setUnassignedMedicines] = useState([]);
+  const [medicineSearchTerm, setMedicineSearchTerm] = useState('');
+  const [assigning, setAssigning] = useState(false);
 
   const user = getCurrentUser();
   const userRole = user?.role;
@@ -52,8 +65,52 @@ const RackLayout = ({ rackId, onBack, onAssignMedicine, onEditLocation }) => {
   };
 
   const handleAssignMedicine = (shelf, position) => {
-    if (onAssignMedicine) {
-      onAssignMedicine(rackId, shelf.shelfNumber, position.positionNumber);
+    setAssignmentPosition({ shelf, position });
+    setShowMedicineSelector(true);
+    fetchUnassignedMedicines();
+  };
+
+  const fetchUnassignedMedicines = async () => {
+    try {
+      const response = await getUnassignedMedicines();
+      setUnassignedMedicines(response.data || []);
+    } catch (err) {
+      console.error('Error fetching unassigned medicines:', err);
+      setError('Failed to fetch unassigned medicines');
+    }
+  };
+
+  const handleMedicineAssignment = async (medicine) => {
+    if (!assignmentPosition) return;
+
+    try {
+      setAssigning(true);
+      await assignMedicineToLocation({
+        medicineId: medicine._id,
+        rackId: rackId,
+        shelf: String(assignmentPosition.shelf.shelfNumber),
+        position: String(assignmentPosition.position.positionNumber),
+        stripQuantity: medicine.inventory?.stripQuantity || 0,
+        individualQuantity: medicine.inventory?.individualQuantity || 0,
+        priority: 'primary',
+        notes: 'Assigned via rack layout'
+      });
+
+      // Refresh layout
+      await fetchRackLayout();
+      setShowMedicineSelector(false);
+      setAssignmentPosition(null);
+      setShowPositionDetails(false);
+      setMedicineSearchTerm('');
+
+      // Show success message
+      const successMessage = `${medicine.name} assigned to position ${assignmentPosition.shelf.shelfNumber}-${assignmentPosition.position.positionNumber} successfully!`;
+      alert(successMessage);
+    } catch (err) {
+      console.error('Error assigning medicine:', err);
+      setError(err.message || 'Failed to assign medicine');
+    } finally {
+      setAssigning(false);
     }
   };
 
@@ -82,6 +139,98 @@ const RackLayout = ({ rackId, onBack, onAssignMedicine, onEditLocation }) => {
     }
     
     return 'bg-blue-100 border-blue-300 hover:bg-blue-200';
+  };
+
+  const MedicineSelectorModal = () => {
+    if (!showMedicineSelector || !assignmentPosition) return null;
+
+    const filteredMedicines = unassignedMedicines.filter(medicine =>
+      medicine.name.toLowerCase().includes(medicineSearchTerm.toLowerCase()) ||
+      medicine.genericName?.toLowerCase().includes(medicineSearchTerm.toLowerCase()) ||
+      medicine.manufacturer?.toLowerCase().includes(medicineSearchTerm.toLowerCase())
+    );
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden">
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 text-left">
+                Select Medicine for Position {formatLocationString(rackData?.rackNumber, assignmentPosition.shelf.shelfNumber, assignmentPosition.position.positionNumber)}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowMedicineSelector(false);
+                  setAssignmentPosition(null);
+                  setMedicineSearchTerm('');
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Search */}
+            <div className="relative mb-4">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+              <input
+                type="text"
+                placeholder="Search medicines..."
+                value={medicineSearchTerm}
+                onChange={(e) => setMedicineSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500 sm:text-sm"
+              />
+            </div>
+
+            {/* Medicine List */}
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {filteredMedicines.length === 0 ? (
+                <div className="text-center py-8">
+                  <Package className="mx-auto h-8 w-8 text-gray-400" />
+                  <p className="mt-2 text-sm text-gray-500">
+                    {medicineSearchTerm ? 'No medicines match your search' : 'No unassigned medicines available'}
+                  </p>
+                </div>
+              ) : (
+                filteredMedicines.map((medicine) => (
+                  <div
+                    key={medicine._id}
+                    onClick={() => !assigning && handleMedicineAssignment(medicine)}
+                    className={`p-3 border rounded-md cursor-pointer transition-colors ${
+                      assigning
+                        ? 'opacity-50 cursor-not-allowed'
+                        : 'border-gray-200 hover:border-green-300 hover:bg-green-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-sm font-medium text-gray-900 text-left">{medicine.name}</h4>
+                        <p className="text-xs text-gray-500 text-left">{medicine.manufacturer}</p>
+                        {medicine.genericName && (
+                          <p className="text-xs text-gray-400 text-left">{medicine.genericName}</p>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {medicine.inventory?.stripQuantity || 0}s / {medicine.inventory?.individualQuantity || 0}u
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {assigning && (
+              <div className="mt-4 text-center">
+                <div className="inline-flex items-center">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-600"></div>
+                  <span className="ml-2 text-sm text-gray-600">Assigning medicine...</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const PositionDetailsModal = () => {
@@ -306,6 +455,9 @@ const RackLayout = ({ rackId, onBack, onAssignMedicine, onEditLocation }) => {
 
       {/* Position Details Modal */}
       <PositionDetailsModal />
+
+      {/* Medicine Selector Modal */}
+      <MedicineSelectorModal />
     </div>
   );
 };

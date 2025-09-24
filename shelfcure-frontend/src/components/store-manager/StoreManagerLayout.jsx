@@ -48,6 +48,7 @@ const StoreManagerLayout = ({ children }) => {
     { name: 'Customers', href: '/store-panel/customers', icon: Users },
     { name: 'Suppliers', href: '/store-panel/suppliers', icon: Truck },
     { name: 'Purchases', href: '/store-panel/purchases', icon: DollarSign },
+    { name: 'Purchase Returns', href: '/store-panel/purchase-returns', icon: RotateCcw },
     { name: 'Expiry Alerts', href: '/store-panel/expiry-alerts', icon: AlertTriangle, badge: expiryAlertsCount },
     { name: 'Doctors', href: '/store-panel/doctors', icon: Stethoscope },
     { name: 'Staff', href: '/store-panel/staff', icon: UserCheck },

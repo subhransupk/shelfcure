@@ -16,9 +16,6 @@ import {
   Edit,
   Trash2,
   Power,
-  Gift,
-  Users,
-  ShoppingCart,
   Tag,
   FileText
 } from 'lucide-react';
@@ -59,8 +56,11 @@ const StoreManagerSettings = () => {
     // Discount Settings
     allowDiscounts: true,
     maxDiscountPercent: 50,
+    maxDiscountAmountPerBill: 0, // 0 means no limit
     requireManagerApproval: true,
     discountOnMRP: true,
+    autoApplyDiscounts: false,
+    autoDiscountRules: [],
 
     // Sales Settings
     allowNegativeStock: false,
@@ -76,11 +76,7 @@ const StoreManagerSettings = () => {
   // Discount Types Management
   const [discountTypes, setDiscountTypes] = useState([
     { id: 1, name: 'Percentage Discount', type: 'percentage', value: 10, maxValue: 50, isActive: true, description: 'Percentage off on total bill' },
-    { id: 2, name: 'Amount Discount', type: 'amount', value: 50, maxValue: 500, isActive: true, description: 'Fixed amount off' },
-    { id: 3, name: 'Festival Discount', type: 'festival', value: 15, maxValue: 30, isActive: false, description: 'Special festival offers' },
-    { id: 4, name: 'Bulk Discount', type: 'bulk', value: 5, maxValue: 20, isActive: true, description: 'Quantity-based discounts' },
-    { id: 5, name: 'Senior Citizen', type: 'customer', value: 10, maxValue: 15, isActive: true, description: 'Senior citizen discount' },
-    { id: 6, name: 'Student Discount', type: 'customer', value: 5, maxValue: 10, isActive: false, description: 'Student discount' }
+    { id: 2, name: 'Amount Discount', type: 'amount', value: 50, maxValue: 500, isActive: true, description: 'Fixed amount off' }
   ]);
 
   // Tax Types Management
@@ -96,8 +92,11 @@ const StoreManagerSettings = () => {
   // Modal states for editing
   const [showDiscountModal, setShowDiscountModal] = useState(false);
   const [showTaxModal, setShowTaxModal] = useState(false);
+  const [showDiscountRuleModal, setShowDiscountRuleModal] = useState(false);
   const [editingDiscount, setEditingDiscount] = useState(null);
   const [editingTax, setEditingTax] = useState(null);
+  const [editingDiscountRule, setEditingDiscountRule] = useState(null);
+  const [gstSaving, setGstSaving] = useState(false);
   const [discountForm, setDiscountForm] = useState({
     name: '',
     type: 'percentage',
@@ -112,6 +111,14 @@ const StoreManagerSettings = () => {
     rate: 0,
     description: '',
     category: 'standard',
+    isActive: true
+  });
+  const [discountRuleForm, setDiscountRuleForm] = useState({
+    name: '',
+    minBillAmount: 0,
+    discountType: 'percentage',
+    discountValue: 0,
+    maxDiscountAmount: 0,
     isActive: true
   });
 
@@ -251,6 +258,8 @@ const StoreManagerSettings = () => {
 
       if (response.ok) {
         console.log('Auto-saved discount types successfully');
+        // Refresh store info in case GST number was updated
+        fetchStoreInfo();
       }
     } catch (error) {
       console.error('Error auto-saving discount types:', error);
@@ -395,9 +404,181 @@ const StoreManagerSettings = () => {
 
       if (response.ok) {
         console.log('Auto-saved tax types successfully');
+        // Refresh store info in case GST number was updated
+        fetchStoreInfo();
       }
     } catch (error) {
       console.error('Error auto-saving tax types:', error);
+    }
+
+    setTimeout(() => setMessage(''), 3000);
+  };
+
+  // Discount Rule Handlers
+  const handleAddDiscountRule = () => {
+    setEditingDiscountRule(null);
+    setDiscountRuleForm({
+      name: '',
+      minBillAmount: 0,
+      discountType: 'percentage',
+      discountValue: 0,
+      maxDiscountAmount: 0,
+      isActive: true
+    });
+    setShowDiscountRuleModal(true);
+  };
+
+  const handleEditDiscountRule = (rule) => {
+    setEditingDiscountRule(rule);
+    setDiscountRuleForm({
+      name: rule.name,
+      minBillAmount: rule.minBillAmount,
+      discountType: rule.discountType,
+      discountValue: rule.discountValue,
+      maxDiscountAmount: rule.maxDiscountAmount || 0,
+      isActive: rule.isActive
+    });
+    setShowDiscountRuleModal(true);
+  };
+
+  const handleSaveDiscountRule = async () => {
+    if (!discountRuleForm.name || discountRuleForm.minBillAmount <= 0 || discountRuleForm.discountValue <= 0) {
+      setMessage('Please fill in all required fields with valid values!');
+      setTimeout(() => setMessage(''), 3000);
+      return;
+    }
+
+    let updatedRules;
+    if (editingDiscountRule) {
+      // Update existing rule
+      updatedRules = businessSettings.autoDiscountRules.map(rule =>
+        rule.id === editingDiscountRule.id
+          ? { ...rule, ...discountRuleForm }
+          : rule
+      );
+      setMessage('Discount rule updated successfully!');
+    } else {
+      // Add new rule
+      const newRule = {
+        id: Date.now(),
+        ...discountRuleForm
+      };
+      updatedRules = [...(businessSettings.autoDiscountRules || []), newRule];
+      setMessage('Discount rule added successfully!');
+    }
+
+    setBusinessSettings({
+      ...businessSettings,
+      autoDiscountRules: updatedRules
+    });
+
+    setShowDiscountRuleModal(false);
+
+    // Auto-save the business settings
+    try {
+      const settingsData = {
+        ...businessSettings,
+        autoDiscountRules: updatedRules,
+        discountTypes,
+        taxTypes
+      };
+
+      const response = await fetch('/api/store-manager/business-settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify(settingsData)
+      });
+
+      if (response.ok) {
+        console.log('Auto-saved discount rules successfully');
+        // Refresh store info in case GST number was updated
+        fetchStoreInfo();
+      }
+    } catch (error) {
+      console.error('Error auto-saving discount rules:', error);
+    }
+
+    setTimeout(() => setMessage(''), 3000);
+  };
+
+  const handleDeleteDiscountRule = async (ruleId) => {
+    const updatedRules = businessSettings.autoDiscountRules.filter(rule => rule.id !== ruleId);
+    setBusinessSettings({
+      ...businessSettings,
+      autoDiscountRules: updatedRules
+    });
+    setMessage('Discount rule deleted successfully!');
+
+    // Auto-save the business settings
+    try {
+      const settingsData = {
+        ...businessSettings,
+        autoDiscountRules: updatedRules,
+        discountTypes,
+        taxTypes
+      };
+
+      const response = await fetch('/api/store-manager/business-settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify(settingsData)
+      });
+
+      if (response.ok) {
+        console.log('Auto-saved discount rules successfully');
+        // Refresh store info in case GST number was updated
+        fetchStoreInfo();
+      }
+    } catch (error) {
+      console.error('Error auto-saving discount rules:', error);
+    }
+
+    setTimeout(() => setMessage(''), 3000);
+  };
+
+  const handleToggleDiscountRule = async (ruleId) => {
+    const updatedRules = businessSettings.autoDiscountRules.map(rule =>
+      rule.id === ruleId
+        ? { ...rule, isActive: !rule.isActive }
+        : rule
+    );
+    setBusinessSettings({
+      ...businessSettings,
+      autoDiscountRules: updatedRules
+    });
+    setMessage('Discount rule status updated successfully!');
+
+    // Auto-save the business settings
+    try {
+      const settingsData = {
+        ...businessSettings,
+        autoDiscountRules: updatedRules,
+        discountTypes,
+        taxTypes
+      };
+
+      const response = await fetch('/api/store-manager/business-settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify(settingsData)
+      });
+
+      if (response.ok) {
+        console.log('Auto-saved discount rules successfully');
+        // Refresh store info in case GST number was updated
+        fetchStoreInfo();
+      }
+    } catch (error) {
+      console.error('Error auto-saving discount rules:', error);
     }
 
     setTimeout(() => setMessage(''), 3000);
@@ -420,6 +601,8 @@ const StoreManagerSettings = () => {
 
       if (response.ok) {
         const data = await response.json();
+        console.log('Store info received:', data.data);
+        console.log('Store info business GST:', data.data.business?.gstNumber);
         setStoreInfo(data.data);
       }
     } catch (error) {
@@ -439,6 +622,8 @@ const StoreManagerSettings = () => {
         const data = await response.json();
         if (data.success) {
           const { discountTypes: fetchedDiscountTypes, taxTypes: fetchedTaxTypes, ...settings } = data.data;
+          console.log('Business settings received:', settings);
+          console.log('Business settings GST:', settings.gstNumber);
           setBusinessSettings(settings);
 
           if (fetchedDiscountTypes) {
@@ -513,6 +698,8 @@ const StoreManagerSettings = () => {
         setMessage('Business settings updated successfully!');
         // Refetch the settings to get the updated data from database
         await fetchBusinessSettings();
+        // Also refetch store info to show updated GST number
+        await fetchStoreInfo();
       } else {
         throw new Error('Failed to update settings');
       }
@@ -687,11 +874,11 @@ const StoreManagerSettings = () => {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1 text-left">GST Number</label>
-                          <p className="text-sm text-gray-900 p-2 bg-gray-50 rounded">{storeInfo.gstNumber || 'Not set'}</p>
+                          <p className="text-sm text-gray-900 p-2 bg-gray-50 rounded">{storeInfo.business?.gstNumber || 'Not set'}</p>
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1 text-left">License Number</label>
-                          <p className="text-sm text-gray-900 p-2 bg-gray-50 rounded">{storeInfo.licenseNumber || 'Not set'}</p>
+                          <p className="text-sm text-gray-900 p-2 bg-gray-50 rounded">{storeInfo.business?.licenseNumber || 'Not set'}</p>
                         </div>
                       </div>
                     </div>
@@ -730,12 +917,55 @@ const StoreManagerSettings = () => {
                         <h5 className="text-sm font-medium text-gray-900 mb-3 text-left">Basic Tax Settings</h5>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1 text-left">GST Number</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-1 text-left">
+                              GST Number
+                              {gstSaving && <span className="ml-2 text-xs text-blue-600">Saving...</span>}
+                            </label>
                             <input
                               type="text"
-                              value={businessSettings.gstNumber}
-                              onChange={(e) => setBusinessSettings({...businessSettings, gstNumber: e.target.value})}
-                              placeholder="Enter GST Number"
+                              value={businessSettings.gstNumber || ''}
+                              onChange={(e) => {
+                                const newGstNumber = e.target.value;
+                                setBusinessSettings({...businessSettings, gstNumber: newGstNumber});
+
+                                // Auto-save GST number after a short delay
+                                clearTimeout(window.gstSaveTimeout);
+                                setGstSaving(true);
+                                window.gstSaveTimeout = setTimeout(async () => {
+                                  try {
+                                    const settingsData = {
+                                      ...businessSettings,
+                                      gstNumber: newGstNumber,
+                                      discountTypes,
+                                      taxTypes
+                                    };
+
+                                    const response = await fetch('/api/store-manager/business-settings', {
+                                      method: 'POST',
+                                      headers: {
+                                        'Content-Type': 'application/json',
+                                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                                      },
+                                      body: JSON.stringify(settingsData)
+                                    });
+
+                                    if (response.ok) {
+                                      console.log('GST number auto-saved successfully');
+                                      // Refresh store info to show updated GST number
+                                      await fetchStoreInfo();
+                                      setMessage('GST number updated successfully!');
+                                      setTimeout(() => setMessage(''), 2000);
+                                    }
+                                  } catch (error) {
+                                    console.error('Error auto-saving GST number:', error);
+                                    setMessage('Failed to save GST number');
+                                    setTimeout(() => setMessage(''), 3000);
+                                  } finally {
+                                    setGstSaving(false);
+                                  }
+                                }, 1000); // Save after 1 second of no typing
+                              }}
+                              placeholder="Enter GST Number (e.g., 27ABCDE1234F1Z5)"
                               className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
                             />
                           </div>
@@ -770,9 +1000,9 @@ const StoreManagerSettings = () => {
                                   <div className="flex items-center space-x-2">
                                     {tax.category === 'standard' && <FileText className="h-4 w-4 text-blue-500" />}
                                     {tax.category === 'essential' && <Tag className="h-4 w-4 text-green-500" />}
-                                    {tax.category === 'lifesaving' && <Users className="h-4 w-4 text-red-500" />}
+                                    {tax.category === 'lifesaving' && <Shield className="h-4 w-4 text-red-500" />}
                                     {tax.category === 'split' && <Calculator className="h-4 w-4 text-purple-500" />}
-                                    {tax.category === 'interstate' && <ShoppingCart className="h-4 w-4 text-orange-500" />}
+                                    {tax.category === 'interstate' && <Store className="h-4 w-4 text-orange-500" />}
                                     <h5 className="text-sm font-medium text-gray-900">{tax.name}</h5>
                                   </div>
                                   <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
@@ -846,9 +1076,6 @@ const StoreManagerSettings = () => {
                                   <div className="flex items-center space-x-2">
                                     {discount.type === 'percentage' && <Percent className="h-4 w-4 text-blue-500" />}
                                     {discount.type === 'amount' && <DollarSign className="h-4 w-4 text-green-500" />}
-                                    {discount.type === 'festival' && <Gift className="h-4 w-4 text-purple-500" />}
-                                    {discount.type === 'bulk' && <ShoppingCart className="h-4 w-4 text-orange-500" />}
-                                    {discount.type === 'customer' && <Users className="h-4 w-4 text-indigo-500" />}
                                     <h5 className="text-sm font-medium text-gray-900">{discount.name}</h5>
                                   </div>
                                   <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
@@ -896,6 +1123,154 @@ const StoreManagerSettings = () => {
                           </div>
                         ))}
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Advanced Discount Settings */}
+                  <div className="mb-6">
+                    <div className="flex items-center mb-4">
+                      <Settings className="h-5 w-5 text-green-600 mr-2" />
+                      <h4 className="text-md font-medium text-gray-900">Advanced Discount Settings</h4>
+                    </div>
+                    <div className="bg-gray-50 p-4 rounded-lg space-y-4">
+                      {/* Basic Discount Settings */}
+                      <div className="bg-white p-4 rounded-lg border border-gray-200">
+                        <h5 className="text-sm font-medium text-gray-900 mb-3 text-left">Basic Discount Configuration</h5>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1 text-left">Max Discount Percentage</label>
+                            <input
+                              type="number"
+                              value={businessSettings.maxDiscountPercent || ''}
+                              onChange={(e) => setBusinessSettings({...businessSettings, maxDiscountPercent: parseFloat(e.target.value) || 0})}
+                              placeholder="Enter max discount %"
+                              min="0"
+                              max="100"
+                              className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1 text-left">Max Discount Amount Per Bill (₹)</label>
+                            <input
+                              type="number"
+                              value={businessSettings.maxDiscountAmountPerBill || ''}
+                              onChange={(e) => setBusinessSettings({...businessSettings, maxDiscountAmountPerBill: parseFloat(e.target.value) || 0})}
+                              placeholder="0 = No limit"
+                              min="0"
+                              className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h6 className="text-sm font-medium text-gray-900 text-left">Require Manager Approval</h6>
+                              <p className="text-xs text-gray-500 text-left">Require approval for discounts</p>
+                            </div>
+                            <button
+                              onClick={() => setBusinessSettings({...businessSettings, requireManagerApproval: !businessSettings.requireManagerApproval})}
+                              className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
+                                businessSettings.requireManagerApproval ? 'bg-green-600' : 'bg-gray-200'
+                              }`}
+                            >
+                              <span
+                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                  businessSettings.requireManagerApproval ? 'translate-x-5' : 'translate-x-0'
+                                }`}
+                              />
+                            </button>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h6 className="text-sm font-medium text-gray-900 text-left">Auto-Apply Discounts</h6>
+                              <p className="text-xs text-gray-500 text-left">Automatically apply eligible discounts</p>
+                            </div>
+                            <button
+                              onClick={() => setBusinessSettings({...businessSettings, autoApplyDiscounts: !businessSettings.autoApplyDiscounts})}
+                              className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
+                                businessSettings.autoApplyDiscounts ? 'bg-green-600' : 'bg-gray-200'
+                              }`}
+                            >
+                              <span
+                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                  businessSettings.autoApplyDiscounts ? 'translate-x-5' : 'translate-x-0'
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Auto Discount Rules */}
+                      {businessSettings.autoApplyDiscounts && (
+                        <div className="bg-white p-4 rounded-lg border border-gray-200">
+                          <div className="flex items-center justify-between mb-3">
+                            <h5 className="text-sm font-medium text-gray-900 text-left">Auto Discount Rules</h5>
+                            <button
+                              onClick={handleAddDiscountRule}
+                              className="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+                            >
+                              <Plus className="h-3 w-3 mr-1" />
+                              Add Rule
+                            </button>
+                          </div>
+                          <p className="text-xs text-gray-500 mb-3 text-left">
+                            Rules are applied in order. The highest applicable discount will be selected automatically.
+                          </p>
+                          {businessSettings.autoDiscountRules && businessSettings.autoDiscountRules.length > 0 ? (
+                            <div className="space-y-2">
+                              {businessSettings.autoDiscountRules.map((rule) => (
+                                <div key={rule.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                  <div className="flex-1">
+                                    <div className="flex items-center space-x-2">
+                                      <h6 className="text-sm font-medium text-gray-900">{rule.name}</h6>
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                        rule.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                                      }`}>
+                                        {rule.isActive ? 'Active' : 'Inactive'}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                      Bill ≥ ₹{rule.minBillAmount} → {rule.discountType === 'percentage' ? `${rule.discountValue}%` : `₹${rule.discountValue}`} off
+                                      {rule.maxDiscountAmount > 0 && ` (max ₹${rule.maxDiscountAmount})`}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center space-x-1">
+                                    <button
+                                      onClick={() => handleToggleDiscountRule(rule.id)}
+                                      className={`p-1 rounded-md ${
+                                        rule.isActive ? 'text-green-600 hover:bg-green-50' : 'text-gray-400 hover:bg-gray-50'
+                                      }`}
+                                      title={rule.isActive ? 'Deactivate' : 'Activate'}
+                                    >
+                                      <Power className="h-3 w-3" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleEditDiscountRule(rule)}
+                                      className="p-1 text-blue-600 hover:bg-blue-50 rounded-md"
+                                      title="Edit"
+                                    >
+                                      <Edit className="h-3 w-3" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteDiscountRule(rule.id)}
+                                      className="p-1 text-red-600 hover:bg-red-50 rounded-md"
+                                      title="Delete"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-center py-4">
+                              <p className="text-sm text-gray-500">No auto discount rules configured</p>
+                              <p className="text-xs text-gray-400 mt-1">Add rules to automatically apply discounts based on bill amount</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1129,9 +1504,6 @@ const StoreManagerSettings = () => {
                   >
                     <option value="percentage">Percentage</option>
                     <option value="amount">Amount</option>
-                    <option value="festival">Festival</option>
-                    <option value="bulk">Bulk</option>
-                    <option value="customer">Customer</option>
                   </select>
                 </div>
                 <div>
@@ -1286,6 +1658,102 @@ const StoreManagerSettings = () => {
                   className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md"
                 >
                   {editingTax ? 'Update' : 'Add'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Discount Rule Modal */}
+      {showDiscountRuleModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">
+                {editingDiscountRule ? 'Edit Discount Rule' : 'Add New Discount Rule'}
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Rule Name</label>
+                  <input
+                    type="text"
+                    value={discountRuleForm.name}
+                    onChange={(e) => setDiscountRuleForm({...discountRuleForm, name: e.target.value})}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
+                    placeholder="e.g., Bulk Purchase Discount"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Minimum Bill Amount (₹)</label>
+                  <input
+                    type="number"
+                    value={discountRuleForm.minBillAmount || ''}
+                    onChange={(e) => setDiscountRuleForm({...discountRuleForm, minBillAmount: parseFloat(e.target.value) || 0})}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
+                    placeholder="Enter minimum bill amount"
+                    min="0"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Discount Type</label>
+                  <select
+                    value={discountRuleForm.discountType}
+                    onChange={(e) => setDiscountRuleForm({...discountRuleForm, discountType: e.target.value})}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
+                  >
+                    <option value="percentage">Percentage</option>
+                    <option value="amount">Fixed Amount</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Discount Value {discountRuleForm.discountType === 'percentage' ? '(%)' : '(₹)'}
+                  </label>
+                  <input
+                    type="number"
+                    value={discountRuleForm.discountValue || ''}
+                    onChange={(e) => setDiscountRuleForm({...discountRuleForm, discountValue: parseFloat(e.target.value) || 0})}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
+                    placeholder={discountRuleForm.discountType === 'percentage' ? 'Enter percentage' : 'Enter amount'}
+                    min="0"
+                    max={discountRuleForm.discountType === 'percentage' ? '100' : undefined}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Maximum Discount Amount (₹)</label>
+                  <input
+                    type="number"
+                    value={discountRuleForm.maxDiscountAmount || ''}
+                    onChange={(e) => setDiscountRuleForm({...discountRuleForm, maxDiscountAmount: parseFloat(e.target.value) || 0})}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
+                    placeholder="0 = No limit"
+                    min="0"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Leave 0 for no maximum limit</p>
+                </div>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={discountRuleForm.isActive}
+                    onChange={(e) => setDiscountRuleForm({...discountRuleForm, isActive: e.target.checked})}
+                    className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                  />
+                  <label className="ml-2 block text-sm text-gray-900">Active</label>
+                </div>
+              </div>
+              <div className="flex justify-end space-x-3 mt-6">
+                <button
+                  onClick={() => setShowDiscountRuleModal(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveDiscountRule}
+                  className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md"
+                >
+                  {editingDiscountRule ? 'Update' : 'Add'}
                 </button>
               </div>
             </div>

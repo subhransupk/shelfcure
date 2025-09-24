@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import StoreManagerLayout from '../components/store-manager/StoreManagerLayout';
 import AddMedicineModal from '../components/store-manager/AddMedicineModal';
+import { createPhoneInputHandler } from '../utils/inputValidation';
+import API_BASE_URL from '../config/api';
 
 const StoreManagerSales = () => {
   const navigate = useNavigate();
@@ -359,6 +361,12 @@ const StoreManagerSales = () => {
     setSelectedCustomer(customer);
     setCustomerSearchTerm(`${customer.name} - ${customer.phone}`);
     setShowCustomerDropdown(false);
+
+    // If credit payment is selected but new customer doesn't have credit facility, reset to cash
+    if (paymentMethod === 'credit' && (!customer.creditLimit || customer.creditLimit <= 0)) {
+      setPaymentMethod('cash');
+      alert('Payment method changed to Cash as the selected customer does not have credit facility.');
+    }
   };
 
   // Handle doctor selection
@@ -375,6 +383,10 @@ const StoreManagerSales = () => {
 
     if (!value.trim()) {
       setSelectedCustomer(null);
+      // If credit payment is selected but customer is cleared, reset to cash
+      if (paymentMethod === 'credit') {
+        setPaymentMethod('cash');
+      }
     }
 
     searchCustomers(value);
@@ -425,6 +437,54 @@ const StoreManagerSales = () => {
     } catch (error) {
       console.error('Error viewing invoice:', error);
       alert('Error viewing invoice');
+    }
+  };
+
+  // Prescription handling function
+  const viewPrescription = async (saleId) => {
+    try {
+      const token = localStorage.getItem('token');
+
+      // Use the correct API base URL
+      const prescriptionUrl = `${API_BASE_URL}/api/store-manager/sales/${saleId}/prescription`;
+
+      console.log('Attempting to fetch prescription from:', prescriptionUrl);
+
+      // Fetch the prescription file with authentication
+      const response = await fetch(prescriptionUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      console.log('Response status:', response.status);
+      console.log('Response headers:', response.headers);
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+
+        console.log('Prescription blob created successfully');
+
+        // Open the blob URL in a new tab
+        const newWindow = window.open(blobUrl, '_blank');
+        if (!newWindow) {
+          alert('Please allow popups to view the prescription');
+        }
+
+        // Clean up the blob URL after a delay
+        setTimeout(() => {
+          URL.revokeObjectURL(blobUrl);
+        }, 10000);
+      } else {
+        const errorData = await response.json();
+        console.error('Error response:', errorData);
+        alert(errorData.message || 'Failed to load prescription');
+      }
+    } catch (error) {
+      console.error('Error viewing prescription:', error);
+      alert('Error viewing prescription: ' + error.message);
     }
   };
 
@@ -1350,7 +1410,9 @@ Get well soon! 🌟`;
                           <input
                             type="tel"
                             value={newCustomer.phone}
-                            onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
+                            onChange={createPhoneInputHandler(
+                              (value) => setNewCustomer({ ...newCustomer, phone: value })
+                            )}
                             placeholder="Phone (10 digits)"
                             className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
                           />
@@ -2081,14 +2143,33 @@ Get well soon! 🌟`;
                       <label className="block text-sm font-medium text-gray-700 mb-1 text-left">Payment Method</label>
                       <select
                         value={paymentMethod}
-                        onChange={(e) => setPaymentMethod(e.target.value)}
+                        onChange={(e) => {
+                          // Check if credit is selected but customer doesn't have credit facility
+                          if (e.target.value === 'credit' && (!selectedCustomer || !selectedCustomer.creditLimit || selectedCustomer.creditLimit <= 0)) {
+                            alert('Credit payment is not available. Please select a customer with credit facility enabled.');
+                            return;
+                          }
+                          setPaymentMethod(e.target.value);
+                        }}
                         className="block w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
                       >
                         <option value="cash">Cash</option>
                         <option value="card">Card</option>
                         <option value="upi">UPI</option>
-                        <option value="credit">Credit</option>
+                        <option
+                          value="credit"
+                          disabled={!selectedCustomer || !selectedCustomer.creditLimit || selectedCustomer.creditLimit <= 0}
+                        >
+                          Credit {(!selectedCustomer || !selectedCustomer.creditLimit || selectedCustomer.creditLimit <= 0) ? '(Not Available)' : ''}
+                        </option>
                       </select>
+                      {paymentMethod === 'credit' && selectedCustomer && selectedCustomer.creditLimit > 0 && (
+                        <div className="mt-2 p-2 bg-blue-50 rounded-md">
+                          <p className="text-xs text-blue-700">
+                            Available Credit: ₹{((selectedCustomer.creditLimit || 0) - (selectedCustomer.creditBalance || 0)).toLocaleString()}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -2282,6 +2363,9 @@ Get well soon! 🌟`;
                             Payment Method
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Prescription
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Actions
                           </th>
                         </tr>
@@ -2316,6 +2400,29 @@ Get well soon! 🌟`;
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 capitalize">
                               {sale.paymentMethod || 'Cash'}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {sale.prescription && sale.prescription.attachment ? (
+                                <button
+                                  onClick={() => viewPrescription(sale._id)}
+                                  className="inline-flex items-center px-2 py-1 border border-transparent text-xs font-medium rounded text-green-700 bg-green-100 hover:bg-green-200 transition-colors"
+                                  title="View Prescription"
+                                >
+                                  <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                  View
+                                </button>
+                              ) : sale.prescription && sale.prescription.doctor ? (
+                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                  <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                  </svg>
+                                  Dr. {sale.prescription.doctor.name}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 text-xs">No prescription</span>
+                              )}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                               <div className="flex space-x-2">

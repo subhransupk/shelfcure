@@ -5,58 +5,42 @@ const Invoice = require('../models/Invoice');
 
 class CommissionService {
   /**
-   * Calculate and create commission for a new store subscription
+   * Calculate and create multi-level commissions for a new store subscription
    * @param {Object} subscriptionData - Store subscription data
    * @param {String} affiliateCode - Affiliate referral code
    */
   static async createInitialCommission(subscriptionData, affiliateCode) {
     try {
-      // Find the affiliate
-      const affiliate = await Affiliate.findOne({ affiliateCode });
-      if (!affiliate || affiliate.status !== 'active') {
-        throw new Error('Invalid or inactive affiliate');
-      }
-
-      // Find the store
-      const store = await Store.findById(subscriptionData.storeId);
-      if (!store) {
-        throw new Error('Store not found');
-      }
-
-      // Calculate commission amount
-      const baseAmount = subscriptionData.amount;
-      const commissionRate = affiliate.commission.rate;
-      const commissionAmount = affiliate.commission.type === 'percentage' 
-        ? (baseAmount * commissionRate) / 100
-        : commissionRate;
-
-      // Create commission record
-      const commission = await AffiliateCommission.create({
-        affiliate: affiliate._id,
-        store: store._id,
-        type: 'initial',
-        period: {
-          month: new Date().getMonth() + 1,
-          year: new Date().getFullYear()
-        },
-        baseAmount,
-        commissionRate,
-        commissionAmount,
-        status: 'pending',
-        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
+      // Prepare sale data for multi-level commission creation
+      const saleData = {
+        affiliateCode,
+        storeId: subscriptionData.storeId,
+        invoiceId: subscriptionData.invoiceId,
+        amount: subscriptionData.amount,
         subscription: {
           planName: subscriptionData.planName,
           planType: subscriptionData.planType,
           subscriptionStartDate: subscriptionData.startDate,
-          subscriptionEndDate: subscriptionData.endDate
-        },
-        customerAcquisitionDate: new Date()
-      });
+          subscriptionEndDate: subscriptionData.endDate,
+          isRenewal: false
+        }
+      };
 
-      // Update affiliate stats
-      await this.updateAffiliateStats(affiliate._id);
+      // Create multi-level commissions using the new system
+      const commissions = await AffiliateCommission.createMultiLevelCommissions(saleData);
 
-      return commission;
+      // Check if this is the affiliate's first sale and handle referral commissions
+      const firstSaleCommission = await this.handleFirstSaleCommission(affiliateCode, saleData);
+      if (firstSaleCommission) {
+        commissions.push(firstSaleCommission);
+      }
+
+      // Update stats for all affected affiliates
+      for (const commission of commissions) {
+        await this.updateAffiliateStats(commission.affiliate);
+      }
+
+      return commissions;
     } catch (error) {
       console.error('Error creating initial commission:', error);
       throw error;
@@ -64,21 +48,17 @@ class CommissionService {
   }
 
   /**
-   * Create recurring commission for existing subscription
+   * Create multi-level recurring commissions for existing subscription
    * @param {String} storeId - Store ID
    * @param {Object} invoiceData - Invoice data
+   * @param {String} affiliateCode - Affiliate code for the store
    */
-  static async createRecurringCommission(storeId, invoiceData) {
+  static async createRecurringCommission(storeId, invoiceData, affiliateCode) {
     try {
-      // Find store and its affiliate
-      const store = await Store.findById(storeId).populate('affiliate.affiliateId');
-      if (!store || !store.affiliate || !store.affiliate.affiliateId) {
-        return null; // No affiliate associated
-      }
-
-      const affiliate = store.affiliate.affiliateId;
-      if (affiliate.status !== 'active') {
-        return null; // Affiliate not active
+      // Find the affiliate
+      const affiliate = await Affiliate.findOne({ affiliateCode, status: 'active' });
+      if (!affiliate) {
+        return null; // No active affiliate found
       }
 
       // Check if recurring commission is enabled and within limit
@@ -89,7 +69,7 @@ class CommissionService {
       // Check how many months of recurring commission have been paid
       const existingCommissions = await AffiliateCommission.countDocuments({
         affiliate: affiliate._id,
-        store: store._id,
+        store: storeId,
         type: 'recurring'
       });
 
@@ -97,39 +77,28 @@ class CommissionService {
         return null; // Reached recurring commission limit
       }
 
-      // Calculate commission
-      const baseAmount = invoiceData.totalAmount;
-      const commissionRate = affiliate.commission.rate;
-      const commissionAmount = affiliate.commission.type === 'percentage' 
-        ? (baseAmount * commissionRate) / 100
-        : commissionRate;
-
-      // Create recurring commission
-      const commission = await AffiliateCommission.create({
-        affiliate: affiliate._id,
-        store: store._id,
-        invoice: invoiceData.invoiceId,
-        type: 'recurring',
-        period: {
-          month: new Date().getMonth() + 1,
-          year: new Date().getFullYear()
-        },
-        baseAmount,
-        commissionRate,
-        commissionAmount,
-        status: 'pending',
-        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      // Prepare sale data for multi-level commission creation
+      const saleData = {
+        affiliateCode,
+        storeId,
+        invoiceId: invoiceData.invoiceId,
+        amount: invoiceData.totalAmount,
         subscription: {
           planName: invoiceData.planName,
           planType: invoiceData.planType,
           isRenewal: true
         }
-      });
+      };
 
-      // Update affiliate stats
-      await this.updateAffiliateStats(affiliate._id);
+      // Create multi-level commissions (recurring for seller, one-time for referrer)
+      const commissions = await AffiliateCommission.createMultiLevelCommissions(saleData);
 
-      return commission;
+      // Update stats for all affected affiliates
+      for (const commission of commissions) {
+        await this.updateAffiliateStats(commission.affiliate);
+      }
+
+      return commissions;
     } catch (error) {
       console.error('Error creating recurring commission:', error);
       throw error;
@@ -137,7 +106,77 @@ class CommissionService {
   }
 
   /**
-   * Update affiliate statistics
+   * Handle affiliate referral commission when a referred affiliate makes their first sale
+   * @param {String} newAffiliateId - ID of the newly referred affiliate who made a sale
+   * @param {Object} firstSaleData - Data of their first sale
+   */
+  static async handleAffiliateReferralCommission(newAffiliateId, firstSaleData) {
+    try {
+      const newAffiliate = await Affiliate.findById(newAffiliateId);
+      if (!newAffiliate || !newAffiliate.referredBy) {
+        return null; // No referrer to pay commission to
+      }
+
+      const referrer = await Affiliate.findById(newAffiliate.referredBy);
+      if (!referrer || referrer.status !== 'active' ||
+          !referrer.commission.referralCommission.enabled) {
+        return null; // Referrer not eligible for commission
+      }
+
+      // Create affiliate referral commission
+      const commission = await AffiliateCommission.createAffiliateReferralCommission(
+        referrer,
+        newAffiliate,
+        firstSaleData
+      );
+
+      if (commission) {
+        // Update stats for the referrer
+        await this.updateAffiliateStats(referrer._id);
+
+        // Update affiliate referral stats
+        referrer.stats.totalAffiliateReferrals += 1;
+        referrer.stats.successfulAffiliateReferrals += 1;
+        await referrer.save();
+      }
+
+      return commission;
+    } catch (error) {
+      console.error('Error handling affiliate referral commission:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if this is an affiliate's first sale and handle referral commissions
+   * @param {String} affiliateCode - Affiliate code who made the sale
+   * @param {Object} saleData - Sale data
+   */
+  static async handleFirstSaleCommission(affiliateCode, saleData) {
+    try {
+      const affiliate = await Affiliate.findOne({ affiliateCode });
+      if (!affiliate) return null;
+
+      // Check if this is their first sale
+      const existingCommissions = await AffiliateCommission.countDocuments({
+        affiliate: affiliate._id,
+        type: { $in: ['initial', 'recurring'] }
+      });
+
+      // If this is their first sale and they were referred by someone
+      if (existingCommissions === 1 && affiliate.referredBy) { // 1 because we just created the initial commission
+        return await this.handleAffiliateReferralCommission(affiliate._id, saleData);
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error handling first sale commission:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update affiliate statistics with multi-level commission support
    * @param {String} affiliateId - Affiliate ID
    */
   static async updateAffiliateStats(affiliateId) {
@@ -145,13 +184,27 @@ class CommissionService {
       const affiliate = await Affiliate.findById(affiliateId);
       if (!affiliate) return;
 
-      // Get commission statistics
+      // Get commission statistics with breakdown by type
       const commissionStats = await AffiliateCommission.aggregate([
         { $match: { affiliate: affiliate._id } },
         {
           $group: {
             _id: null,
             totalEarnings: { $sum: '$commissionAmount' },
+            recurringEarnings: {
+              $sum: {
+                $cond: [{ $eq: ['$type', 'recurring'] }, '$commissionAmount', 0]
+              }
+            },
+            oneTimeEarnings: {
+              $sum: {
+                $cond: [
+                  { $in: ['$type', ['initial', 'referral_onetime', 'bonus']] },
+                  '$commissionAmount',
+                  0
+                ]
+              }
+            },
             pendingEarnings: {
               $sum: {
                 $cond: [{ $eq: ['$status', 'pending'] }, '$commissionAmount', 0]
@@ -166,7 +219,7 @@ class CommissionService {
         }
       ]);
 
-      // Get referral statistics
+      // Get store referral statistics
       const totalReferrals = await Store.countDocuments({
         'affiliate.affiliateId': affiliateId
       });
@@ -176,13 +229,27 @@ class CommissionService {
         status: 'active'
       });
 
+      // Get affiliate referral statistics
+      const totalAffiliateReferrals = await Affiliate.countDocuments({
+        referredBy: affiliateId
+      });
+
+      const successfulAffiliateReferrals = await Affiliate.countDocuments({
+        referredBy: affiliateId,
+        status: 'active'
+      });
+
       // Update affiliate stats
       const stats = commissionStats[0] || {};
       affiliate.stats = {
         ...affiliate.stats,
         totalReferrals,
         successfulReferrals,
+        totalAffiliateReferrals,
+        successfulAffiliateReferrals,
         totalEarnings: stats.totalEarnings || 0,
+        recurringEarnings: stats.recurringEarnings || 0,
+        oneTimeEarnings: stats.oneTimeEarnings || 0,
         pendingEarnings: stats.pendingEarnings || 0,
         paidEarnings: stats.paidEarnings || 0,
         conversionRate: totalReferrals > 0 ? Math.round((successfulReferrals / totalReferrals) * 100) : 0,

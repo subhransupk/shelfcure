@@ -91,9 +91,9 @@ const LoginHeroSection = () => {
           <div className="relative">
             {/* Main Login Visual */}
             <div className="relative">
-              <img 
-                src="/images/web-images/hero8.png" 
-                alt="ShelfCure Login" 
+              <img
+                src="/images/web-images/hero2.png"
+                alt="ShelfCure Login"
                 className="w-full h-auto rounded-3xl shadow-2xl"
               />
               

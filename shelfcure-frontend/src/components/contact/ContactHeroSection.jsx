@@ -98,9 +98,9 @@ const ContactHeroSection = () => {
           <div className="relative">
             {/* Main Contact Visual */}
             <div className="relative">
-              <img 
-                src="/images/web-images/hero7.png" 
-                alt="Contact ShelfCure" 
+              <img
+                src="/images/web-images/hero3.png"
+                alt="Contact ShelfCure"
                 className="w-full h-auto rounded-3xl shadow-2xl"
               />
               

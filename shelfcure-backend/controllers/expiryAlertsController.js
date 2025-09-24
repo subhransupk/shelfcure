@@ -131,6 +131,13 @@ const getExpiryAlerts = async (req, res) => {
       };
     });
 
+    // Add cache-busting headers
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+
     res.json({
       success: true,
       data: processedMedicines,
@@ -166,8 +173,7 @@ const getExpiryAlertsSummary = async (req, res) => {
       expiredCount,
       criticalCount,
       warningCount,
-      upcomingCount,
-      totalWithExpiry
+      upcomingCount
     ] = await Promise.all([
       Medicine.countDocuments({
         store: store._id,
@@ -188,11 +194,6 @@ const getExpiryAlertsSummary = async (req, res) => {
         store: store._id,
         isActive: true,
         expiryDate: { $gt: warningDate, $lte: upcomingDate }
-      }),
-      Medicine.countDocuments({
-        store: store._id,
-        isActive: true,
-        expiryDate: { $exists: true, $ne: null }
       })
     ]);
 
@@ -233,6 +234,16 @@ const getExpiryAlertsSummary = async (req, res) => {
     const criticalValue = calculateValue(criticalMedicines);
     const warningValue = calculateValue(warningMedicines);
 
+    // Calculate the actual total count of medicines in alert categories
+    const totalAlertCount = expiredCount + criticalCount + warningCount + upcomingCount;
+
+    // Add cache-busting headers
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+
     res.json({
       success: true,
       data: {
@@ -241,7 +252,7 @@ const getExpiryAlertsSummary = async (req, res) => {
           critical: { count: criticalCount, value: criticalValue },
           warning: { count: warningCount, value: warningValue },
           upcoming: { count: upcomingCount, value: 0 },
-          total: { count: totalWithExpiry, value: expiredValue + criticalValue + warningValue }
+          total: { count: totalAlertCount, value: expiredValue + criticalValue + warningValue }
         },
         urgencyLevels: {
           expired: { label: 'Expired', color: 'red', days: 'Past due' },

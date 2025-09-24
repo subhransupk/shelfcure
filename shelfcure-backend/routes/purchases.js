@@ -10,8 +10,14 @@ const {
   createPurchase,
   updatePurchase,
   deletePurchase,
-  getPurchaseAnalytics
+  getPurchaseAnalytics,
+  getDeliveryTracking
 } = require('../controllers/purchaseController');
+
+const {
+  getReturnsForPurchase,
+  getAvailableItemsForReturn
+} = require('../controllers/purchaseReturnController');
 
 const { protect, authorize } = require('../middleware/auth');
 const { storeManagerOnly, checkFeatureAccess, logStoreManagerActivity } = require('../middleware/storeManagerAuth');
@@ -24,8 +30,9 @@ router.use(storeManagerOnly);
 // Validation rules for purchase creation/update
 const purchaseValidation = [
   body('supplier')
+    .optional()
     .isMongoId()
-    .withMessage('Valid supplier ID is required'),
+    .withMessage('Valid supplier ID is required when provided'),
   body('purchaseOrderNumber')
     .trim()
     .isLength({ min: 1, max: 50 })
@@ -84,6 +91,15 @@ router.get('/reorder-report',
   checkFeatureAccess('purchases'),
   logStoreManagerActivity('generate_reorder_report'),
   generateReorderReport
+);
+
+// @route   GET /api/store-manager/purchases/deliveries
+// @desc    Get delivery tracking information
+// @access  Private
+router.get('/deliveries',
+  checkFeatureAccess('purchases'),
+  logStoreManagerActivity('view_delivery_tracking'),
+  getDeliveryTracking
 );
 
 // @route   POST /api/store-manager/purchases/send-reorder-whatsapp
@@ -227,10 +243,28 @@ router.put('/:id',
 // @route   DELETE /api/store-manager/purchases/:id
 // @desc    Delete purchase
 // @access  Private
-router.delete('/:id', 
+router.delete('/:id',
   checkFeatureAccess('purchases'),
   logStoreManagerActivity('delete_purchase'),
   deletePurchase
+);
+
+// @route   GET /api/store-manager/purchases/:purchaseId/returns
+// @desc    Get all returns for a specific purchase
+// @access  Private
+router.get('/:purchaseId/returns',
+  checkFeatureAccess('purchases'),
+  logStoreManagerActivity('view_purchase_returns'),
+  getReturnsForPurchase
+);
+
+// @route   GET /api/store-manager/purchases/:purchaseId/available-for-return
+// @desc    Get available items for return from a specific purchase
+// @access  Private
+router.get('/:purchaseId/available-for-return',
+  checkFeatureAccess('purchases'),
+  logStoreManagerActivity('view_available_return_items'),
+  getAvailableItemsForReturn
 );
 
 module.exports = router;

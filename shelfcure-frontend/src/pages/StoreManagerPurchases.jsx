@@ -6,7 +6,6 @@ import {
   Search,
   Filter,
   Eye,
-  Edit,
   Download,
   Calendar,
   User,
@@ -23,11 +22,27 @@ import {
   FileText,
   MessageCircle,
   Users,
-  RefreshCw
+  RefreshCw,
+  DollarSign,
+  Clock
 } from 'lucide-react';
 import StoreManagerLayout from '../components/store-manager/StoreManagerLayout';
+import AddMedicineRequestForm from '../components/store-manager/AddMedicineRequestForm';
+import { createNumericInputHandler, createPhoneInputHandler, VALIDATION_OPTIONS } from '../utils/inputValidation';
 
 const StoreManagerPurchases = () => {
+  // Helper function to safely format dates
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return 'N/A';
+      return date.toLocaleDateString();
+    } catch (error) {
+      return 'N/A';
+    }
+  };
+
   const [activeTab, setActiveTab] = useState('list'); // 'list', 'new', 'ocr', 'reorder', 'requests'
   const [purchases, setPurchases] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -36,6 +51,8 @@ const StoreManagerPurchases = () => {
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [dateFromFilter, setDateFromFilter] = useState('');
+  const [dateToFilter, setDateToFilter] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
@@ -72,13 +89,15 @@ const StoreManagerPurchases = () => {
 
   // Purchase Action Modals
   const [viewModal, setViewModal] = useState({ show: false, purchase: null });
-  const [editModal, setEditModal] = useState({ show: false, purchase: null });
-  const [deleteModal, setDeleteModal] = useState({ show: false, purchase: null });
+  const [paymentModal, setPaymentModal] = useState({ show: false, purchase: null });
+  const [deliveryModal, setDeliveryModal] = useState({ show: false, deliveries: [] });
   const [statusModal, setStatusModal] = useState({ show: false, purchase: null });
   const [selectedPurchase, setSelectedPurchase] = useState(null);
 
   // Medicine Request Modal
   const [viewRequestModal, setViewRequestModal] = useState({ show: false, request: null });
+  const [convertingRequest, setConvertingRequest] = useState(null);
+  const [addRequestModal, setAddRequestModal] = useState({ show: false });
 
   // OCR State
   const [ocrFile, setOcrFile] = useState(null);
@@ -91,6 +110,7 @@ const StoreManagerPurchases = () => {
     supplier: '',
     purchaseOrderNumber: '',
     invoiceNumber: '',
+    paymentMethod: 'cash',
     expectedDeliveryDate: '',
     items: [],
     subtotal: 0,
@@ -101,6 +121,27 @@ const StoreManagerPurchases = () => {
     notes: ''
   });
 
+  // Payment Form State
+  const [paymentForm, setPaymentForm] = useState({
+    amount: '',
+    paymentMethod: 'cash',
+    transactionId: '',
+    checkNumber: '',
+    notes: ''
+  });
+
+  // Debounce search term to avoid too many API calls
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (activeTab === 'list') {
+        fetchPurchases();
+      }
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm]);
+
+  // Handle other filters and tab changes immediately
   useEffect(() => {
     if (activeTab === 'list') {
       fetchPurchases();
@@ -115,7 +156,7 @@ const StoreManagerPurchases = () => {
     } else if (activeTab === 'requests') {
       fetchMedicineRequests();
     }
-  }, [activeTab, currentPage, searchTerm, statusFilter]);
+  }, [activeTab, currentPage, statusFilter, dateFromFilter, dateToFilter]);
 
   // Handle clicks outside dropdowns to close them
   useEffect(() => {
@@ -185,7 +226,7 @@ const StoreManagerPurchases = () => {
             minStockLevel: 1,
             maxStockLevel: 10,
             suggestedQuantity: 5, // Default suggested quantity
-            priority: 'high', // Customer requests are high priority
+            priority: medicine.priority || 'high', // Use original priority or default to high
             reason: 'Customer Request',
             supplier: null, // Will need to be selected
             lastOrderDate: null,
@@ -196,6 +237,7 @@ const StoreManagerPurchases = () => {
           }));
 
           console.log('🎯 Customer requested items created:', customerRequestedItems);
+          console.log('🔍 Priority check - Original medicine priorities:', parsedData.medicines.map(m => ({ name: m.name, priority: m.priority })));
 
           // Add customer requested items to reorder suggestions
           setReorderSuggestions(prev => {
@@ -236,13 +278,17 @@ const StoreManagerPurchases = () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      
+
       const params = new URLSearchParams({
         page: currentPage,
         limit: 20,
         ...(searchTerm && { search: searchTerm }),
-        ...(statusFilter && { status: statusFilter })
+        ...(statusFilter && { status: statusFilter }),
+        ...(dateFromFilter && { dateFrom: dateFromFilter }),
+        ...(dateToFilter && { dateTo: dateToFilter })
       });
+
+      console.log('Fetching purchases with params:', Object.fromEntries(params));
 
       const response = await fetch(`/api/store-manager/purchases?${params}`, {
         headers: {
@@ -392,7 +438,8 @@ const StoreManagerPurchases = () => {
     try {
       setRequestsLoading(true);
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/store-manager/medicine-requests', {
+      // Only fetch pending requests by default (exclude ordered/converted requests)
+      const response = await fetch('/api/store-manager/medicine-requests?status=pending', {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -642,9 +689,6 @@ const StoreManagerPurchases = () => {
       const token = localStorage.getItem('token');
 
       // Validate required fields
-      if (!newPurchase.supplier) {
-        throw new Error('Please select a supplier');
-      }
       if (!newPurchase.purchaseOrderNumber.trim()) {
         throw new Error('Purchase order number is required');
       }
@@ -668,9 +712,10 @@ const StoreManagerPurchases = () => {
       }
 
       const purchaseData = {
-        supplier: newPurchase.supplier,
+        ...(newPurchase.supplier && { supplier: newPurchase.supplier }), // Only include supplier if selected
         purchaseOrderNumber: newPurchase.purchaseOrderNumber.trim(),
         invoiceNumber: newPurchase.invoiceNumber?.trim() || '',
+        paymentMethod: newPurchase.paymentMethod || 'cash',
         expectedDeliveryDate: newPurchase.expectedDeliveryDate,
         items: newPurchase.items.map(item => {
           // Handle reorder items (customer requested) vs regular inventory items
@@ -774,14 +819,45 @@ const StoreManagerPurchases = () => {
       // Refresh purchases list
       fetchPurchases();
 
-      // IMPORTANT: Refresh reorder suggestions to remove items that no longer need reordering
-      // This ensures that items with updated stock levels are filtered out properly
-      await fetchReorderSuggestions();
+      // Remove the ordered items from reorder suggestions
+      // Since stock levels won't be updated until PO is received, we manually remove ordered items
+      const orderedMedicineIds = newPurchase.items.map(item => {
+        // For customer requested items, use the generated ID
+        if (item.isFromReorder && item.medicine && item.medicine.startsWith('customer_')) {
+          return item.medicine;
+        }
+        // For regular medicines, use the medicine ID
+        return item.medicine;
+      }).filter(Boolean);
+
+      console.log('🗑️ Removing ordered medicines from reorder suggestions:', orderedMedicineIds);
+
+      setReorderSuggestions(prev => {
+        const filtered = prev.filter(suggestion => {
+          const suggestionId = suggestion.isCustomerRequested
+            ? suggestion._id
+            : suggestion.medicine;
+
+          const shouldRemove = orderedMedicineIds.includes(suggestionId);
+          if (shouldRemove) {
+            console.log(`🗑️ Removing ${suggestion.medicineName || suggestion.medicine?.name} from reorder suggestions`);
+          }
+          return !shouldRemove;
+        });
+
+        console.log(`📊 Reorder suggestions: ${prev.length} → ${filtered.length} (removed ${prev.length - filtered.length} items)`);
+        return filtered;
+      });
 
       // Clear selected reorder items since they've been converted to a PO
       setSelectedReorderItems([]);
 
-      // Show success message (you can add a toast notification here)
+      // Clear any reorder data from localStorage since items have been processed
+      localStorage.removeItem('reorderData');
+
+      // Show success message
+      const removedCount = orderedMedicineIds.length;
+      alert(`✅ Purchase Order created successfully!\n\n${removedCount} medicine${removedCount > 1 ? 's' : ''} removed from Reorder Items.`);
       console.log('Purchase created successfully:', data);
 
     } catch (error) {
@@ -821,46 +897,76 @@ const StoreManagerPurchases = () => {
     }
   };
 
-  const handleEditPurchase = async (purchaseId) => {
+
+
+
+
+  const handlePaySupplier = (purchase) => {
+    console.log('Paying supplier for purchase:', purchase._id);
+    setPaymentForm({
+      amount: purchase.creditAmount || '',
+      paymentMethod: 'cash',
+      transactionId: '',
+      checkNumber: '',
+      notes: ''
+    });
+    setPaymentModal({ show: true, purchase });
+  };
+
+  const handlePaymentSubmit = async (e) => {
+    e.preventDefault();
     try {
-      console.log('Editing purchase:', purchaseId);
       setLoading(true);
       const token = localStorage.getItem('token');
 
-      const response = await fetch(`/api/store-manager/purchases/${purchaseId}`, {
+      const response = await fetch(`/api/store-manager/suppliers/${paymentModal.purchase.supplier._id}/payment`, {
+        method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
-        }
+        },
+        body: JSON.stringify({
+          amount: parseFloat(paymentForm.amount),
+          paymentMethod: paymentForm.paymentMethod,
+          transactionId: paymentForm.transactionId,
+          checkNumber: paymentForm.checkNumber,
+          notes: paymentForm.notes
+        })
       });
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to fetch purchase details');
+        throw new Error(errorData.message || 'Failed to record payment');
       }
 
-      const data = await response.json();
-      setEditModal({ show: true, purchase: data.data });
+      // Close modal and refresh list
+      setPaymentModal({ show: false, purchase: null });
+      setPaymentForm({
+        amount: '',
+        paymentMethod: 'cash',
+        transactionId: '',
+        checkNumber: '',
+        notes: ''
+      });
+      fetchPurchases();
+
+      // Show success message
+      console.log('Payment recorded successfully');
     } catch (error) {
-      console.error('Edit purchase error:', error);
-      setError(error.message || 'Failed to load purchase details');
+      console.error('Record payment error:', error);
+      setError(error.message || 'Failed to record payment');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeletePurchase = (purchase) => {
-    console.log('Deleting purchase:', purchase._id);
-    setDeleteModal({ show: true, purchase });
-  };
-
-  const confirmDeletePurchase = async () => {
+  const handleTrackDeliveries = async () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
 
-      const response = await fetch(`/api/store-manager/purchases/${deleteModal.purchase._id}`, {
-        method: 'DELETE',
+      const response = await fetch('/api/store-manager/purchases/deliveries', {
+        method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -869,18 +975,15 @@ const StoreManagerPurchases = () => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to delete purchase');
+        throw new Error(errorData.message || 'Failed to fetch delivery information');
       }
 
-      // Close modal and refresh list
-      setDeleteModal({ show: false, purchase: null });
-      fetchPurchases();
+      const data = await response.json();
+      setDeliveryModal({ show: true, deliveries: data.data || [] });
 
-      // Show success message
-      console.log('Purchase deleted successfully');
     } catch (error) {
-      console.error('Delete purchase error:', error);
-      setError(error.message || 'Failed to delete purchase');
+      console.error('Track deliveries error:', error);
+      setError(error.message || 'Failed to fetch delivery information');
     } finally {
       setLoading(false);
     }
@@ -896,6 +999,12 @@ const StoreManagerPurchases = () => {
       setLoading(true);
       const token = localStorage.getItem('token');
 
+      console.log('Updating purchase status:', {
+        purchaseId: statusModal.purchase._id,
+        currentStatus: statusModal.purchase.status,
+        newStatus: newStatus
+      });
+
       const response = await fetch(`/api/store-manager/purchases/${statusModal.purchase._id}`, {
         method: 'PUT',
         headers: {
@@ -905,17 +1014,23 @@ const StoreManagerPurchases = () => {
         body: JSON.stringify({ status: newStatus })
       });
 
+      console.log('Response status:', response.status);
+
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to update purchase status');
+        console.error('Error response:', errorData);
+        throw new Error(errorData.message || `Failed to update purchase status (${response.status})`);
       }
+
+      const responseData = await response.json();
+      console.log('Success response:', responseData);
 
       // Close modal and refresh list
       setStatusModal({ show: false, purchase: null });
       fetchPurchases();
 
       // Show success message
-      console.log('Purchase status updated successfully');
+      console.log('Purchase status updated successfully to:', newStatus);
     } catch (error) {
       console.error('Update status error:', error);
       setError(error.message || 'Failed to update purchase status');
@@ -926,13 +1041,18 @@ const StoreManagerPurchases = () => {
 
   const getStatusBadge = (status) => {
     const statusConfig = {
-      'pending': { color: 'bg-yellow-100 text-yellow-800', label: 'Pending' },
+      'draft': { color: 'bg-gray-100 text-gray-800', label: 'Draft' },
+      'ordered': { color: 'bg-blue-100 text-blue-800', label: 'Ordered' },
+      'confirmed': { color: 'bg-indigo-100 text-indigo-800', label: 'Confirmed' },
+      'shipped': { color: 'bg-purple-100 text-purple-800', label: 'Shipped' },
       'received': { color: 'bg-green-100 text-green-800', label: 'Received' },
-      'partial': { color: 'bg-blue-100 text-blue-800', label: 'Partial' },
-      'cancelled': { color: 'bg-red-100 text-red-800', label: 'Cancelled' }
+      'completed': { color: 'bg-emerald-100 text-emerald-800', label: 'Completed' },
+      'cancelled': { color: 'bg-red-100 text-red-800', label: 'Cancelled' },
+      'pending': { color: 'bg-yellow-100 text-yellow-800', label: 'Pending' },
+      'partial': { color: 'bg-orange-100 text-orange-800', label: 'Partial' }
     };
-    
-    const config = statusConfig[status] || statusConfig['pending'];
+
+    const config = statusConfig[status] || statusConfig['draft'];
     return (
       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${config.color}`}>
         {config.label}
@@ -971,7 +1091,11 @@ const StoreManagerPurchases = () => {
             <Camera className="h-5 w-5" />
             <span>Scan Bill (OCR)</span>
           </button>
-          <button className="bg-purple-600 text-white p-4 rounded-lg hover:bg-purple-700 flex items-center justify-center space-x-2">
+          <button
+            onClick={handleTrackDeliveries}
+            disabled={loading}
+            className="bg-purple-600 text-white p-4 rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+          >
             <Truck className="h-5 w-5" />
             <span>Track Deliveries</span>
           </button>
@@ -984,8 +1108,20 @@ const StoreManagerPurchases = () => {
 
       {/* Filters */}
       <div className="bg-white shadow rounded-lg p-6 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="relative">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-medium text-gray-900">Filters</h3>
+          {loading && (
+            <div className="flex items-center text-sm text-gray-500">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-600 mr-2"></div>
+              Loading...
+            </div>
+          )}
+        </div>
+
+        {/* Main Filters Row */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+          {/* Search Input */}
+          <div className="relative lg:col-span-2">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <Search className="h-5 w-5 text-gray-400" />
             </div>
@@ -1001,6 +1137,7 @@ const StoreManagerPurchases = () => {
             />
           </div>
 
+          {/* Status Filter */}
           <div>
             <select
               value={statusFilter}
@@ -1011,25 +1148,24 @@ const StoreManagerPurchases = () => {
               className="block w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
             >
               <option value="">All Status</option>
-              <option value="pending">Pending</option>
+              <option value="draft">Draft</option>
+              <option value="ordered">Ordered</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="shipped">Shipped</option>
               <option value="received">Received</option>
-              <option value="partial">Partial</option>
+              <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
             </select>
           </div>
 
-          <div>
-            <input
-              type="date"
-              className="block w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
-            />
-          </div>
-
+          {/* Clear Filters Button */}
           <div>
             <button
               onClick={() => {
                 setSearchTerm('');
                 setStatusFilter('');
+                setDateFromFilter('');
+                setDateToFilter('');
                 setCurrentPage(1); // Reset to first page when clearing filters
               }}
               className="w-full px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
@@ -1038,7 +1174,135 @@ const StoreManagerPurchases = () => {
             </button>
           </div>
         </div>
+
+        {/* Separator */}
+        <div className="border-t border-gray-200 my-4"></div>
+
+        {/* Date Range Filters Row */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Date Range Inputs */}
+          <div className="md:col-span-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">From Date</label>
+                <input
+                  type="date"
+                  value={dateFromFilter}
+                  onChange={(e) => {
+                    setDateFromFilter(e.target.value);
+                    // If to date is set and is earlier than from date, clear it
+                    if (dateToFilter && e.target.value && new Date(e.target.value) > new Date(dateToFilter)) {
+                      setDateToFilter('');
+                    }
+                    setCurrentPage(1); // Reset to first page when filtering
+                  }}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">To Date</label>
+                <input
+                  type="date"
+                  value={dateToFilter}
+                  min={dateFromFilter || undefined} // Set minimum date to from date
+                  onChange={(e) => {
+                    setDateToFilter(e.target.value);
+                    setCurrentPage(1); // Reset to first page when filtering
+                  }}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
+                />
+                {dateFromFilter && dateToFilter && new Date(dateFromFilter) > new Date(dateToFilter) && (
+                  <p className="text-xs text-red-600 mt-1">To date must be after from date</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Date Range Presets */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              Quick Select
+              {(dateFromFilter || dateToFilter) && (
+                <span className="ml-2 text-green-600 text-xs">• Active</span>
+              )}
+            </label>
+            <div className="flex flex-wrap gap-1">
+              <button
+                onClick={() => {
+                  const today = new Date();
+                  const todayStr = today.toISOString().split('T')[0];
+                  setDateFromFilter(todayStr);
+                  setDateToFilter(todayStr);
+                  setCurrentPage(1);
+                }}
+                className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200"
+              >
+                Today
+              </button>
+              <button
+                onClick={() => {
+                  const today = new Date();
+                  const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+                  setDateFromFilter(weekAgo.toISOString().split('T')[0]);
+                  setDateToFilter(today.toISOString().split('T')[0]);
+                  setCurrentPage(1);
+                }}
+                className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200"
+              >
+                7 days
+              </button>
+              <button
+                onClick={() => {
+                  const today = new Date();
+                  const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+                  setDateFromFilter(monthAgo.toISOString().split('T')[0]);
+                  setDateToFilter(today.toISOString().split('T')[0]);
+                  setCurrentPage(1);
+                }}
+                className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200"
+              >
+                30 days
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* Results Summary */}
+      {!loading && (
+        <div className="bg-white shadow rounded-lg p-4 mb-6">
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-gray-600">
+              Showing {purchases.length} of {totalCount} purchases
+              {(searchTerm || statusFilter || dateFromFilter || dateToFilter) && (
+                <span className="ml-2 text-green-600">
+                  (filtered
+                  {dateFromFilter && dateToFilter && (
+                    <span className="ml-1">
+                      • {dateFromFilter} to {dateToFilter}
+                    </span>
+                  )}
+                  {dateFromFilter && !dateToFilter && (
+                    <span className="ml-1">
+                      • from {dateFromFilter}
+                    </span>
+                  )}
+                  {!dateFromFilter && dateToFilter && (
+                    <span className="ml-1">
+                      • until {dateToFilter}
+                    </span>
+                  )}
+                  )
+                </span>
+              )}
+            </div>
+            <div className="text-sm text-gray-500">
+              Page {currentPage} of {totalPages}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Purchases Table */}
       <div className="bg-white shadow overflow-hidden sm:rounded-md">
@@ -1056,7 +1320,13 @@ const StoreManagerPurchases = () => {
                   Amount
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Payment Method
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Status
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Expected Delivery
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Actions
@@ -1064,16 +1334,30 @@ const StoreManagerPurchases = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {purchases.length > 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan="6" className="px-6 py-12 text-center">
+                    <div className="flex items-center justify-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mr-3"></div>
+                      <span className="text-gray-500">Loading purchases...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : purchases.length > 0 ? (
                 purchases.map((purchase) => (
                   <tr key={purchase._id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div>
                         <div className="text-sm font-medium text-gray-900 text-left">
-                          {purchase.invoiceNumber}
+                          {purchase.purchaseOrderNumber || 'N/A'}
                         </div>
+                        {purchase.invoiceNumber && (
+                          <div className="text-xs text-gray-400 text-left">
+                            Invoice: {purchase.invoiceNumber}
+                          </div>
+                        )}
                         <div className="text-sm text-gray-500 text-left">
-                          {new Date(purchase.invoiceDate).toLocaleDateString()}
+                          {formatDate(purchase.purchaseDate)}
                         </div>
                         <div className="text-xs text-gray-400 text-left">
                           {purchase.items?.length || 0} items
@@ -1092,7 +1376,46 @@ const StoreManagerPurchases = () => {
                       ₹{purchase.totalAmount?.toLocaleString() || 0}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900 text-left capitalize">
+                        {purchase.paymentMethod || 'Cash'}
+                      </div>
+                      {purchase.paymentMethod === 'credit' && purchase.creditAmount > 0 && (
+                        <div className="text-xs text-red-600 text-left">
+                          Credit: ₹{purchase.creditAmount?.toLocaleString() || 0}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
                       {getStatusBadge(purchase.status)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {purchase.expectedDeliveryDate ? (
+                        <div className="text-sm text-gray-900 text-left">
+                          {formatDate(purchase.expectedDeliveryDate)}
+                          {(() => {
+                            if (!purchase.expectedDeliveryDate) return null;
+                            const expectedDate = new Date(purchase.expectedDeliveryDate);
+                            if (isNaN(expectedDate.getTime())) return null;
+                            const today = new Date();
+                            const daysRemaining = Math.ceil((expectedDate - today) / (1000 * 60 * 60 * 24));
+                            const isOverdue = daysRemaining < 0 && purchase.status !== 'received';
+
+                            if (purchase.status === 'received') {
+                              return <div className="text-xs text-green-600">Delivered</div>;
+                            } else if (isOverdue) {
+                              return <div className="text-xs text-red-600">{Math.abs(daysRemaining)} days overdue</div>;
+                            } else if (daysRemaining === 0) {
+                              return <div className="text-xs text-yellow-600">Due today</div>;
+                            } else if (daysRemaining <= 2) {
+                              return <div className="text-xs text-yellow-600">{daysRemaining} days left</div>;
+                            } else {
+                              return <div className="text-xs text-gray-500">{daysRemaining} days left</div>;
+                            }
+                          })()}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-400">Not set</span>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex space-x-2">
@@ -1105,14 +1428,6 @@ const StoreManagerPurchases = () => {
                           <Eye className="h-4 w-4" />
                         </button>
                         <button
-                          onClick={() => handleEditPurchase(purchase._id)}
-                          disabled={loading}
-                          className="text-blue-600 hover:text-blue-900 disabled:opacity-50 disabled:cursor-not-allowed"
-                          title="Edit Purchase"
-                        >
-                          <Edit className="h-4 w-4" />
-                        </button>
-                        <button
                           onClick={() => handleUpdateStatus(purchase)}
                           disabled={loading}
                           className="text-purple-600 hover:text-purple-900 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1120,22 +1435,53 @@ const StoreManagerPurchases = () => {
                         >
                           <Receipt className="h-4 w-4" />
                         </button>
-                        <button
-                          onClick={() => handleDeletePurchase(purchase)}
-                          disabled={loading || purchase.status === 'completed'}
-                          className="text-red-600 hover:text-red-900 disabled:opacity-50 disabled:cursor-not-allowed"
-                          title={purchase.status === 'completed' ? 'Cannot delete completed purchase' : 'Delete Purchase'}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        {purchase.paymentMethod === 'credit' && purchase.creditAmount > 0 && (
+                          <button
+                            onClick={() => handlePaySupplier(purchase)}
+                            disabled={loading}
+                            className="text-green-600 hover:text-green-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Pay Supplier"
+                          >
+                            <DollarSign className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan="5" className="px-6 py-4 text-center text-gray-500">
-                    No purchases found
+                  <td colSpan="6" className="px-6 py-12 text-center">
+                    <div className="text-gray-500">
+                      <div className="text-lg font-medium mb-2">No purchases found</div>
+                      {(searchTerm || statusFilter || dateFromFilter || dateToFilter) ? (
+                        <div className="text-sm">
+                          Try adjusting your search criteria or{' '}
+                          <button
+                            onClick={() => {
+                              setSearchTerm('');
+                              setStatusFilter('');
+                              setDateFromFilter('');
+                              setDateToFilter('');
+                              setCurrentPage(1);
+                            }}
+                            className="text-green-600 hover:text-green-700 underline"
+                          >
+                            clear all filters
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="text-sm">
+                          No purchase orders have been created yet.{' '}
+                          <button
+                            onClick={() => setActiveTab('new')}
+                            className="text-green-600 hover:text-green-700 underline"
+                          >
+                            Create your first purchase order
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </td>
                 </tr>
               )}
@@ -1471,8 +1817,8 @@ const StoreManagerPurchases = () => {
               )}
             </div>
             {!selectedPurchaseSupplier && (
-              <p className="mt-1 text-sm text-yellow-600">
-                💡 You can create this purchase order without a supplier and assign one later.
+              <p className="mt-1 text-sm text-blue-600">
+                💡 Optional: You can create this purchase order without a supplier and assign one later from the purchase details page.
               </p>
             )}
           </div>
@@ -1493,7 +1839,7 @@ const StoreManagerPurchases = () => {
         </div>
 
         {/* Invoice Details */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2 text-left">
               Invoice Number
@@ -1505,6 +1851,25 @@ const StoreManagerPurchases = () => {
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
               placeholder="INV-001"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2 text-left">
+              Payment Method *
+            </label>
+            <select
+              value={newPurchase.paymentMethod || 'cash'}
+              onChange={(e) => setNewPurchase(prev => ({ ...prev, paymentMethod: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+              required
+            >
+              <option value="cash">Cash</option>
+              <option value="card">Card</option>
+              <option value="upi">UPI</option>
+              <option value="bank_transfer">Bank Transfer</option>
+              <option value="check">Check</option>
+              <option value="credit">Credit</option>
+            </select>
           </div>
 
           <div>
@@ -1568,15 +1933,24 @@ const StoreManagerPurchases = () => {
                       <label className="block text-sm font-medium text-gray-700 mb-1 text-left">
                         Medicine *
                       </label>
-                      {item.isFromReorder && item.medicineDetails ? (
-                        <div className="w-full px-3 py-2 border border-orange-300 rounded-md bg-orange-50">
-                          <div className="font-medium text-gray-900">{item.medicineDetails.name}</div>
+                      {(item.isFromReorder && item.medicineDetails) || item.medicineName ? (
+                        <div className={`w-full px-3 py-2 border rounded-md ${
+                          item.isFromReorder ? 'border-orange-300 bg-orange-50' : 'border-green-300 bg-green-50'
+                        }`}>
+                          <div className="font-medium text-gray-900">
+                            {item.medicineDetails?.name || item.medicineName}
+                          </div>
                           <div className="text-sm text-gray-600">
-                            {item.medicineDetails.manufacturer} | {item.medicineDetails.genericName}
+                            {item.medicineDetails?.manufacturer || item.manufacturer}
+                            {(item.medicineDetails?.genericName || item.genericName) &&
+                              ` | ${item.medicineDetails?.genericName || item.genericName}`
+                            }
                           </div>
-                          <div className="text-xs text-orange-600 mt-1">
-                            Customer requested - Not in current inventory
-                          </div>
+                          {item.isFromReorder && (
+                            <div className="text-xs text-orange-600 mt-1">
+                              Customer requested - Not in current inventory
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div className={`relative medicine-search-${index}`}>
@@ -1640,7 +2014,11 @@ const StoreManagerPurchases = () => {
                       <input
                         type="number"
                         value={item.quantity}
-                        onChange={(e) => updatePurchaseItem(index, 'quantity', parseFloat(e.target.value) || 0)}
+                        onChange={createNumericInputHandler(
+                          (value) => updatePurchaseItem(index, 'quantity', value),
+                          null,
+                          { ...VALIDATION_OPTIONS.QUANTITY, min: 1 }
+                        )}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
                         min="1"
                         required
@@ -1654,7 +2032,11 @@ const StoreManagerPurchases = () => {
                       <input
                         type="number"
                         value={item.unitPrice || ''}
-                        onChange={(e) => updatePurchaseItem(index, 'unitPrice', parseFloat(e.target.value) || 0)}
+                        onChange={createNumericInputHandler(
+                          (value) => updatePurchaseItem(index, 'unitPrice', value),
+                          null,
+                          VALIDATION_OPTIONS.PRICE
+                        )}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
                         min="0"
                         step="0.01"
@@ -1786,10 +2168,10 @@ const StoreManagerPurchases = () => {
           <button
             type="button"
             onClick={handleCreatePurchase}
-            disabled={!newPurchase.supplier || !newPurchase.purchaseOrderNumber || newPurchase.items.length === 0}
+            disabled={!newPurchase.purchaseOrderNumber || newPurchase.items.length === 0}
             className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Create Purchase Order
+            {!selectedPurchaseSupplier ? 'Create Purchase Order (No Supplier)' : 'Create Purchase Order'}
           </button>
         </div>
       </form>
@@ -1823,9 +2205,20 @@ const StoreManagerPurchases = () => {
   };
 
   const handleReorderItemToggle = (suggestion, unitType) => {
-    const medicineId = suggestion.medicine?._id || suggestion.medicine || suggestion._id;
+    // Use the same key generation logic as the checkboxes
+    // This ensures consistency between checkbox checked state and toggle function
+    const medicineId = suggestion._id || suggestion.medicine;
     const itemKey = `${medicineId}_${unitType}`;
     const isSelected = selectedReorderItems.some(item => item.key === itemKey);
+
+    console.log('🔧 Toggle Debug:', {
+      medicineId,
+      unitType,
+      itemKey,
+      isSelected,
+      isCustomerRequested: suggestion.isCustomerRequested,
+      suggestionMedicine: suggestion.medicine
+    });
 
     if (isSelected) {
       setSelectedReorderItems(prev => prev.filter(item => item.key !== itemKey));
@@ -1872,6 +2265,8 @@ const StoreManagerPurchases = () => {
 
   // New flexible purchase order creation
   const createPurchaseOrdersFromReorder = () => {
+    console.log('🛒 Creating PO from selected items:', selectedReorderItems);
+
     if (selectedReorderItems.length === 0) {
       setError('Please select at least one item to reorder');
       return;
@@ -1903,13 +2298,18 @@ const StoreManagerPurchases = () => {
   };
 
   const createSinglePurchaseOrder = (supplierGroup) => {
+    console.log('🏗️ Creating single PO with supplier group:', supplierGroup);
+
     // Pre-populate the new purchase form
     setNewPurchase({
       supplier: supplierGroup.supplier?._id || '',
       purchaseOrderNumber: `PO-${Date.now()}`,
       invoiceNumber: '',
+      paymentMethod: 'cash',
       expectedDeliveryDate: '',
-      items: supplierGroup.items.map(item => {
+      items: supplierGroup.items.map((item, index) => {
+        console.log(`🔧 Processing item ${index}:`, item);
+
         // Handle customer requested items vs regular reorder items
         if (item.isCustomerRequested) {
           // Check if medicine ID is valid (not fake) for customer requests
@@ -1941,6 +2341,12 @@ const StoreManagerPurchases = () => {
           };
         } else {
           // Regular reorder items
+          console.log(`📦 Creating regular reorder item:`, {
+            medicine: item.medicine,
+            medicineName: item.medicineName,
+            manufacturer: item.manufacturer
+          });
+
           return {
             medicine: item.medicine,
             medicineName: item.medicineName,
@@ -2342,7 +2748,7 @@ const StoreManagerPurchases = () => {
           if (item.medicine?.genericName) {
             reorderMessage += `   • Generic: ${item.medicine.genericName}\n`;
           }
-          reorderMessage += `   • Priority: HIGH (Customer waiting)\n`;
+          reorderMessage += `   • Priority: ${(item.priority || 'HIGH').toUpperCase()} (Customer waiting)\n`;
         } else {
           // Handle regular reorder suggestions
           if (item.stripSuggestion) {
@@ -2580,7 +2986,14 @@ const StoreManagerPurchases = () => {
                       </div>
                       <div>
                         <p className="text-gray-600">Priority</p>
-                        <p className="font-semibold text-orange-600">High</p>
+                        <p className={`font-semibold ${
+                          suggestion.priority === 'urgent' ? 'text-red-600' :
+                          suggestion.priority === 'high' ? 'text-orange-600' :
+                          suggestion.priority === 'medium' ? 'text-blue-600' :
+                          'text-gray-600'
+                        }`}>
+                          {suggestion.priority ? suggestion.priority.charAt(0).toUpperCase() + suggestion.priority.slice(1) : 'High'}
+                        </p>
                       </div>
                       <div>
                         <p className="text-gray-600">Quantity to Order</p>
@@ -2589,7 +3002,11 @@ const StoreManagerPurchases = () => {
                             type="number"
                             min="1"
                             value={getEffectiveQuantity(suggestion._id || suggestion.medicine, 'strip', suggestion.suggestedQuantity || 5)}
-                            onChange={(e) => handleQuantityChange(suggestion._id || suggestion.medicine, 'strip', e.target.value)}
+                            onChange={createNumericInputHandler(
+                              (value) => handleQuantityChange(suggestion._id || suggestion.medicine, 'strip', value),
+                              null,
+                              { ...VALIDATION_OPTIONS.QUANTITY, min: 1 }
+                            )}
                             className="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
                             placeholder="Qty"
                           />
@@ -2612,7 +3029,7 @@ const StoreManagerPurchases = () => {
                             <label className="flex items-center cursor-pointer">
                               <input
                                 type="checkbox"
-                                checked={selectedReorderItems.some(item => item.key === `${suggestion.medicine}_strip`)}
+                                checked={selectedReorderItems.some(item => item.key === `${suggestion._id || suggestion.medicine}_strip`)}
                                 onChange={() => handleReorderItemToggle(suggestion, 'strip')}
                                 className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded mr-2"
                               />
@@ -2668,7 +3085,7 @@ const StoreManagerPurchases = () => {
                             <label className="flex items-center cursor-pointer">
                               <input
                                 type="checkbox"
-                                checked={selectedReorderItems.some(item => item.key === `${suggestion.medicine}_individual`)}
+                                checked={selectedReorderItems.some(item => item.key === `${suggestion._id || suggestion.medicine}_individual`)}
                                 onChange={() => handleReorderItemToggle(suggestion, 'individual')}
                                 className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded mr-2"
                               />
@@ -2737,7 +3154,7 @@ const StoreManagerPurchases = () => {
         </div>
         <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
           <button
-            onClick={() => window.location.href = '/store-panel/add-medicine-request'}
+            onClick={() => setAddRequestModal({ show: true })}
             className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700"
           >
             <Plus className="h-4 w-4 mr-2" />
@@ -2759,7 +3176,7 @@ const StoreManagerPurchases = () => {
           </p>
           <div className="mt-6">
             <button
-              onClick={() => window.location.href = '/store-panel/add-medicine-request'}
+              onClick={() => setAddRequestModal({ show: true })}
               className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
             >
               <Plus className="h-4 w-4 mr-2" />
@@ -2821,37 +3238,97 @@ const StoreManagerPurchases = () => {
                       )}
                     </div>
                     <div className="mt-2 text-xs text-gray-500 text-left">
-                      Requested by {request.requestedBy?.name} on {new Date(request.createdAt).toLocaleDateString()}
+                      Requested by {request.requestedBy?.name} on {formatDate(request.createdAt)}
                     </div>
                   </div>
                   <div className="ml-4 flex items-center space-x-2">
                     {request.status === 'pending' && (
                       <button
-                        onClick={() => {
-                          // Convert to purchase order
-                          const requestData = {
-                            medicines: [{
-                              _id: `request_${request._id}`,
-                              name: request.medicineName,
-                              manufacturer: request.manufacturer,
-                              genericName: request.composition,
-                              category: request.category,
-                              isInInventory: false,
-                              isCustomerRequested: true,
-                              requestedQuantity: request.requestedQuantity,
-                              unitType: request.unitType,
-                              supplierInfo: request.supplierInfo,
-                              notes: request.notes,
-                              priority: request.priority
-                            }],
-                            source: 'medicine_request'
-                          };
-                          localStorage.setItem('reorderData', JSON.stringify(requestData));
-                          setActiveTab('reorder');
+                        onClick={async () => {
+                          try {
+                            setConvertingRequest(request._id);
+                            console.log('🔄 Converting medicine request:', request);
+                            // First, update the medicine request status to 'ordered'
+                            const token = localStorage.getItem('token');
+                            const updateResponse = await fetch(`/api/store-manager/medicine-requests/${request._id}`, {
+                              method: 'PUT',
+                              headers: {
+                                'Authorization': `Bearer ${token}`,
+                                'Content-Type': 'application/json'
+                              },
+                              body: JSON.stringify({
+                                // Send all required fields to satisfy validation
+                                medicineName: request.medicineName,
+                                manufacturer: request.manufacturer,
+                                composition: request.composition,
+                                strength: request.strength || 'Not specified',
+                                packSize: request.packSize || 'Not specified',
+                                requestedQuantity: request.requestedQuantity,
+                                unitType: request.unitType,
+                                priority: request.priority,
+                                category: request.category,
+                                notes: request.notes || '',
+                                supplierInfo: request.supplierInfo || {},
+                                status: 'ordered' // This is what we actually want to change
+                              })
+                            });
+
+                            if (!updateResponse.ok) {
+                              const errorData = await updateResponse.json();
+                              console.error('Update status error:', errorData);
+                              throw new Error(`Failed to update medicine request status: ${errorData.message || updateResponse.statusText}`);
+                            }
+
+                            // Convert to purchase order
+                            const requestData = {
+                              medicines: [{
+                                _id: `request_${request._id}`,
+                                name: request.medicineName,
+                                manufacturer: request.manufacturer,
+                                genericName: request.composition,
+                                category: request.category,
+                                isInInventory: false,
+                                isCustomerRequested: true,
+                                requestedQuantity: request.requestedQuantity,
+                                unitType: request.unitType,
+                                supplierInfo: request.supplierInfo,
+                                notes: request.notes,
+                                priority: request.priority
+                              }],
+                              source: 'medicine_request'
+                            };
+                            localStorage.setItem('reorderData', JSON.stringify(requestData));
+
+                            // Refresh medicine requests list to remove the converted request
+                            await fetchMedicineRequests();
+
+                            // Switch to reorder tab
+                            setActiveTab('reorder');
+
+                            // Show success message
+                            alert(`✅ Medicine request for "${request.medicineName}" has been converted to purchase order and moved to Reorder Items!`);
+                          } catch (error) {
+                            console.error('Error converting medicine request:', error);
+                            alert('Failed to convert medicine request. Please try again.');
+                          } finally {
+                            setConvertingRequest(null);
+                          }
                         }}
-                        className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded text-white bg-green-600 hover:bg-green-700"
+                        disabled={convertingRequest === request._id}
+                        className={`inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded text-white ${
+                          convertingRequest === request._id
+                            ? 'bg-green-400 cursor-not-allowed'
+                            : 'bg-green-600 hover:bg-green-700'
+                        }`}
                       >
-                        Convert to Purchase
+                        {convertingRequest === request._id ? (
+                          <>
+                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                            Converting...
+                          </>
+                        ) : (
+                          'Convert to Purchase'
+                        )}
                       </button>
                     )}
                     <button
@@ -3194,7 +3671,7 @@ const StoreManagerPurchases = () => {
                   <input
                     type="tel"
                     value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    onChange={createPhoneInputHandler(setPhoneNumber)}
                     placeholder="Enter phone number (e.g., +919876543210)"
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
                   />
@@ -3300,15 +3777,25 @@ const StoreManagerPurchases = () => {
                     <div>
                       <h4 className="text-sm font-medium text-gray-700">Purchase Date</h4>
                       <p className="text-sm text-gray-900">
-                        {new Date(viewModal.purchase.purchaseDate).toLocaleDateString()}
+                        {formatDate(viewModal.purchase.purchaseDate)}
                       </p>
                     </div>
                     <div>
                       <h4 className="text-sm font-medium text-gray-700">Expected Delivery</h4>
                       <p className="text-sm text-gray-900">
-                        {viewModal.purchase.expectedDeliveryDate ?
-                          new Date(viewModal.purchase.expectedDeliveryDate).toLocaleDateString() : 'N/A'}
+                        {formatDate(viewModal.purchase.expectedDeliveryDate)}
                       </p>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-700">Payment Method</h4>
+                      <p className="text-sm text-gray-900 capitalize">
+                        {viewModal.purchase.paymentMethod || 'Cash'}
+                      </p>
+                      {viewModal.purchase.paymentMethod === 'credit' && viewModal.purchase.creditAmount > 0 && (
+                        <p className="text-xs text-red-600">
+                          Credit Amount: ₹{viewModal.purchase.creditAmount?.toLocaleString() || 0}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -3370,59 +3857,7 @@ const StoreManagerPurchases = () => {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
-      {deleteModal.show && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-            <div className="mt-3">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-900">Confirm Delete</h3>
-                <button
-                  onClick={() => setDeleteModal({ show: false, purchase: null })}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
 
-              <div className="mb-6">
-                <div className="flex items-center mb-4">
-                  <AlertTriangle className="h-12 w-12 text-red-500 mr-4" />
-                  <div>
-                    <p className="text-sm text-gray-900">
-                      Are you sure you want to delete this purchase order?
-                    </p>
-                    <p className="text-sm text-gray-500 mt-1">
-                      PO: {deleteModal.purchase?.purchaseOrderNumber}
-                    </p>
-                  </div>
-                </div>
-                <div className="bg-red-50 border border-red-200 rounded-md p-3">
-                  <p className="text-sm text-red-800">
-                    This action cannot be undone. The purchase order and all associated data will be permanently deleted.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex justify-end space-x-3">
-                <button
-                  onClick={() => setDeleteModal({ show: false, purchase: null })}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={confirmDeletePurchase}
-                  disabled={loading}
-                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 border border-transparent rounded-md hover:bg-red-700 disabled:opacity-50"
-                >
-                  {loading ? 'Deleting...' : 'Delete Purchase'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Status Update Modal */}
       {statusModal.show && (
@@ -3591,7 +4026,7 @@ const StoreManagerPurchases = () => {
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Requested By</label>
                       <p className="mt-1 text-sm text-gray-900">
-                        {viewRequestModal.request.requestedBy?.name} on {new Date(viewRequestModal.request.createdAt).toLocaleDateString()}
+                        {viewRequestModal.request.requestedBy?.name} on {formatDate(viewRequestModal.request.createdAt)}
                       </p>
                     </div>
                   </div>
@@ -3611,116 +4046,341 @@ const StoreManagerPurchases = () => {
         </div>
       )}
 
-      {/* Edit Purchase Modal */}
-      {editModal.show && (
+
+
+      {/* Payment Modal */}
+      {paymentModal.show && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-10 mx-auto p-5 border w-4/5 max-w-2xl shadow-lg rounded-md bg-white">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
             <div className="mt-3">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-900">Edit Purchase Order</h3>
+                <h3 className="text-lg font-medium text-gray-900">Pay Supplier</h3>
                 <button
-                  onClick={() => setEditModal({ show: false, purchase: null })}
+                  onClick={() => setPaymentModal({ show: false, purchase: null })}
                   className="text-gray-400 hover:text-gray-600"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
 
-              {editModal.purchase && (
+              {paymentModal.purchase && (
                 <div className="space-y-4">
-                  <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
-                    <p className="text-sm text-blue-800">
-                      <strong>Note:</strong> This is a basic edit interface. For now, you can update the purchase status,
-                      payment information, and notes. Full item editing will be available in a future update.
-                    </p>
+                  <div className="bg-gray-50 p-3 rounded-lg">
+                    <p className="text-sm text-gray-600">Supplier: <span className="font-medium">{paymentModal.purchase.supplier?.name}</span></p>
+                    <p className="text-sm text-gray-600">Purchase Order: <span className="font-medium">{paymentModal.purchase.purchaseOrderNumber}</span></p>
+                    <p className="text-sm text-gray-600">Outstanding Amount: <span className="font-medium text-red-600">₹{paymentModal.purchase.creditAmount?.toLocaleString()}</span></p>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <form onSubmit={handlePaymentSubmit} className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Purchase Order Number
+                        Payment Amount *
                       </label>
                       <input
-                        type="text"
-                        value={editModal.purchase.purchaseOrderNumber}
-                        disabled
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-500"
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        max={paymentModal.purchase.creditAmount}
+                        value={paymentForm.amount}
+                        onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                        placeholder="Enter payment amount"
+                        required
                       />
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Invoice Number
-                      </label>
-                      <input
-                        type="text"
-                        value={editModal.purchase.invoiceNumber || ''}
-                        disabled
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Supplier
-                      </label>
-                      <input
-                        type="text"
-                        value={editModal.purchase.supplier?.name || 'Unknown'}
-                        disabled
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Total Amount
-                      </label>
-                      <input
-                        type="text"
-                        value={`₹${editModal.purchase.totalAmount?.toFixed(2) || '0.00'}`}
-                        disabled
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-500"
-                      />
-                    </div>
-                  </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Notes
-                    </label>
-                    <textarea
-                      value={editModal.purchase.notes || ''}
-                      disabled
-                      rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-500"
-                      placeholder="Purchase notes..."
-                    />
-                  </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Payment Method *
+                      </label>
+                      <select
+                        value={paymentForm.paymentMethod}
+                        onChange={(e) => setPaymentForm({ ...paymentForm, paymentMethod: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                        required
+                      >
+                        <option value="cash">Cash</option>
+                        <option value="card">Card</option>
+                        <option value="upi">UPI</option>
+                        <option value="bank_transfer">Bank Transfer</option>
+                        <option value="check">Check</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
 
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
-                    <p className="text-sm text-yellow-800">
-                      To make changes to this purchase order, please use the Status Update button to change the status,
-                      or contact your system administrator for advanced editing capabilities.
-                    </p>
+                    {(paymentForm.paymentMethod === 'upi' || paymentForm.paymentMethod === 'bank_transfer') && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Transaction ID
+                        </label>
+                        <input
+                          type="text"
+                          value={paymentForm.transactionId}
+                          onChange={(e) => setPaymentForm({ ...paymentForm, transactionId: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                          placeholder="Enter transaction ID"
+                        />
+                      </div>
+                    )}
+
+                    {paymentForm.paymentMethod === 'check' && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Check Number
+                        </label>
+                        <input
+                          type="text"
+                          value={paymentForm.checkNumber}
+                          onChange={(e) => setPaymentForm({ ...paymentForm, checkNumber: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                          placeholder="Enter check number"
+                        />
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Notes
+                      </label>
+                      <textarea
+                        value={paymentForm.notes}
+                        onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                        rows="3"
+                        placeholder="Enter payment notes (optional)"
+                      />
+                    </div>
+
+                    <div className="flex justify-end space-x-3 pt-4">
+                      <button
+                        type="button"
+                        onClick={() => setPaymentModal({ show: false, purchase: null })}
+                        className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={loading || !paymentForm.amount}
+                        className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {loading ? 'Recording...' : 'Record Payment'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delivery Tracking Modal */}
+      {deliveryModal.show && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-10 mx-auto p-5 border w-11/12 max-w-6xl shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">Delivery Tracking</h3>
+                <button
+                  onClick={() => setDeliveryModal({ show: false, deliveries: [] })}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                {/* Delivery Statistics */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-blue-50 p-4 rounded-lg">
+                    <div className="flex items-center">
+                      <Clock className="h-8 w-8 text-blue-600" />
+                      <div className="ml-3">
+                        <p className="text-sm font-medium text-blue-600">Pending</p>
+                        <p className="text-2xl font-semibold text-blue-900">
+                          {deliveryModal.deliveries.filter(d => ['ordered', 'confirmed'].includes(d.status)).length}
+                        </p>
+                      </div>
+                    </div>
                   </div>
+                  <div className="bg-yellow-50 p-4 rounded-lg">
+                    <div className="flex items-center">
+                      <Truck className="h-8 w-8 text-yellow-600" />
+                      <div className="ml-3">
+                        <p className="text-sm font-medium text-yellow-600">Shipped</p>
+                        <p className="text-2xl font-semibold text-yellow-900">
+                          {deliveryModal.deliveries.filter(d => d.status === 'shipped').length}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="bg-green-50 p-4 rounded-lg">
+                    <div className="flex items-center">
+                      <CheckCircle className="h-8 w-8 text-green-600" />
+                      <div className="ml-3">
+                        <p className="text-sm font-medium text-green-600">Delivered</p>
+                        <p className="text-2xl font-semibold text-green-900">
+                          {deliveryModal.deliveries.filter(d => d.status === 'received').length}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="bg-red-50 p-4 rounded-lg">
+                    <div className="flex items-center">
+                      <AlertTriangle className="h-8 w-8 text-red-600" />
+                      <div className="ml-3">
+                        <p className="text-sm font-medium text-red-600">Overdue</p>
+                        <p className="text-2xl font-semibold text-red-900">
+                          {deliveryModal.deliveries.filter(d => {
+                            if (!d.expectedDeliveryDate || ['received'].includes(d.status)) return false;
+                            const expectedDate = new Date(d.expectedDeliveryDate);
+                            return !isNaN(expectedDate.getTime()) && expectedDate < new Date();
+                          }).length}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Delivery List */}
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Purchase Order
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Supplier
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Status
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Expected Delivery
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actual Delivery
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Amount
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Days Remaining
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {deliveryModal.deliveries.length > 0 ? (
+                        deliveryModal.deliveries.map((delivery) => {
+                          const expectedDate = delivery.expectedDeliveryDate ? new Date(delivery.expectedDeliveryDate) : null;
+                          const isValidDate = expectedDate && !isNaN(expectedDate.getTime());
+                          const today = new Date();
+                          const daysRemaining = isValidDate ? Math.ceil((expectedDate - today) / (1000 * 60 * 60 * 24)) : null;
+                          const isOverdue = isValidDate && daysRemaining !== null && daysRemaining < 0 && delivery.status !== 'received';
+
+                          return (
+                            <tr key={delivery._id} className={isOverdue ? 'bg-red-50' : ''}>
+                              <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                {delivery.purchaseOrderNumber}
+                              </td>
+                              <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {delivery.supplier?.name || 'Unknown'}
+                              </td>
+                              <td className="px-4 py-4 whitespace-nowrap">
+                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                  delivery.status === 'received' ? 'bg-green-100 text-green-800' :
+                                  delivery.status === 'shipped' ? 'bg-yellow-100 text-yellow-800' :
+                                  delivery.status === 'confirmed' ? 'bg-blue-100 text-blue-800' :
+                                  delivery.status === 'ordered' ? 'bg-purple-100 text-purple-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {delivery.status}
+                                </span>
+                              </td>
+                              <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {formatDate(delivery.expectedDeliveryDate)}
+                              </td>
+                              <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {formatDate(delivery.deliveryDate)}
+                              </td>
+                              <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                                ₹{delivery.totalAmount?.toLocaleString() || 0}
+                              </td>
+                              <td className="px-4 py-4 whitespace-nowrap text-sm">
+                                {daysRemaining !== null ? (
+                                  <span className={`font-medium ${
+                                    isOverdue ? 'text-red-600' :
+                                    daysRemaining <= 2 ? 'text-yellow-600' :
+                                    'text-green-600'
+                                  }`}>
+                                    {isOverdue ? `${Math.abs(daysRemaining)} days overdue` :
+                                     daysRemaining === 0 ? 'Due today' :
+                                     `${daysRemaining} days`}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
+                            No deliveries to track
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex justify-end pt-4">
+                  <button
+                    onClick={() => setDeliveryModal({ show: false, deliveries: [] })}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Medicine Request Modal */}
+      {addRequestModal.show && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-10 mx-auto p-5 border w-full max-w-md shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-medium text-gray-900 text-left">Add New Medicine Request</h3>
+                <button
+                  onClick={() => setAddRequestModal({ show: false })}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {error && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center">
+                  <AlertTriangle className="h-4 w-4 text-red-500 mr-2" />
+                  <span className="text-red-700 text-sm text-left">{error}</span>
                 </div>
               )}
 
-              <div className="flex justify-end space-x-3 mt-6">
-                <button
-                  onClick={() => setEditModal({ show: false, purchase: null })}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={() => {
-                    setEditModal({ show: false, purchase: null });
-                    setStatusModal({ show: true, purchase: editModal.purchase });
-                  }}
-                  className="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700"
-                >
-                  Update Status
-                </button>
-              </div>
+              <AddMedicineRequestForm
+                onSuccess={() => {
+                  setAddRequestModal({ show: false });
+                  fetchMedicineRequests(); // Refresh the requests list
+                }}
+                onError={(errorMessage) => setError(errorMessage)}
+              />
             </div>
           </div>
         </div>

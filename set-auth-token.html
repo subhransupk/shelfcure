@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Set Authentication Token</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        button {
+            background-color: #22c55e;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background-color: #16a34a;
+        }
+        .success {
+            color: #22c55e;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .info {
+            background-color: #f0f9ff;
+            border: 1px solid #0ea5e9;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 15px 0;
+        }
+        pre {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ShelfCure Analytics - Set Authentication Token</h1>
+        
+        <div class="info">
+            <strong>Instructions:</strong>
+            <ol>
+                <li>Click the "Set Store Manager Token" button below</li>
+                <li>Go to <a href="http://localhost:3000/store-panel/analytics" target="_blank">Analytics Page</a></li>
+                <li>Refresh the page to see real data</li>
+            </ol>
+        </div>
+
+        <button onclick="setStoreManagerToken()">Set Store Manager Token</button>
+        <button onclick="clearTokens()">Clear All Tokens</button>
+        <button onclick="checkTokens()">Check Current Tokens</button>
+
+        <div id="result"></div>
+
+        <h3>Current Token Status:</h3>
+        <pre id="tokenStatus">Click "Check Current Tokens" to see status</pre>
+
+        <h3>Test Analytics API:</h3>
+        <button onclick="testAnalyticsAPI()">Test Analytics API Call</button>
+        <div id="apiResult"></div>
+    </div>
+
+    <script>
+        function setStoreManagerToken() {
+            // Token from our test
+            const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4YjlkMzRkMzRkNTU1MDA4MDIwODMzZCIsImlhdCI6MTc1ODAyMzg1NywiZXhwIjoxNzU4NjI4NjU3fQ.CAtsugIIaTtLjqPXpSC_loMGIHBcRVJzv39-b5IffQg';
+            const user = {
+                "id": "68b9d34d34d555008020833d",
+                "name": "mota",
+                "email": "mota@gmail.com",
+                "phone": "4645645640",
+                "role": "store_manager",
+                "avatar": null,
+                "currentStore": {
+                    "_id": "68b9cb21dde66276dda440a5",
+                    "name": "subh",
+                    "fullAddress": "undefined, undefined, undefined - undefined",
+                    "totalStaff": 0,
+                    "id": "68b9cb21dde66276dda440a5"
+                },
+                "permissions": {
+                    "inventory": {"view": true, "add": false, "edit": false, "delete": false},
+                    "sales": {"view": true, "create": false, "edit": false, "delete": false, "refund": false},
+                    "purchases": {"view": false, "create": false, "edit": false, "delete": false},
+                    "customers": {"view": true, "add": false, "edit": false, "delete": false},
+                    "reports": {"view": false, "export": false},
+                    "settings": {"view": false, "edit": false}
+                },
+                "preferences": {
+                    "notifications": {"email": true, "push": true, "sms": false},
+                    "theme": "light",
+                    "language": "en",
+                    "defaultUnitType": "both"
+                },
+                "lastLogin": "2025-09-16T11:57:37.283Z"
+            };
+
+            localStorage.setItem('token', token);
+            localStorage.setItem('user', JSON.stringify(user));
+            
+            document.getElementById('result').innerHTML = '<div class="success">✅ Store Manager token set successfully!</div>';
+            checkTokens();
+        }
+
+        function clearTokens() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            localStorage.removeItem('adminToken');
+            localStorage.removeItem('adminUser');
+            
+            document.getElementById('result').innerHTML = '<div class="success">✅ All tokens cleared!</div>';
+            checkTokens();
+        }
+
+        function checkTokens() {
+            const token = localStorage.getItem('token');
+            const user = localStorage.getItem('user');
+            const adminToken = localStorage.getItem('adminToken');
+            
+            let status = 'Current localStorage contents:\n\n';
+            status += `Regular Token: ${token ? 'Present' : 'Not found'}\n`;
+            status += `Regular User: ${user ? 'Present' : 'Not found'}\n`;
+            status += `Admin Token: ${adminToken ? 'Present' : 'Not found'}\n\n`;
+            
+            if (user) {
+                try {
+                    const userData = JSON.parse(user);
+                    status += `User Details:\n`;
+                    status += `- Name: ${userData.name}\n`;
+                    status += `- Email: ${userData.email}\n`;
+                    status += `- Role: ${userData.role}\n`;
+                    status += `- Store: ${userData.currentStore?.name}\n`;
+                } catch (e) {
+                    status += 'User data is corrupted\n';
+                }
+            }
+            
+            document.getElementById('tokenStatus').textContent = status;
+        }
+
+        async function testAnalyticsAPI() {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                document.getElementById('apiResult').innerHTML = '<div style="color: red;">❌ No token found. Please set token first.</div>';
+                return;
+            }
+
+            try {
+                const response = await fetch('http://localhost:5000/api/store-manager/analytics?period=30d', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('apiResult').innerHTML = `
+                        <div class="success">✅ Analytics API working!</div>
+                        <pre>Revenue: ₹${data.data.summary.totalRevenue}
+Sales: ${data.data.summary.totalSales}
+Period: ${data.data.period}
+Daily Sales: ${data.data.dailySales.length} days
+Top Medicines: ${data.data.topMedicines.length} items</pre>
+                    `;
+                } else {
+                    const errorText = await response.text();
+                    document.getElementById('apiResult').innerHTML = `<div style="color: red;">❌ API Error (${response.status}): ${errorText}</div>`;
+                }
+            } catch (error) {
+                document.getElementById('apiResult').innerHTML = `<div style="color: red;">❌ Network Error: ${error.message}</div>`;
+            }
+        }
+
+        // Check tokens on page load
+        window.onload = function() {
+            checkTokens();
+        };
+    </script>
+</body>
+</html>

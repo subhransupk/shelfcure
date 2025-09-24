@@ -26,6 +26,7 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 import StoreManagerLayout from '../components/store-manager/StoreManagerLayout';
 import { getCurrentUser } from '../services/authService';
+import { createNumericInputHandler, VALIDATION_OPTIONS } from '../utils/inputValidation';
 
 const StoreManagerInventory = () => {
   const location = useLocation();
@@ -104,18 +105,18 @@ const StoreManagerInventory = () => {
     
     // Pricing and Stock
     stripInfo: {
-      purchasePrice: 0,
-      sellingPrice: 0,
-      mrp: 0,
-      stock: 0,
+      purchasePrice: '',
+      sellingPrice: '',
+      mrp: '',
+      stock: '',
       minStock: 5,
       reorderLevel: 10
     },
     individualInfo: {
-      purchasePrice: 0,
-      sellingPrice: 0,
-      mrp: 0,
-      stock: 0,
+      purchasePrice: '',
+      sellingPrice: '',
+      mrp: '',
+      stock: '',
       minStock: 50,
       reorderLevel: 100
     },
@@ -171,18 +172,18 @@ const StoreManagerInventory = () => {
   // Master medicine inventory data (for pricing and stock when adding master medicine to inventory)
   const [masterMedicineInventoryData, setMasterMedicineInventoryData] = useState({
     stripInfo: {
-      purchasePrice: 0,
-      sellingPrice: 0,
-      mrp: 0,
-      stock: 0,
+      purchasePrice: '',
+      sellingPrice: '',
+      mrp: '',
+      stock: '',
       minStock: 5,
       reorderLevel: 10
     },
     individualInfo: {
-      purchasePrice: 0,
-      sellingPrice: 0,
-      mrp: 0,
-      stock: 0,
+      purchasePrice: '',
+      sellingPrice: '',
+      mrp: '',
+      stock: '',
       minStock: 50,
       reorderLevel: 100
     },
@@ -735,18 +736,18 @@ const StoreManagerInventory = () => {
       
       // Pricing and Stock
       stripInfo: {
-        purchasePrice: 0,
-        sellingPrice: 0,
-        mrp: 0,
-        stock: 0,
+        purchasePrice: '',
+        sellingPrice: '',
+        mrp: '',
+        stock: '',
         minStock: 5,
         reorderLevel: 10
       },
       individualInfo: {
-        purchasePrice: 0,
-        sellingPrice: 0,
-        mrp: 0,
-        stock: 0,
+        purchasePrice: '',
+        sellingPrice: '',
+        mrp: '',
+        stock: '',
         minStock: 50,
         reorderLevel: 100
       },
@@ -804,18 +805,18 @@ const StoreManagerInventory = () => {
           };
 
           // Auto-calculate Individual Unit Purchase Price when Strip Purchase Price changes
-          if (field === 'stripInfo.purchasePrice' && value > 0) {
+          if (field === 'stripInfo.purchasePrice' && value && parseFloat(value) > 0) {
             const unitsPerStrip = prev.unitTypes.unitsPerStrip || 10;
             if (unitsPerStrip > 0) {
-              newData.individualInfo.purchasePrice = parseFloat((value / unitsPerStrip).toFixed(2));
+              newData.individualInfo.purchasePrice = parseFloat((parseFloat(value) / unitsPerStrip).toFixed(2)).toString();
             }
           }
 
           // Auto-calculate Individual Unit MRP when Strip MRP changes
-          if (field === 'stripInfo.mrp' && value > 0) {
+          if (field === 'stripInfo.mrp' && value && parseFloat(value) > 0) {
             const unitsPerStrip = prev.unitTypes.unitsPerStrip || 10;
             if (unitsPerStrip > 0) {
-              newData.individualInfo.mrp = parseFloat((value / unitsPerStrip).toFixed(2));
+              newData.individualInfo.mrp = parseFloat((parseFloat(value) / unitsPerStrip).toFixed(2)).toString();
             }
           }
 
@@ -865,24 +866,24 @@ const StoreManagerInventory = () => {
           };
 
           // Auto-calculate Individual Unit Purchase Price when Strip Purchase Price changes
-          if (field === 'stripInfo.purchasePrice' && value > 0) {
+          if (field === 'stripInfo.purchasePrice' && value && parseFloat(value) > 0) {
             const unitsPerStrip = isCustomMode
               ? customMedicineData.unitTypes.unitsPerStrip
               : selectedMasterMedicine?.unitTypes?.unitsPerStrip || 10;
 
             if (unitsPerStrip > 0) {
-              newData.individualInfo.purchasePrice = parseFloat((value / unitsPerStrip).toFixed(2));
+              newData.individualInfo.purchasePrice = parseFloat((parseFloat(value) / unitsPerStrip).toFixed(2)).toString();
             }
           }
 
           // Auto-calculate Individual Unit MRP when Strip MRP changes
-          if (field === 'stripInfo.mrp' && value > 0) {
+          if (field === 'stripInfo.mrp' && value && parseFloat(value) > 0) {
             const unitsPerStrip = isCustomMode
               ? customMedicineData.unitTypes.unitsPerStrip
               : selectedMasterMedicine?.unitTypes?.unitsPerStrip || 10;
 
             if (unitsPerStrip > 0) {
-              newData.individualInfo.mrp = parseFloat((value / unitsPerStrip).toFixed(2));
+              newData.individualInfo.mrp = parseFloat((parseFloat(value) / unitsPerStrip).toFixed(2)).toString();
             }
           }
 
@@ -990,23 +991,54 @@ const StoreManagerInventory = () => {
     setSelectedMedicineForAction(medicine);
     setEditMedicineData({
       ...medicine,
-      // Ensure we have the correct structure for editing
-      stripInfo: medicine.stripInfo || {
-        purchasePrice: 0,
-        sellingPrice: 0,
-        mrp: 0,
-        stock: 0,
+      // Ensure we have the correct structure for editing - convert numbers to strings for display
+      stripInfo: medicine.stripInfo ? {
+        ...medicine.stripInfo,
+        purchasePrice: medicine.stripInfo.purchasePrice?.toString() || '',
+        sellingPrice: medicine.stripInfo.sellingPrice?.toString() || '',
+        mrp: medicine.stripInfo.mrp?.toString() || '',
+        stock: medicine.stripInfo.stock?.toString() || '',
+        minStock: medicine.stripInfo.minStock || 5,
+        reorderLevel: medicine.stripInfo.reorderLevel || 10
+      } : {
+        purchasePrice: '',
+        sellingPrice: '',
+        mrp: '',
+        stock: '',
         minStock: 5,
         reorderLevel: 10
       },
-      individualInfo: medicine.individualInfo || {
-        purchasePrice: 0,
-        sellingPrice: 0,
-        mrp: 0,
-        stock: 0,
+      individualInfo: medicine.individualInfo ? {
+        ...medicine.individualInfo,
+        purchasePrice: medicine.individualInfo.purchasePrice?.toString() || '',
+        sellingPrice: medicine.individualInfo.sellingPrice?.toString() || '',
+        mrp: medicine.individualInfo.mrp?.toString() || '',
+        stock: medicine.individualInfo.stock?.toString() || '',
+        minStock: medicine.individualInfo.minStock || 50,
+        reorderLevel: medicine.individualInfo.reorderLevel || 100
+      } : {
+        purchasePrice: '',
+        sellingPrice: '',
+        mrp: '',
+        stock: '',
         minStock: 50,
         reorderLevel: 100
-      }
+      },
+      // Ensure dosage object exists
+      dosage: medicine.dosage || {
+        strength: '',
+        form: '',
+        frequency: ''
+      },
+      // Ensure arrays are properly initialized
+      tags: medicine.tags || [],
+      sideEffects: medicine.sideEffects || [],
+      contraindications: medicine.contraindications || [],
+      interactions: medicine.interactions || [],
+      // Ensure other fields have defaults
+      notes: medicine.notes || '',
+      requiresPrescription: medicine.requiresPrescription || false,
+      isActive: medicine.isActive !== false // Default to true unless explicitly false
     });
     setShowEditModal(true);
   };
@@ -1058,7 +1090,40 @@ const StoreManagerInventory = () => {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(editMedicineData)
+        body: JSON.stringify({
+          ...editMedicineData,
+          stripInfo: {
+            ...editMedicineData.stripInfo,
+            purchasePrice: parseFloat(editMedicineData.stripInfo?.purchasePrice) || 0,
+            sellingPrice: parseFloat(editMedicineData.stripInfo?.sellingPrice) || 0,
+            mrp: parseFloat(editMedicineData.stripInfo?.mrp) || 0,
+            stock: parseInt(editMedicineData.stripInfo?.stock) || 0,
+            minStock: parseInt(editMedicineData.stripInfo?.minStock) || 5,
+            reorderLevel: parseInt(editMedicineData.stripInfo?.reorderLevel) || 10,
+          },
+          individualInfo: {
+            ...editMedicineData.individualInfo,
+            purchasePrice: parseFloat(editMedicineData.individualInfo?.purchasePrice) || 0,
+            sellingPrice: parseFloat(editMedicineData.individualInfo?.sellingPrice) || 0,
+            mrp: parseFloat(editMedicineData.individualInfo?.mrp) || 0,
+            stock: parseInt(editMedicineData.individualInfo?.stock) || 0,
+            minStock: parseInt(editMedicineData.individualInfo?.minStock) || 50,
+            reorderLevel: parseInt(editMedicineData.individualInfo?.reorderLevel) || 100,
+          },
+          // Ensure dosage object exists
+          dosage: {
+            strength: editMedicineData.dosage?.strength || '',
+            form: editMedicineData.dosage?.form || '',
+            frequency: editMedicineData.dosage?.frequency || ''
+          },
+          // Convert date to proper format
+          expiryDate: editMedicineData.expiryDate ? new Date(editMedicineData.expiryDate).toISOString() : null,
+          // Ensure arrays are properly formatted
+          tags: Array.isArray(editMedicineData.tags) ? editMedicineData.tags : [],
+          sideEffects: Array.isArray(editMedicineData.sideEffects) ? editMedicineData.sideEffects : [],
+          contraindications: Array.isArray(editMedicineData.contraindications) ? editMedicineData.contraindications : [],
+          interactions: Array.isArray(editMedicineData.interactions) ? editMedicineData.interactions : []
+        })
       });
 
       if (response.ok) {
@@ -1107,20 +1172,20 @@ const StoreManagerInventory = () => {
 
     // Check if strips are enabled and validate strip fields
     if (customMedicineData.unitTypes.hasStrips) {
-      if (!customMedicineData.stripInfo.purchasePrice || customMedicineData.stripInfo.purchasePrice <= 0) {
+      if (!customMedicineData.stripInfo.purchasePrice || parseFloat(customMedicineData.stripInfo.purchasePrice) <= 0) {
         validationErrors.push('Strip Purchase Price is required');
       }
-      if (!customMedicineData.stripInfo.sellingPrice || customMedicineData.stripInfo.sellingPrice <= 0) {
+      if (!customMedicineData.stripInfo.sellingPrice || parseFloat(customMedicineData.stripInfo.sellingPrice) <= 0) {
         validationErrors.push('Strip Selling Price is required');
       }
     }
 
     // Check if individual units are enabled and validate individual fields
     if (customMedicineData.unitTypes.hasIndividual) {
-      if (!customMedicineData.individualInfo.purchasePrice || customMedicineData.individualInfo.purchasePrice <= 0) {
+      if (!customMedicineData.individualInfo.purchasePrice || parseFloat(customMedicineData.individualInfo.purchasePrice) <= 0) {
         validationErrors.push('Individual Unit Purchase Price is required');
       }
-      if (!customMedicineData.individualInfo.sellingPrice || customMedicineData.individualInfo.sellingPrice <= 0) {
+      if (!customMedicineData.individualInfo.sellingPrice || parseFloat(customMedicineData.individualInfo.sellingPrice) <= 0) {
         validationErrors.push('Individual Unit Selling Price is required');
       }
     }
@@ -1139,13 +1204,32 @@ const StoreManagerInventory = () => {
         return;
       }
 
+      // Convert string values to numbers for backend
+      const dataToSend = {
+        ...customMedicineData,
+        stripInfo: {
+          ...customMedicineData.stripInfo,
+          purchasePrice: parseFloat(customMedicineData.stripInfo.purchasePrice) || 0,
+          sellingPrice: parseFloat(customMedicineData.stripInfo.sellingPrice) || 0,
+          mrp: parseFloat(customMedicineData.stripInfo.mrp) || 0,
+          stock: parseInt(customMedicineData.stripInfo.stock) || 0,
+        },
+        individualInfo: {
+          ...customMedicineData.individualInfo,
+          purchasePrice: parseFloat(customMedicineData.individualInfo.purchasePrice) || 0,
+          sellingPrice: parseFloat(customMedicineData.individualInfo.sellingPrice) || 0,
+          mrp: parseFloat(customMedicineData.individualInfo.mrp) || 0,
+          stock: parseInt(customMedicineData.individualInfo.stock) || 0,
+        }
+      };
+
       const response = await fetch('http://localhost:5000/api/store-manager/medicines', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(customMedicineData)
+        body: JSON.stringify(dataToSend)
       });
 
       const data = await response.json();
@@ -1216,11 +1300,29 @@ const StoreManagerInventory = () => {
       }
 
       // Prepare the data for master medicine addition
+      const inventoryDataConverted = {
+        ...masterMedicineInventoryData,
+        stripInfo: {
+          ...masterMedicineInventoryData.stripInfo,
+          purchasePrice: parseFloat(masterMedicineInventoryData.stripInfo.purchasePrice) || 0,
+          sellingPrice: parseFloat(masterMedicineInventoryData.stripInfo.sellingPrice) || 0,
+          mrp: parseFloat(masterMedicineInventoryData.stripInfo.mrp) || 0,
+          stock: parseInt(masterMedicineInventoryData.stripInfo.stock) || 0,
+        },
+        individualInfo: {
+          ...masterMedicineInventoryData.individualInfo,
+          purchasePrice: parseFloat(masterMedicineInventoryData.individualInfo.purchasePrice) || 0,
+          sellingPrice: parseFloat(masterMedicineInventoryData.individualInfo.sellingPrice) || 0,
+          mrp: parseFloat(masterMedicineInventoryData.individualInfo.mrp) || 0,
+          stock: parseInt(masterMedicineInventoryData.individualInfo.stock) || 0,
+        }
+      };
+
       const medicineData = {
         ...selectedMasterMedicine,
         supplier: selectedSupplier, // Use the selected supplier from non-custom mode
         // Add inventory-specific data
-        ...masterMedicineInventoryData
+        ...inventoryDataConverted
       };
 
       const response = await fetch('http://localhost:5000/api/store-manager/medicines', {
@@ -1246,18 +1348,18 @@ const StoreManagerInventory = () => {
       // Reset master medicine inventory data
       setMasterMedicineInventoryData({
         stripInfo: {
-          purchasePrice: 0,
-          sellingPrice: 0,
-          mrp: 0,
-          stock: 0,
+          purchasePrice: '',
+          sellingPrice: '',
+          mrp: '',
+          stock: '',
           minStock: 5,
           reorderLevel: 10
         },
         individualInfo: {
-          purchasePrice: 0,
-          sellingPrice: 0,
-          mrp: 0,
-          stock: 0,
+          purchasePrice: '',
+          sellingPrice: '',
+          mrp: '',
+          stock: '',
           minStock: 50,
           reorderLevel: 100
         },
@@ -1517,18 +1619,30 @@ const StoreManagerInventory = () => {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Category
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Strip Stock
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Strip Pricing
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Individual Stock
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Individual Pricing
-                      </th>
+                      {/* Show Strip Stock header only if any medicine has strips configured */}
+                      {medicines.some(medicine => medicine.unitTypes?.hasStrips) && (
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Strip Stock
+                        </th>
+                      )}
+                      {/* Show Strip Pricing header only if any medicine has strips configured */}
+                      {medicines.some(medicine => medicine.unitTypes?.hasStrips) && (
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Strip Pricing
+                        </th>
+                      )}
+                      {/* Show Individual Stock header only if any medicine has individual units configured */}
+                      {medicines.some(medicine => medicine.unitTypes?.hasIndividual) && (
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Individual Stock
+                        </th>
+                      )}
+                      {/* Show Individual Pricing header only if any medicine has individual units configured */}
+                      {medicines.some(medicine => medicine.unitTypes?.hasIndividual) && (
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Individual Pricing
+                        </th>
+                      )}
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Status
                       </th>
@@ -1564,67 +1678,106 @@ const StoreManagerInventory = () => {
                                 {medicine.category}
                               </span>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                              <div className="text-left">
-                                <div className="font-medium">
-                                  {medicine.stripInfo?.stock || medicine.inventory?.stripQuantity || 0} strips
-                                </div>
-                                <div className="text-xs text-gray-500">
-                                  Min: {medicine.stripInfo?.minStock || medicine.inventory?.stripMinimumStock || 0}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                              <div className="text-left">
-                                {medicine.stripInfo ? (
-                                  <>
+                            {/* Strip Stock - Show if any medicine has strips OR show empty cell to maintain table structure */}
+                            {medicines.some(med => med.unitTypes?.hasStrips) && (
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {medicine.unitTypes?.hasStrips ? (
+                                  <div className="text-left">
                                     <div className="font-medium">
-                                      ₹{medicine.stripInfo.sellingPrice || 0}
+                                      {medicine.stripInfo?.stock || medicine.inventory?.stripQuantity || 0} strips
                                     </div>
                                     <div className="text-xs text-gray-500">
-                                      MRP: ₹{medicine.stripInfo.mrp || 0}
+                                      Min: {medicine.stripInfo?.minStock || medicine.inventory?.stripMinimumStock || 0}
                                     </div>
-                                    <div className="text-xs text-gray-400">
-                                      Cost: ₹{medicine.stripInfo.purchasePrice || 0}
-                                    </div>
-                                  </>
+                                  </div>
                                 ) : (
-                                  <span className="text-gray-400 text-xs">Not set</span>
+                                  <div className="text-left">
+                                    <span className="text-gray-400 text-xs">N/A</span>
+                                  </div>
                                 )}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                              <div className="text-left">
-                                <div className="font-medium">
-                                  {medicine.individualInfo?.stock || medicine.inventory?.individualQuantity || 0} units
-                                </div>
-                                <div className="text-xs text-gray-500">
-                                  Min: {medicine.individualInfo?.minStock || medicine.inventory?.individualMinimumStock || 0}
-                                </div>
-                                <div className="text-xs text-gray-400">
-                                  (Cut medicines only)
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                              <div className="text-left">
-                                {medicine.individualInfo ? (
-                                  <>
+                              </td>
+                            )}
+
+                            {/* Strip Pricing - Show if any medicine has strips OR show empty cell to maintain table structure */}
+                            {medicines.some(med => med.unitTypes?.hasStrips) && (
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {medicine.unitTypes?.hasStrips ? (
+                                  <div className="text-left">
+                                    {medicine.stripInfo ? (
+                                      <>
+                                        <div className="font-medium">
+                                          ₹{medicine.stripInfo.sellingPrice || 0}
+                                        </div>
+                                        <div className="text-xs text-gray-500">
+                                          MRP: ₹{medicine.stripInfo.mrp || 0}
+                                        </div>
+                                        <div className="text-xs text-gray-400">
+                                          Cost: ₹{medicine.stripInfo.purchasePrice || 0}
+                                        </div>
+                                      </>
+                                    ) : (
+                                      <span className="text-gray-400 text-xs">Not set</span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="text-left">
+                                    <span className="text-gray-400 text-xs">N/A</span>
+                                  </div>
+                                )}
+                              </td>
+                            )}
+
+                            {/* Individual Stock - Show if any medicine has individual units OR show empty cell to maintain table structure */}
+                            {medicines.some(med => med.unitTypes?.hasIndividual) && (
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {medicine.unitTypes?.hasIndividual ? (
+                                  <div className="text-left">
                                     <div className="font-medium">
-                                      ₹{medicine.individualInfo.sellingPrice || 0}
+                                      {medicine.individualInfo?.stock || medicine.inventory?.individualQuantity || 0} units
                                     </div>
                                     <div className="text-xs text-gray-500">
-                                      MRP: ₹{medicine.individualInfo.mrp || 0}
+                                      Min: {medicine.individualInfo?.minStock || medicine.inventory?.individualMinimumStock || 0}
                                     </div>
                                     <div className="text-xs text-gray-400">
-                                      Cost: ₹{medicine.individualInfo.purchasePrice || 0}
+                                      (Cut medicines only)
                                     </div>
-                                  </>
+                                  </div>
                                 ) : (
-                                  <span className="text-gray-400 text-xs">Not set</span>
+                                  <div className="text-left">
+                                    <span className="text-gray-400 text-xs">N/A</span>
+                                  </div>
                                 )}
-                              </div>
-                            </td>
+                              </td>
+                            )}
+
+                            {/* Individual Pricing - Show if any medicine has individual units OR show empty cell to maintain table structure */}
+                            {medicines.some(med => med.unitTypes?.hasIndividual) && (
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {medicine.unitTypes?.hasIndividual ? (
+                                  <div className="text-left">
+                                    {medicine.individualInfo ? (
+                                      <>
+                                        <div className="font-medium">
+                                          ₹{medicine.individualInfo.sellingPrice || 0}
+                                        </div>
+                                        <div className="text-xs text-gray-500">
+                                          MRP: ₹{medicine.individualInfo.mrp || 0}
+                                        </div>
+                                        <div className="text-xs text-gray-400">
+                                          Cost: ₹{medicine.individualInfo.purchasePrice || 0}
+                                        </div>
+                                      </>
+                                    ) : (
+                                      <span className="text-gray-400 text-xs">Not set</span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="text-left">
+                                    <span className="text-gray-400 text-xs">N/A</span>
+                                  </div>
+                                )}
+                              </td>
+                            )}
                             <td className="px-6 py-4 whitespace-nowrap">
                               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${stockStatus.color}`}>
                                 {getStockIcon(stockStatus.status)}
@@ -1642,7 +1795,12 @@ const StoreManagerInventory = () => {
                                           {location.rack?.rackNumber || 'Unknown'}-{location.shelf}-{location.position}
                                         </span>
                                         <span className="text-xs text-gray-500">
-                                          ({location.stripQuantity || 0}s/{location.individualQuantity || 0}u)
+                                          ({medicine.unitTypes?.hasStrips && medicine.unitTypes?.hasIndividual
+                                            ? `${location.stripQuantity || 0}s/${location.individualQuantity || 0}u`
+                                            : medicine.unitTypes?.hasStrips
+                                              ? `${location.stripQuantity || 0}s`
+                                              : `${location.individualQuantity || 0}u`
+                                          })
                                         </span>
                                       </div>
                                     ))}
@@ -2538,14 +2696,13 @@ const StoreManagerInventory = () => {
                                 type="number"
                                   step="0.01"
                                   value={isCustomMode ? customMedicineData.stripInfo.purchasePrice : masterMedicineInventoryData.stripInfo.purchasePrice}
-                                  onChange={(e) => {
-                                    const value = parseFloat(e.target.value) || 0;
-                                    if (isCustomMode) {
-                                      handleCustomMedicineInputChange('stripInfo.purchasePrice', value);
-                                    } else {
-                                      handleMasterMedicineInventoryChange('stripInfo.purchasePrice', value);
-                                    }
-                                  }}
+                                  onChange={createNumericInputHandler(
+                                    isCustomMode ?
+                                      (value) => handleCustomMedicineInputChange('stripInfo.purchasePrice', value) :
+                                      (value) => handleMasterMedicineInventoryChange('stripInfo.purchasePrice', value),
+                                    null,
+                                    VALIDATION_OPTIONS.PRICE
+                                  )}
                                 placeholder="0.00"
                                   required={((isCustomMode && customMedicineData.unitTypes.hasStrips) || (!isCustomMode && selectedMasterMedicine.unitTypes?.hasStrips))}
                                 className="mt-1 block w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-green-500 focus:border-green-500"
@@ -2557,14 +2714,13 @@ const StoreManagerInventory = () => {
                                 type="number"
                                   step="0.01"
                                   value={isCustomMode ? customMedicineData.stripInfo.sellingPrice : masterMedicineInventoryData.stripInfo.sellingPrice}
-                                  onChange={(e) => {
-                                    const value = parseFloat(e.target.value) || 0;
-                                    if (isCustomMode) {
-                                      handleCustomMedicineInputChange('stripInfo.sellingPrice', value);
-                                    } else {
-                                      handleMasterMedicineInventoryChange('stripInfo.sellingPrice', value);
-                                    }
-                                  }}
+                                  onChange={createNumericInputHandler(
+                                    isCustomMode ?
+                                      (value) => handleCustomMedicineInputChange('stripInfo.sellingPrice', value) :
+                                      (value) => handleMasterMedicineInventoryChange('stripInfo.sellingPrice', value),
+                                    null,
+                                    VALIDATION_OPTIONS.PRICE
+                                  )}
                                 placeholder="0.00"
                                   required={((isCustomMode && customMedicineData.unitTypes.hasStrips) || (!isCustomMode && selectedMasterMedicine.unitTypes?.hasStrips))}
                                 className="mt-1 block w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-green-500 focus:border-green-500"
@@ -2578,14 +2734,13 @@ const StoreManagerInventory = () => {
                                 type="number"
                                   step="0.01"
                                   value={isCustomMode ? customMedicineData.stripInfo.mrp : masterMedicineInventoryData.stripInfo.mrp}
-                                  onChange={(e) => {
-                                    const value = parseFloat(e.target.value) || 0;
-                                    if (isCustomMode) {
-                                      handleCustomMedicineInputChange('stripInfo.mrp', value);
-                                    } else {
-                                      handleMasterMedicineInventoryChange('stripInfo.mrp', value);
-                                    }
-                                  }}
+                                  onChange={createNumericInputHandler(
+                                    isCustomMode ?
+                                      (value) => handleCustomMedicineInputChange('stripInfo.mrp', value) :
+                                      (value) => handleMasterMedicineInventoryChange('stripInfo.mrp', value),
+                                    null,
+                                    VALIDATION_OPTIONS.PRICE
+                                  )}
                                 placeholder="0.00"
                                 className="mt-1 block w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-green-500 focus:border-green-500"
                               />
@@ -2595,14 +2750,13 @@ const StoreManagerInventory = () => {
                               <input
                                 type="number"
                                   value={isCustomMode ? customMedicineData.stripInfo.stock : masterMedicineInventoryData.stripInfo.stock}
-                                  onChange={(e) => {
-                                    const value = parseInt(e.target.value) || 0;
-                                    if (isCustomMode) {
-                                      handleCustomMedicineInputChange('stripInfo.stock', value);
-                                    } else {
-                                      handleMasterMedicineInventoryChange('stripInfo.stock', value);
-                                    }
-                                  }}
+                                  onChange={createNumericInputHandler(
+                                    isCustomMode ?
+                                      (value) => handleCustomMedicineInputChange('stripInfo.stock', value) :
+                                      (value) => handleMasterMedicineInventoryChange('stripInfo.stock', value),
+                                    null,
+                                    VALIDATION_OPTIONS.QUANTITY
+                                  )}
                                 placeholder="0"
                                 className="mt-1 block w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-green-500 focus:border-green-500"
                               />
@@ -2659,14 +2813,13 @@ const StoreManagerInventory = () => {
                                 type="number"
                                   step="0.01"
                                   value={isCustomMode ? customMedicineData.individualInfo.purchasePrice : masterMedicineInventoryData.individualInfo.purchasePrice}
-                                  onChange={(e) => {
-                                    const value = parseFloat(e.target.value) || 0;
-                                    if (isCustomMode) {
-                                      handleCustomMedicineInputChange('individualInfo.purchasePrice', value);
-                                    } else {
-                                      handleMasterMedicineInventoryChange('individualInfo.purchasePrice', value);
-                                    }
-                                  }}
+                                  onChange={createNumericInputHandler(
+                                    isCustomMode ?
+                                      (value) => handleCustomMedicineInputChange('individualInfo.purchasePrice', value) :
+                                      (value) => handleMasterMedicineInventoryChange('individualInfo.purchasePrice', value),
+                                    null,
+                                    VALIDATION_OPTIONS.PRICE
+                                  )}
                                 placeholder="0.00"
                                   required={((isCustomMode && customMedicineData.unitTypes.hasIndividual) || (!isCustomMode && selectedMasterMedicine.unitTypes?.hasIndividual))}
                                 className="mt-1 block w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-purple-500 focus:border-purple-500"
@@ -2678,14 +2831,13 @@ const StoreManagerInventory = () => {
                                 type="number"
                                   step="0.01"
                                   value={isCustomMode ? customMedicineData.individualInfo.sellingPrice : masterMedicineInventoryData.individualInfo.sellingPrice}
-                                  onChange={(e) => {
-                                    const value = parseFloat(e.target.value) || 0;
-                                    if (isCustomMode) {
-                                      handleCustomMedicineInputChange('individualInfo.sellingPrice', value);
-                                    } else {
-                                      handleMasterMedicineInventoryChange('individualInfo.sellingPrice', value);
-                                    }
-                                  }}
+                                  onChange={createNumericInputHandler(
+                                    isCustomMode ?
+                                      (value) => handleCustomMedicineInputChange('individualInfo.sellingPrice', value) :
+                                      (value) => handleMasterMedicineInventoryChange('individualInfo.sellingPrice', value),
+                                    null,
+                                    VALIDATION_OPTIONS.PRICE
+                                  )}
                                 placeholder="0.00"
                                   required={((isCustomMode && customMedicineData.unitTypes.hasIndividual) || (!isCustomMode && selectedMasterMedicine.unitTypes?.hasIndividual))}
                                 className="mt-1 block w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-purple-500 focus:border-purple-500"
@@ -2699,14 +2851,13 @@ const StoreManagerInventory = () => {
                                 type="number"
                                   step="0.01"
                                   value={isCustomMode ? customMedicineData.individualInfo.mrp : masterMedicineInventoryData.individualInfo.mrp}
-                                  onChange={(e) => {
-                                    const value = parseFloat(e.target.value) || 0;
-                                    if (isCustomMode) {
-                                      handleCustomMedicineInputChange('individualInfo.mrp', value);
-                                    } else {
-                                      handleMasterMedicineInventoryChange('individualInfo.mrp', value);
-                                    }
-                                  }}
+                                  onChange={createNumericInputHandler(
+                                    isCustomMode ?
+                                      (value) => handleCustomMedicineInputChange('individualInfo.mrp', value) :
+                                      (value) => handleMasterMedicineInventoryChange('individualInfo.mrp', value),
+                                    null,
+                                    VALIDATION_OPTIONS.PRICE
+                                  )}
                                 placeholder="0.00"
                                 className="mt-1 block w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-purple-500 focus:border-purple-500"
                               />
@@ -2716,14 +2867,13 @@ const StoreManagerInventory = () => {
                               <input
                                 type="number"
                                   value={isCustomMode ? customMedicineData.individualInfo.stock : masterMedicineInventoryData.individualInfo.stock}
-                                  onChange={(e) => {
-                                    const value = parseInt(e.target.value) || 0;
-                                    if (isCustomMode) {
-                                      handleCustomMedicineInputChange('individualInfo.stock', value);
-                                    } else {
-                                      handleMasterMedicineInventoryChange('individualInfo.stock', value);
-                                    }
-                                  }}
+                                  onChange={createNumericInputHandler(
+                                    isCustomMode ?
+                                      (value) => handleCustomMedicineInputChange('individualInfo.stock', value) :
+                                      (value) => handleMasterMedicineInventoryChange('individualInfo.stock', value),
+                                    null,
+                                    VALIDATION_OPTIONS.QUANTITY
+                                  )}
                                 placeholder="0"
                                 className="mt-1 block w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-purple-500 focus:border-purple-500"
                               />
@@ -3119,22 +3269,52 @@ const StoreManagerInventory = () => {
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700">Manufacturer</label>
+                        <label className="block text-sm font-medium text-gray-700">Composition *</label>
+                        <input
+                          type="text"
+                          value={editMedicineData.composition || ''}
+                          onChange={(e) => handleEditMedicineInputChange('composition', e.target.value)}
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Manufacturer *</label>
                         <input
                           type="text"
                           value={editMedicineData.manufacturer || ''}
                           onChange={(e) => handleEditMedicineInputChange('manufacturer', e.target.value)}
                           className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                          required
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700">Category</label>
-                        <input
-                          type="text"
+                        <label className="block text-sm font-medium text-gray-700">Category *</label>
+                        <select
                           value={editMedicineData.category || ''}
                           onChange={(e) => handleEditMedicineInputChange('category', e.target.value)}
                           className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
-                        />
+                          required
+                        >
+                          <option value="">Select Category</option>
+                          <option value="Tablet">Tablet</option>
+                          <option value="Capsule">Capsule</option>
+                          <option value="Syrup">Syrup</option>
+                          <option value="Injection">Injection</option>
+                          <option value="Drops">Drops</option>
+                          <option value="Cream">Cream</option>
+                          <option value="Ointment">Ointment</option>
+                          <option value="Powder">Powder</option>
+                          <option value="Inhaler">Inhaler</option>
+                          <option value="Spray">Spray</option>
+                          <option value="Gel">Gel</option>
+                          <option value="Lotion">Lotion</option>
+                          <option value="Solution">Solution</option>
+                          <option value="Suspension">Suspension</option>
+                          <option value="Patch">Patch</option>
+                          <option value="Suppository">Suppository</option>
+                          <option value="Other">Other</option>
+                        </select>
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700">Barcode</label>
@@ -3154,6 +3334,76 @@ const StoreManagerInventory = () => {
                           className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
                         />
                       </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Expiry Date</label>
+                        <input
+                          type="date"
+                          value={editMedicineData.expiryDate ? new Date(editMedicineData.expiryDate).toISOString().split('T')[0] : ''}
+                          onChange={(e) => handleEditMedicineInputChange('expiryDate', e.target.value)}
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Medicine Information */}
+                    <div className="border-t pt-4">
+                      <h4 className="text-md font-medium text-gray-900 mb-3">Medicine Information</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Strength</label>
+                          <input
+                            type="text"
+                            value={editMedicineData.dosage?.strength || ''}
+                            onChange={(e) => handleEditMedicineInputChange('dosage.strength', e.target.value)}
+                            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                            placeholder="e.g., 500mg"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Form</label>
+                          <input
+                            type="text"
+                            value={editMedicineData.dosage?.form || ''}
+                            onChange={(e) => handleEditMedicineInputChange('dosage.form', e.target.value)}
+                            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                            placeholder="e.g., Tablet"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Frequency</label>
+                          <input
+                            type="text"
+                            value={editMedicineData.dosage?.frequency || ''}
+                            onChange={(e) => handleEditMedicineInputChange('dosage.frequency', e.target.value)}
+                            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                            placeholder="e.g., Twice daily"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={editMedicineData.requiresPrescription || false}
+                              onChange={(e) => handleEditMedicineInputChange('requiresPrescription', e.target.checked)}
+                              className="mr-2"
+                            />
+                            Requires Prescription
+                          </label>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={editMedicineData.isActive !== false}
+                              onChange={(e) => handleEditMedicineInputChange('isActive', e.target.checked)}
+                              className="mr-2"
+                            />
+                            Active
+                          </label>
+                        </div>
+                      </div>
                     </div>
 
                     {/* Stock Information */}
@@ -3168,21 +3418,31 @@ const StoreManagerInventory = () => {
                                 <label className="block text-sm font-medium text-gray-700">Stock</label>
                                 <input
                                   type="number"
-                                  value={editMedicineData.stripInfo?.stock || 0}
-                                  onChange={(e) => handleEditMedicineInputChange('stripInfo.stock', parseInt(e.target.value) || 0)}
+                                  value={editMedicineData.stripInfo?.stock || ''}
+                                  onChange={createNumericInputHandler(
+                                    (value) => handleEditMedicineInputChange('stripInfo.stock', value),
+                                    null,
+                                    VALIDATION_OPTIONS.QUANTITY
+                                  )}
                                   className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
                                   min="0"
+                                  placeholder="0"
                                 />
                               </div>
                               <div>
-                                <label className="block text-sm font-medium text-gray-700">MRP (₹)</label>
+                                <label className="block text-sm font-medium text-gray-700">Purchase Price (₹)</label>
                                 <input
                                   type="number"
                                   step="0.01"
-                                  value={editMedicineData.stripInfo?.mrp || 0}
-                                  onChange={(e) => handleEditMedicineInputChange('stripInfo.mrp', parseFloat(e.target.value) || 0)}
+                                  value={editMedicineData.stripInfo?.purchasePrice || ''}
+                                  onChange={createNumericInputHandler(
+                                    (value) => handleEditMedicineInputChange('stripInfo.purchasePrice', value),
+                                    null,
+                                    VALIDATION_OPTIONS.PRICE
+                                  )}
                                   className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
                                   min="0"
+                                  placeholder="0.00"
                                 />
                               </div>
                               <div>
@@ -3190,10 +3450,31 @@ const StoreManagerInventory = () => {
                                 <input
                                   type="number"
                                   step="0.01"
-                                  value={editMedicineData.stripInfo?.sellingPrice || 0}
-                                  onChange={(e) => handleEditMedicineInputChange('stripInfo.sellingPrice', parseFloat(e.target.value) || 0)}
+                                  value={editMedicineData.stripInfo?.sellingPrice || ''}
+                                  onChange={createNumericInputHandler(
+                                    (value) => handleEditMedicineInputChange('stripInfo.sellingPrice', value),
+                                    null,
+                                    VALIDATION_OPTIONS.PRICE
+                                  )}
                                   className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
                                   min="0"
+                                  placeholder="0.00"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700">MRP (₹)</label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={editMedicineData.stripInfo?.mrp || ''}
+                                  onChange={createNumericInputHandler(
+                                    (value) => handleEditMedicineInputChange('stripInfo.mrp', value),
+                                    null,
+                                    VALIDATION_OPTIONS.PRICE
+                                  )}
+                                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                                  min="0"
+                                  placeholder="0.00"
                                 />
                               </div>
                               <div>
@@ -3202,6 +3483,16 @@ const StoreManagerInventory = () => {
                                   type="number"
                                   value={editMedicineData.stripInfo?.minStock || 0}
                                   onChange={(e) => handleEditMedicineInputChange('stripInfo.minStock', parseInt(e.target.value) || 0)}
+                                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                                  min="0"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700">Reorder Level</label>
+                                <input
+                                  type="number"
+                                  value={editMedicineData.stripInfo?.reorderLevel || 0}
+                                  onChange={(e) => handleEditMedicineInputChange('stripInfo.reorderLevel', parseInt(e.target.value) || 0)}
                                   className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
                                   min="0"
                                 />
@@ -3218,21 +3509,31 @@ const StoreManagerInventory = () => {
                                 <label className="block text-sm font-medium text-gray-700">Stock (Cut Medicines)</label>
                                 <input
                                   type="number"
-                                  value={editMedicineData.individualInfo?.stock || 0}
-                                  onChange={(e) => handleEditMedicineInputChange('individualInfo.stock', parseInt(e.target.value) || 0)}
+                                  value={editMedicineData.individualInfo?.stock || ''}
+                                  onChange={createNumericInputHandler(
+                                    (value) => handleEditMedicineInputChange('individualInfo.stock', value),
+                                    null,
+                                    VALIDATION_OPTIONS.QUANTITY
+                                  )}
                                   className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
                                   min="0"
+                                  placeholder="0"
                                 />
                               </div>
                               <div>
-                                <label className="block text-sm font-medium text-gray-700">MRP (₹)</label>
+                                <label className="block text-sm font-medium text-gray-700">Purchase Price (₹)</label>
                                 <input
                                   type="number"
                                   step="0.01"
-                                  value={editMedicineData.individualInfo?.mrp || 0}
-                                  onChange={(e) => handleEditMedicineInputChange('individualInfo.mrp', parseFloat(e.target.value) || 0)}
+                                  value={editMedicineData.individualInfo?.purchasePrice || ''}
+                                  onChange={createNumericInputHandler(
+                                    (value) => handleEditMedicineInputChange('individualInfo.purchasePrice', value),
+                                    null,
+                                    VALIDATION_OPTIONS.PRICE
+                                  )}
                                   className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
                                   min="0"
+                                  placeholder="0.00"
                                 />
                               </div>
                               <div>
@@ -3240,10 +3541,31 @@ const StoreManagerInventory = () => {
                                 <input
                                   type="number"
                                   step="0.01"
-                                  value={editMedicineData.individualInfo?.sellingPrice || 0}
-                                  onChange={(e) => handleEditMedicineInputChange('individualInfo.sellingPrice', parseFloat(e.target.value) || 0)}
+                                  value={editMedicineData.individualInfo?.sellingPrice || ''}
+                                  onChange={createNumericInputHandler(
+                                    (value) => handleEditMedicineInputChange('individualInfo.sellingPrice', value),
+                                    null,
+                                    VALIDATION_OPTIONS.PRICE
+                                  )}
                                   className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
                                   min="0"
+                                  placeholder="0.00"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700">MRP (₹)</label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={editMedicineData.individualInfo?.mrp || ''}
+                                  onChange={createNumericInputHandler(
+                                    (value) => handleEditMedicineInputChange('individualInfo.mrp', value),
+                                    null,
+                                    VALIDATION_OPTIONS.PRICE
+                                  )}
+                                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                                  min="0"
+                                  placeholder="0.00"
                                 />
                               </div>
                               <div>
@@ -3256,9 +3578,88 @@ const StoreManagerInventory = () => {
                                   min="0"
                                 />
                               </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700">Reorder Level</label>
+                                <input
+                                  type="number"
+                                  value={editMedicineData.individualInfo?.reorderLevel || 0}
+                                  onChange={(e) => handleEditMedicineInputChange('individualInfo.reorderLevel', parseInt(e.target.value) || 0)}
+                                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                                  min="0"
+                                />
+                              </div>
                             </div>
                           </div>
                         )}
+                      </div>
+                    </div>
+
+                    {/* Additional Information */}
+                    <div className="border-t pt-4">
+                      <h4 className="text-md font-medium text-gray-900 mb-3">Additional Information</h4>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Notes</label>
+                          <textarea
+                            value={editMedicineData.notes || ''}
+                            onChange={(e) => handleEditMedicineInputChange('notes', e.target.value)}
+                            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                            rows="3"
+                            placeholder="Additional notes about this medicine..."
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Tags (comma-separated)</label>
+                          <input
+                            type="text"
+                            value={Array.isArray(editMedicineData.tags) ? editMedicineData.tags.join(', ') : (editMedicineData.tags || '')}
+                            onChange={(e) => {
+                              const tags = e.target.value.split(',').map(tag => tag.trim()).filter(tag => tag);
+                              handleEditMedicineInputChange('tags', tags);
+                            }}
+                            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                            placeholder="e.g., pain relief, fever, headache"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Side Effects (comma-separated)</label>
+                          <textarea
+                            value={Array.isArray(editMedicineData.sideEffects) ? editMedicineData.sideEffects.join(', ') : (editMedicineData.sideEffects || '')}
+                            onChange={(e) => {
+                              const sideEffects = e.target.value.split(',').map(effect => effect.trim()).filter(effect => effect);
+                              handleEditMedicineInputChange('sideEffects', sideEffects);
+                            }}
+                            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                            rows="2"
+                            placeholder="e.g., nausea, dizziness, drowsiness"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Contraindications (comma-separated)</label>
+                          <textarea
+                            value={Array.isArray(editMedicineData.contraindications) ? editMedicineData.contraindications.join(', ') : (editMedicineData.contraindications || '')}
+                            onChange={(e) => {
+                              const contraindications = e.target.value.split(',').map(item => item.trim()).filter(item => item);
+                              handleEditMedicineInputChange('contraindications', contraindications);
+                            }}
+                            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                            rows="2"
+                            placeholder="e.g., pregnancy, liver disease, kidney problems"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Drug Interactions (comma-separated)</label>
+                          <textarea
+                            value={Array.isArray(editMedicineData.interactions) ? editMedicineData.interactions.join(', ') : (editMedicineData.interactions || '')}
+                            onChange={(e) => {
+                              const interactions = e.target.value.split(',').map(item => item.trim()).filter(item => item);
+                              handleEditMedicineInputChange('interactions', interactions);
+                            }}
+                            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                            rows="2"
+                            placeholder="e.g., warfarin, aspirin, alcohol"
+                          />
+                        </div>
                       </div>
                     </div>
 
@@ -3419,7 +3820,11 @@ const StoreManagerInventory = () => {
                           type="number"
                           min="0"
                           value={newBatch.stripQuantity}
-                          onChange={(e) => setNewBatch({...newBatch, stripQuantity: parseInt(e.target.value) || 0})}
+                          onChange={createNumericInputHandler(
+                            (value) => setNewBatch({...newBatch, stripQuantity: value}),
+                            null,
+                            VALIDATION_OPTIONS.QUANTITY
+                          )}
                           className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
                         />
                       </div>
@@ -3429,7 +3834,11 @@ const StoreManagerInventory = () => {
                           type="number"
                           min="0"
                           value={newBatch.individualQuantity}
-                          onChange={(e) => setNewBatch({...newBatch, individualQuantity: parseInt(e.target.value) || 0})}
+                          onChange={createNumericInputHandler(
+                            (value) => setNewBatch({...newBatch, individualQuantity: value}),
+                            null,
+                            VALIDATION_OPTIONS.QUANTITY
+                          )}
                           className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
                         />
                       </div>

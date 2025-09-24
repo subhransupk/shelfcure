@@ -405,6 +405,14 @@ io.on('connection', (socket) => {
 // Make io available to routes
 app.set('io', io);
 
+// Set up socket manager
+const { setIO } = require('./utils/socketManager');
+setIO(io);
+
+// Initialize notification jobs
+const NotificationJobs = require('./jobs/notificationJobs');
+NotificationJobs.init();
+
 // API Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/medicines', require('./routes/medicines'));
@@ -423,6 +431,7 @@ app.use('/api/ocr', require('./routes/ocr'));
 // Admin Routes
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/affiliates', require('./routes/affiliates'));
+app.use('/api/affiliate-panel', require('./routes/affiliatePanel'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/discounts', require('./routes/discounts'));
 app.use('/api/whatsapp', require('./routes/whatsapp'));
@@ -434,10 +443,13 @@ app.use('/api/store-owner', require('./routes/storeOwnerClean'));
 // Store Manager Routes
 app.use('/api/store-manager', require('./routes/storeManager'));
 app.use('/api/store-manager/suppliers', require('./routes/suppliers'));
+app.use('/api/store-manager/suppliers', require('./routes/supplierPayment'));
 app.use('/api/store-manager/purchases', require('./routes/purchases'));
+app.use('/api/store-manager/purchase-returns', require('./routes/purchaseReturns'));
 app.use('/api/store-manager/medicine-requests', require('./routes/medicineRequests'));
 app.use('/api/store-manager/expiry-alerts', require('./routes/expiryAlerts'));
 app.use('/api/store-manager/returns', require('./routes/returns'));
+app.use('/api/store-manager/credit', require('./routes/credit'));
 
 // Medicine Location Routes (accessible to store staff for read-only operations)
 app.use('/api/medicine-locations', require('./routes/medicineLocation'));

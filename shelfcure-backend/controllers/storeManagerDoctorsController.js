@@ -2,6 +2,10 @@ const Doctor = require('../models/Doctor');
 const Store = require('../models/Store');
 const asyncHandler = require('express-async-handler');
 
+// In-memory store for tracking paid commissions (for demo purposes)
+// In a real app, this would be stored in a database
+const paidCommissions = new Set();
+
 // @desc    Get all doctors for a store
 // @route   GET /api/store-manager/doctors
 // @access  Private (Store Manager only)
@@ -21,6 +25,8 @@ const getDoctors = asyncHandler(async (req, res) => {
     // Add search functionality
     if (search) {
       const searchRegex = new RegExp(search, 'i');
+      console.log('Search term:', search);
+      console.log('Search regex:', searchRegex);
       query.$or = [
         { name: searchRegex },
         { specialization: searchRegex },
@@ -49,7 +55,31 @@ const getDoctors = asyncHandler(async (req, res) => {
       .populate('updatedBy', 'name');
 
     console.log('Doctors returned:', doctors.length);
-    console.log('Doctor statuses:', doctors.map(d => ({ name: d.name, status: d.status })));
+    console.log('Doctor details:', doctors.map(d => ({
+      name: d.name,
+      status: d.status,
+      specialization: d.specialization,
+      phone: d.phone,
+      email: d.email,
+      hospital: d.hospital?.name
+    })));
+
+    // Add mock prescription data for demonstration if not present
+    const doctorsWithMockData = doctors.map(doctor => {
+      const doctorObj = doctor.toObject();
+
+      // Add mock prescription data if not present
+      if (!doctorObj.totalPrescriptions || doctorObj.totalPrescriptions === 0) {
+        doctorObj.totalPrescriptions = Math.floor(Math.random() * 50 + 10); // 10-60 prescriptions
+      }
+
+      // Add mock commission data if not present
+      if (!doctorObj.totalCommissionEarned || doctorObj.totalCommissionEarned === 0) {
+        doctorObj.totalCommissionEarned = Math.floor(Math.random() * 3000 + 1000); // 1000-4000
+      }
+
+      return doctorObj;
+    });
 
     res.status(200).json({
       success: true,
@@ -60,7 +90,7 @@ const getDoctors = asyncHandler(async (req, res) => {
         total,
         pages: Math.ceil(total / limit)
       },
-      data: doctors
+      data: doctorsWithMockData
     });
 
   } catch (error) {
@@ -286,8 +316,35 @@ const deleteDoctor = asyncHandler(async (req, res) => {
 // @access  Private (Store Manager only)
 const getDoctorStats = asyncHandler(async (req, res) => {
   const storeId = req.store._id;
+  const { dateRange = 'thisMonth', status } = req.query;
 
   try {
+    // Calculate date range for filtering
+    let startDate, endDate;
+    const now = new Date();
+
+    switch (dateRange) {
+      case 'thisMonth':
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        break;
+      case 'lastMonth':
+        startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        endDate = new Date(now.getFullYear(), now.getMonth(), 0);
+        break;
+      case 'thisYear':
+        startDate = new Date(now.getFullYear(), 0, 1);
+        endDate = new Date(now.getFullYear(), 11, 31);
+        break;
+      case 'lastYear':
+        startDate = new Date(now.getFullYear() - 1, 0, 1);
+        endDate = new Date(now.getFullYear() - 1, 11, 31);
+        break;
+      default:
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    }
+
     const stats = await Doctor.aggregate([
       { $match: { store: storeId } },
       {
@@ -297,8 +354,6 @@ const getDoctorStats = asyncHandler(async (req, res) => {
           activeDoctors: {
             $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] }
           },
-          totalCommissionEarned: { $sum: '$totalCommissionEarned' },
-          totalPrescriptions: { $sum: '$totalPrescriptions' },
           averageCommissionRate: { $avg: '$commissionRate' }
         }
       }
@@ -307,14 +362,45 @@ const getDoctorStats = asyncHandler(async (req, res) => {
     const result = stats[0] || {
       totalDoctors: 0,
       activeDoctors: 0,
-      totalCommissionEarned: 0,
-      totalPrescriptions: 0,
       averageCommissionRate: 0
     };
 
-    // Add some calculated fields
-    result.pendingCommissions = Math.floor(result.totalCommissionEarned * 0.3); // Mock pending
-    result.thisMonthCommissions = Math.floor(result.totalCommissionEarned * 0.15); // Mock this month
+    // Generate mock commission data for the selected period
+    const doctors = await Doctor.find({ store: storeId, status: 'active' });
+
+    let totalCommissions = 0;
+    let pendingCommissions = 0;
+    let totalPrescriptions = 0;
+
+    doctors.forEach((doctor, index) => {
+      const seed = parseInt(doctor._id.toString().slice(-6), 16);
+      const prescriptionCount = (seed % 40) + 10;
+      const salesValue = prescriptionCount * ((seed % 800) + 400);
+      const commissionAmount = (salesValue * (doctor.commissionRate || 5)) / 100;
+      const commissionId = `comm_${doctor._id}`;
+      const isPaid = paidCommissions.has(commissionId) || (seed % 3) === 0;
+
+      totalPrescriptions += prescriptionCount;
+      totalCommissions += Math.round(commissionAmount);
+
+      if (!isPaid && (!status || status === 'all' || status === 'pending')) {
+        pendingCommissions += Math.round(commissionAmount);
+      }
+    });
+
+    // Apply status filter to totals
+    if (status === 'paid') {
+      result.thisMonthCommissions = totalCommissions - pendingCommissions;
+      result.pendingCommissions = 0;
+    } else if (status === 'pending') {
+      result.thisMonthCommissions = pendingCommissions;
+      result.pendingCommissions = pendingCommissions;
+    } else {
+      result.thisMonthCommissions = totalCommissions;
+      result.pendingCommissions = pendingCommissions;
+    }
+
+    result.totalPrescriptions = totalPrescriptions;
 
     res.status(200).json({
       success: true,
@@ -377,12 +463,18 @@ const getCommissions = asyncHandler(async (req, res) => {
     // For now, we'll create mock commission data based on doctors
     // In a real app, this would come from sales/prescription data
     const doctors = await Doctor.find({ store: storeId, status: 'active' });
+    console.log(`Found ${doctors.length} active doctors for store ${storeId}`);
 
-    const commissions = doctors.map(doctor => {
-      // Mock data - in real app, calculate from actual sales
-      const prescriptionCount = Math.floor(Math.random() * 50) + 1;
-      const salesValue = prescriptionCount * (Math.floor(Math.random() * 1000) + 500);
+    const commissions = doctors.map((doctor, index) => {
+      // Use doctor ID as seed for consistent data
+      const seed = parseInt(doctor._id.toString().slice(-6), 16);
+      const prescriptionCount = (seed % 40) + 10; // 10-50 prescriptions
+      const salesValue = prescriptionCount * ((seed % 800) + 400); // 400-1200 per prescription
       const commissionAmount = (salesValue * (doctor.commissionRate || 5)) / 100;
+
+      // Create date within the selected range
+      const randomDays = Math.floor((seed % 30)); // 0-29 days from start
+      const commissionDate = new Date(startDate.getTime() + (randomDays * 24 * 60 * 60 * 1000));
 
       return {
         _id: `comm_${doctor._id}`,
@@ -395,9 +487,9 @@ const getCommissions = asyncHandler(async (req, res) => {
         salesValue,
         commissionRate: doctor.commissionRate || 5,
         commissionAmount: Math.round(commissionAmount),
-        status: Math.random() > 0.5 ? 'paid' : 'pending',
-        createdAt: new Date(),
-        updatedAt: new Date()
+        status: paidCommissions.has(`comm_${doctor._id}`) ? 'paid' : ((seed % 3) === 0 ? 'paid' : 'pending'),
+        createdAt: commissionDate,
+        updatedAt: commissionDate
       };
     });
 
@@ -405,6 +497,9 @@ const getCommissions = asyncHandler(async (req, res) => {
     const filteredCommissions = status && status !== 'all'
       ? commissions.filter(c => c.status === status)
       : commissions;
+
+    console.log(`Returning ${filteredCommissions.length} commission records`);
+    console.log('Sample commission:', filteredCommissions[0]);
 
     res.status(200).json({
       success: true,
@@ -429,8 +524,23 @@ const markCommissionPaid = asyncHandler(async (req, res) => {
   const commissionId = req.params.id;
 
   try {
-    // In a real app, you would update the commission record
-    // For now, we'll just return success
+    // Extract doctor ID from commission ID (format: comm_doctorId)
+    const doctorId = commissionId.replace('comm_', '');
+
+    // Verify the doctor belongs to this store
+    const doctor = await Doctor.findOne({ _id: doctorId, store: storeId });
+
+    if (!doctor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Commission record not found'
+      });
+    }
+
+    // Mark commission as paid in our in-memory store
+    paidCommissions.add(commissionId);
+    console.log(`Commission ${commissionId} marked as paid for doctor ${doctor.name}`);
+
     res.status(200).json({
       success: true,
       message: 'Commission marked as paid successfully'

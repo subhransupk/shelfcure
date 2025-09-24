@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Plus, AlertCircle } from 'lucide-react';
+import { createNumericInputHandler, VALIDATION_OPTIONS } from '../../utils/inputValidation';
 
 const AddMedicineModal = ({ isOpen, onClose, onMedicineAdded }) => {
   const [loading, setLoading] = useState(false);
@@ -11,8 +12,16 @@ const AddMedicineModal = ({ isOpen, onClose, onMedicineAdded }) => {
     genericName: '',
     composition: '',
     manufacturer: '',
-    quantity: 1
+    quantity: 1,
+    priority: 'medium'
   });
+
+  const priorities = [
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+    { value: 'urgent', label: 'Urgent' }
+  ];
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -56,7 +65,7 @@ const AddMedicineModal = ({ isOpen, onClose, onMedicineAdded }) => {
           packSize: 'Not specified', // Required by backend
           requestedQuantity: parseInt(formData.quantity),
           unitType: 'strip', // Default unit type
-          priority: 'medium', // Default priority
+          priority: formData.priority,
           category: 'Other', // Default category
           notes: `Added via quick request form${formData.genericName.trim() ? ` - Generic: ${formData.genericName.trim()}` : ''}${formData.composition.trim() ? ` - Composition: ${formData.composition.trim()}` : ''}`
         })
@@ -73,7 +82,8 @@ const AddMedicineModal = ({ isOpen, onClose, onMedicineAdded }) => {
           genericName: '',
           composition: '',
           manufacturer: '',
-          quantity: 1
+          quantity: 1,
+          priority: 'medium'
         });
 
         // Notify parent component
@@ -108,7 +118,8 @@ const AddMedicineModal = ({ isOpen, onClose, onMedicineAdded }) => {
       genericName: '',
       composition: '',
       manufacturer: '',
-      quantity: 1
+      quantity: 1,
+      priority: 'medium'
     });
     onClose();
   };
@@ -167,12 +178,35 @@ const AddMedicineModal = ({ isOpen, onClose, onMedicineAdded }) => {
                     type="number"
                     name="quantity"
                     value={formData.quantity}
-                    onChange={handleInputChange}
+                    onChange={createNumericInputHandler(
+                      (value) => setFormData(prev => ({ ...prev, quantity: value })),
+                      null,
+                      { ...VALIDATION_OPTIONS.QUANTITY, min: 1 }
+                    )}
                     required
                     min="1"
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
                     placeholder="Enter quantity"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 text-left mb-1">
+                    Priority *
+                  </label>
+                  <select
+                    name="priority"
+                    value={formData.priority}
+                    onChange={handleInputChange}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                  >
+                    {priorities.map(priority => (
+                      <option key={priority.value} value={priority.value}>
+                        {priority.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>

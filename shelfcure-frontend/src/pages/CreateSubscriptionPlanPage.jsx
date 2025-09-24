@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import AdminLayout from '../components/admin/AdminLayout';
 import { API_ENDPOINTS } from '../config/api';
 import { ArrowLeft, Save, Eye } from 'lucide-react';
+import { createNumericInputHandler, VALIDATION_OPTIONS } from '../utils/inputValidation';
 
 const CreateSubscriptionPlanPage = () => {
   const navigate = useNavigate();
@@ -343,7 +344,11 @@ const CreateSubscriptionPlanPage = () => {
                     step="0.01"
                     placeholder="0"
                     value={formData.basePrice}
-                    onChange={(e) => handleInputChange('basePrice', parseFloat(e.target.value) || 0)}
+                    onChange={createNumericInputHandler(
+                      (value) => handleInputChange('basePrice', value),
+                      null,
+                      VALIDATION_OPTIONS.PRICE
+                    )}
                     className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${
                       errors.basePrice ? 'border-red-300' : 'border-gray-300'
                     }`}

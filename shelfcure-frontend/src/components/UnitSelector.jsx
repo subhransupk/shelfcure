@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { ChevronDown, Package, Pill } from 'lucide-react';
+import { createNumericInputHandler, VALIDATION_OPTIONS } from '../utils/inputValidation';
 
 const UnitSelector = ({ 
   medicine, 
@@ -89,10 +90,14 @@ const UnitSelector = ({
     setIsOpen(false);
   }, []);
 
-  const handleQuantityChange = useCallback((e) => {
-    const newQuantity = Math.max(1, parseInt(e.target.value) || 1);
-    setQuantity(newQuantity);
-  }, []);
+  const handleQuantityChange = useCallback(
+    createNumericInputHandler(
+      setQuantity,
+      null,
+      { ...VALIDATION_OPTIONS.QUANTITY, min: 1 }
+    ),
+    []
+  );
 
   // If only one unit type available, show simplified view
   if (availableUnits.length === 1) {

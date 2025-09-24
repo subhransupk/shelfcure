@@ -346,6 +346,24 @@ router.get('/customers/credit-management',
   getCreditManagement
 );
 
+// Individual customer routes
+router.route('/customers/:id')
+  .get(
+    checkFeatureAccess('customers'),
+    logStoreManagerActivity('view_customer'),
+    require('../controllers/storeManagerController').getCustomer
+  )
+  .put(
+    checkFeatureAccess('customers'),
+    logStoreManagerActivity('update_customer'),
+    require('../controllers/storeManagerController').updateCustomer
+  )
+  .delete(
+    checkFeatureAccess('customers'),
+    logStoreManagerActivity('delete_customer'),
+    require('../controllers/storeManagerController').deleteCustomer
+  );
+
 // ===================
 // DOCTOR ROUTES
 // ===================
@@ -559,88 +577,37 @@ router.get('/notifications',
         });
       }
 
-      // Mock notifications data
-      const mockNotifications = [
-        {
-          _id: '1',
-          type: 'low_stock',
-          priority: 'high',
-          title: 'Low Stock Alert',
-          message: 'Paracetamol 500mg is running low (5 units remaining)',
-          isRead: false,
-          actionRequired: true,
-          createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-          metadata: { medicineId: 'med123', currentStock: 5, threshold: 10 }
-        },
-        {
-          _id: '2',
-          type: 'expiry_alert',
-          priority: 'medium',
-          title: 'Expiry Alert',
-          message: 'Amoxicillin 250mg expires in 7 days',
-          isRead: false,
-          actionRequired: true,
-          createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000), // 4 hours ago
-          metadata: { medicineId: 'med456', expiryDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) }
-        },
-        {
-          _id: '3',
-          type: 'system',
-          priority: 'low',
-          title: 'System Update',
-          message: 'ShelfCure system has been updated to version 2.1.0',
-          isRead: true,
-          actionRequired: false,
-          createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000), // 1 day ago
-          metadata: { version: '2.1.0' }
-        },
-        {
-          _id: '4',
-          type: 'customer_message',
-          priority: 'medium',
-          title: 'Customer Inquiry',
-          message: 'Customer John Doe asked about availability of insulin',
-          isRead: false,
-          actionRequired: true,
-          createdAt: new Date(Date.now() - 6 * 60 * 60 * 1000), // 6 hours ago
-          metadata: { customerId: 'cust789', customerName: 'John Doe' }
-        },
-        {
-          _id: '5',
-          type: 'payment_reminder',
-          priority: 'high',
-          title: 'Payment Due',
-          message: 'Subscription payment of ₹2,999 is due in 3 days',
-          isRead: false,
-          actionRequired: true,
-          createdAt: new Date(Date.now() - 8 * 60 * 60 * 1000), // 8 hours ago
-          metadata: { amount: 2999, dueDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000) }
-        }
-      ];
+      // Import Notification model
+      const Notification = require('../models/Notification');
 
-      // Apply filters
-      let filteredNotifications = mockNotifications;
+      const result = await Notification.getNotifications({
+        storeId,
+        userId: req.user.id,
+        type,
+        search,
+        page,
+        limit
+      });
 
-      if (type) {
-        filteredNotifications = filteredNotifications.filter(n => n.type === type);
-      }
-
-      if (search) {
-        const searchLower = search.toLowerCase();
-        filteredNotifications = filteredNotifications.filter(n =>
-          n.title.toLowerCase().includes(searchLower) ||
-          n.message.toLowerCase().includes(searchLower)
-        );
-      }
+      // Format notifications for display
+      const formattedNotifications = result.notifications.map(notification => ({
+        _id: notification._id,
+        type: notification.type,
+        priority: notification.priority,
+        title: notification.title,
+        message: notification.message,
+        isRead: notification.isRead,
+        actionRequired: notification.actionRequired,
+        actionUrl: notification.actionUrl,
+        metadata: notification.metadata,
+        createdAt: notification.createdAt,
+        timeAgo: getTimeAgo(notification.createdAt)
+      }));
 
       res.json({
         success: true,
-        data: filteredNotifications,
-        pagination: {
-          current: parseInt(page),
-          pages: 1,
-          total: filteredNotifications.length
-        }
+        data: formattedNotifications,
+        pagination: result.pagination
       });
 
     } catch (error) {
@@ -654,12 +621,27 @@ router.get('/notifications',
   }
 );
 
+// Helper function to get time ago
+function getTimeAgo(date) {
+  const now = new Date();
+  const diff = now - new Date(date);
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
+  if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+  if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+  return 'Just now';
+}
+
 // Mark notifications as read
 router.post('/notifications/mark-read',
   logStoreManagerActivity('mark_notifications_read'),
   async (req, res) => {
     try {
       const { notificationIds } = req.body;
+      const storeId = req.store._id;
 
       if (!notificationIds || !Array.isArray(notificationIds)) {
         return res.status(400).json({
@@ -668,7 +650,11 @@ router.post('/notifications/mark-read',
         });
       }
 
-      // For now, just return success
+      // Import Notification model
+      const Notification = require('../models/Notification');
+
+      await Notification.markAsRead(notificationIds, storeId);
+
       res.json({
         success: true,
         message: 'Notifications marked as read'
@@ -685,6 +671,104 @@ router.post('/notifications/mark-read',
   }
 );
 
+// Trigger notification generation (for testing)
+router.post('/notifications/generate',
+  logStoreManagerActivity('generate_notifications'),
+  async (req, res) => {
+    try {
+      const storeId = req.store._id;
+      const userId = req.user.id;
+
+      // Import notification service and models
+      const NotificationService = require('../services/notificationService');
+
+      // Create some sample notifications for testing
+      const sampleNotifications = [
+        {
+          storeId,
+          userId,
+          type: 'low_stock',
+          priority: 'high',
+          title: 'Low Stock Alert',
+          message: 'Paracetamol 500mg is running low (3 strips remaining)',
+          actionRequired: true,
+          actionUrl: '/store-panel/inventory?search=Paracetamol',
+          metadata: {
+            medicineId: 'sample-med-1',
+            medicineName: 'Paracetamol 500mg',
+            currentStock: 3,
+            threshold: 10,
+            unit: 'strips'
+          }
+        },
+        {
+          storeId,
+          userId,
+          type: 'expiry_alert',
+          priority: 'medium',
+          title: 'Medicine Expiry Alert',
+          message: 'Amoxicillin 250mg expires in 5 days',
+          actionRequired: true,
+          actionUrl: '/store-panel/expiry-alerts',
+          metadata: {
+            medicineId: 'sample-med-2',
+            medicineName: 'Amoxicillin 250mg',
+            expiryDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
+            daysToExpiry: 5
+          }
+        },
+        {
+          storeId,
+          userId,
+          type: 'system',
+          priority: 'low',
+          title: 'System Update',
+          message: 'ShelfCure has been updated with new features',
+          actionRequired: false,
+          metadata: {
+            version: '2.1.0'
+          }
+        },
+        {
+          storeId,
+          userId,
+          type: 'customer_message',
+          priority: 'medium',
+          title: 'Customer Inquiry',
+          message: 'Customer John Doe asked about insulin availability',
+          actionRequired: true,
+          actionUrl: '/store-panel/customers',
+          metadata: {
+            customerId: 'sample-customer-1',
+            customerName: 'John Doe'
+          }
+        }
+      ];
+
+      // Create the sample notifications
+      for (const notificationData of sampleNotifications) {
+        await NotificationService.createNotification(notificationData);
+      }
+
+      // Also run real notification checks
+      await NotificationService.runNotificationChecks(storeId);
+
+      res.json({
+        success: true,
+        message: `Generated ${sampleNotifications.length} sample notifications and ran system checks`
+      });
+
+    } catch (error) {
+      console.error('Generate notifications error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to generate notifications',
+        error: error.message
+      });
+    }
+  }
+);
+
 // Get notification settings
 router.get('/notification-settings',
   logStoreManagerActivity('view_notification_settings'),
@@ -692,51 +776,14 @@ router.get('/notification-settings',
     try {
       const storeId = req.store._id;
 
-      // For now, return default settings
-      // In a real implementation, you would fetch from database
-      const defaultSettings = {
-        email: {
-          lowStock: true,
-          expiryAlerts: true,
-          customerMessages: true,
-          systemUpdates: false,
-          paymentReminders: true
-        },
-        whatsapp: {
-          lowStock: false,
-          expiryAlerts: true,
-          customerMessages: true,
-          systemUpdates: false,
-          paymentReminders: false
-        },
-        sms: {
-          lowStock: false,
-          expiryAlerts: false,
-          customerMessages: false,
-          systemUpdates: false,
-          paymentReminders: true
-        },
-        push: {
-          lowStock: true,
-          expiryAlerts: true,
-          customerMessages: true,
-          systemUpdates: true,
-          paymentReminders: true
-        },
-        preferences: {
-          quietHours: {
-            enabled: true,
-            startTime: '22:00',
-            endTime: '08:00'
-          },
-          frequency: 'immediate',
-          priority: 'medium'
-        }
-      };
+      // Import NotificationSettings model
+      const NotificationSettings = require('../models/NotificationSettings');
+
+      const settings = await NotificationSettings.getOrCreateSettings(storeId, req.user.id);
 
       res.json({
         success: true,
-        data: defaultSettings
+        data: settings
       });
 
     } catch (error) {
@@ -761,13 +808,28 @@ router.post('/notification-settings',
       console.log('Saving notification settings for store:', storeId);
       console.log('Settings:', JSON.stringify(settings, null, 2));
 
-      // For now, just log the settings
-      // In a real implementation, you would save to database
+      // Import NotificationSettings model
+      const NotificationSettings = require('../models/NotificationSettings');
+
+      // Update or create notification settings
+      const updatedSettings = await NotificationSettings.findOneAndUpdate(
+        { storeId },
+        {
+          storeId,
+          userId: req.user.id,
+          ...settings
+        },
+        {
+          new: true,
+          upsert: true,
+          runValidators: true
+        }
+      );
 
       res.json({
         success: true,
         message: 'Notification settings saved successfully',
-        data: settings
+        data: updatedSettings
       });
 
     } catch (error) {
@@ -803,7 +865,8 @@ router.get('/business-settings',
         // GST Settings
         gstEnabled: store.settings?.gstEnabled ?? true,
         defaultGstRate: store.settings?.defaultTaxRate ?? 18,
-        gstNumber: store.settings?.gstNumber ?? '',
+        // Use settings.gstNumber if available, otherwise fall back to business.gstNumber
+        gstNumber: store.settings?.gstNumber || store.business?.gstNumber || '',
         includeTaxInPrice: store.settings?.includeTaxInPrice ?? true,
 
         // Discount Settings
@@ -830,11 +893,7 @@ router.get('/business-settings',
           ? store.settings.discountTypes
           : [
               { id: 1, name: 'Percentage Discount', type: 'percentage', value: 10, maxValue: 50, isActive: true, description: 'Percentage off on total bill' },
-              { id: 2, name: 'Amount Discount', type: 'amount', value: 50, maxValue: 500, isActive: true, description: 'Fixed amount off' },
-              { id: 3, name: 'Festival Discount', type: 'festival', value: 15, maxValue: 30, isActive: false, description: 'Special festival offers' },
-              { id: 4, name: 'Bulk Discount', type: 'bulk', value: 5, maxValue: 20, isActive: true, description: 'Quantity-based discounts' },
-              { id: 5, name: 'Senior Citizen', type: 'customer', value: 10, maxValue: 15, isActive: true, description: 'Senior citizen discount' },
-              { id: 6, name: 'Student Discount', type: 'customer', value: 5, maxValue: 10, isActive: false, description: 'Student discount' }
+              { id: 2, name: 'Amount Discount', type: 'amount', value: 50, maxValue: 500, isActive: true, description: 'Fixed amount off' }
             ],
 
         // Tax Types - use saved data if exists, otherwise defaults
@@ -877,6 +936,7 @@ router.post('/business-settings',
 
       console.log('Saving business settings for store:', storeId);
       console.log('Settings:', JSON.stringify(settings, null, 2));
+      console.log('GST Number being saved:', settings.gstNumber);
 
       // Validate settings
       if (settings.maxDiscountPercent && (settings.maxDiscountPercent < 0 || settings.maxDiscountPercent > 100)) {
@@ -914,6 +974,13 @@ router.post('/business-settings',
         'settings.decimalPlaces': settings.decimalPlaces
       };
 
+      // Always update both business.gstNumber and settings.gstNumber to keep them synchronized
+      if (settings.gstNumber !== undefined) {
+        updateData['business.gstNumber'] = settings.gstNumber;
+        updateData['settings.gstNumber'] = settings.gstNumber;
+        console.log('Setting both GST numbers to:', settings.gstNumber);
+      }
+
       // Update discount and tax types if provided
       if (settings.discountTypes) {
         updateData['settings.discountTypes'] = settings.discountTypes;
@@ -923,11 +990,24 @@ router.post('/business-settings',
         updateData['settings.taxTypes'] = settings.taxTypes;
       }
 
+      console.log('Update data being sent to MongoDB:', JSON.stringify(updateData, null, 2));
+
       const updatedStore = await Store.findByIdAndUpdate(
         storeId,
         { $set: updateData },
         { new: true, runValidators: true }
-      ).select('settings');
+      );
+
+      if (!updatedStore) {
+        return res.status(404).json({
+          success: false,
+          message: 'Store not found'
+        });
+      }
+
+      console.log('Business settings updated successfully');
+      console.log('Updated store business GST:', updatedStore.business?.gstNumber);
+      console.log('Updated store settings GST:', updatedStore.settings?.gstNumber);
 
       res.json({
         success: true,
@@ -1097,6 +1177,9 @@ router.post('/whatsapp/send',
 // ===================
 router.get('/store-info', (req, res) => {
   const store = req.store;
+  console.log('Store info request - business GST:', store.business?.gstNumber);
+  console.log('Store info request - settings GST:', store.settings?.gstNumber);
+
   res.status(200).json({
     success: true,
     data: {
@@ -1208,6 +1291,81 @@ router.get('/medicine-locations/:medicineId',
 // ===================
 // INVOICE ROUTES
 // ===================
+
+// Get prescription file for a specific sale
+router.get('/sales/:saleId/prescription',
+  checkFeatureAccess('sales'),
+  logStoreManagerActivity('view_prescription'),
+  async (req, res) => {
+    try {
+      const Sale = require('../models/Sale');
+      const store = req.store;
+
+      console.log('🔍 Prescription request for sale:', req.params.saleId);
+      console.log('🏪 Store ID:', store._id);
+
+      // Find the sale and verify it belongs to the current store
+      const sale = await Sale.findOne({
+        _id: req.params.saleId,
+        store: store._id
+      });
+
+      console.log('📋 Sale found:', !!sale);
+      if (sale) {
+        console.log('💊 Has prescription:', !!sale.prescription);
+        console.log('📎 Has attachment:', !!(sale.prescription && sale.prescription.attachment));
+        if (sale.prescription && sale.prescription.attachment) {
+          console.log('📁 File path:', sale.prescription.attachment.path);
+          console.log('📄 File name:', sale.prescription.attachment.filename);
+        }
+      }
+
+      if (!sale) {
+        return res.status(404).json({
+          success: false,
+          message: 'Sale not found'
+        });
+      }
+
+      // Check if sale has prescription attachment
+      if (!sale.prescription || !sale.prescription.attachment) {
+        return res.status(404).json({
+          success: false,
+          message: 'No prescription found for this sale'
+        });
+      }
+
+      const prescriptionPath = sale.prescription.attachment.path;
+
+      // Verify file exists
+      if (!fs.existsSync(prescriptionPath)) {
+        console.error('❌ File not found at path:', prescriptionPath);
+        return res.status(404).json({
+          success: false,
+          message: 'Prescription file not found on server'
+        });
+      }
+
+      console.log('✅ Serving prescription file:', prescriptionPath);
+
+      // Set appropriate headers based on file type
+      const mimetype = sale.prescription.attachment.mimetype;
+      res.setHeader('Content-Type', mimetype);
+      res.setHeader('Content-Disposition', `inline; filename="${sale.prescription.attachment.filename}"`);
+
+      // Stream the file
+      const fileStream = fs.createReadStream(prescriptionPath);
+      fileStream.pipe(res);
+
+    } catch (error) {
+      console.error('Error serving prescription file:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error serving prescription file'
+      });
+    }
+  }
+);
 
 // Get invoice for a specific sale
 router.get('/sales/:saleId/invoice',

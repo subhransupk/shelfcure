@@ -253,6 +253,70 @@ router.get('/:id',
   }
 );
 
+// @route   PATCH /api/store-manager/medicine-requests/:id/status
+// @desc    Update medicine request status only
+// @access  Private
+router.patch('/:id/status',
+  checkFeatureAccess('purchases'),
+  [
+    body('status')
+      .isIn(['pending', 'approved', 'ordered', 'received', 'cancelled', 'rejected'])
+      .withMessage('Invalid status')
+  ],
+  logStoreManagerActivity('update_medicine_request_status'),
+  async (req, res) => {
+    try {
+      // Check for validation errors
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: errors.array()
+        });
+      }
+
+      const store = req.store;
+      const request = await MedicineRequest.findOne({
+        _id: req.params.id,
+        store: store._id
+      });
+
+      if (!request) {
+        return res.status(404).json({
+          success: false,
+          message: 'Medicine request not found'
+        });
+      }
+
+      // Update only the status and related fields
+      request.status = req.body.status;
+      if (req.body.status === 'ordered') {
+        request.convertedToPurchaseAt = new Date();
+      }
+      await request.save();
+
+      // Populate the updated request
+      await request.populate('requestedBy', 'name email');
+      await request.populate('approvedBy', 'name email');
+
+      res.json({
+        success: true,
+        data: request,
+        message: 'Medicine request status updated successfully'
+      });
+
+    } catch (error) {
+      console.error('Update medicine request status error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Server error updating medicine request status',
+        error: error.message
+      });
+    }
+  }
+);
+
 // @route   PUT /api/store-manager/medicine-requests/:id
 // @desc    Update a medicine request
 // @access  Private

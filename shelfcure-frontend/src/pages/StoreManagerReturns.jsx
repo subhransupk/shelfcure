@@ -54,6 +54,12 @@ const StoreManagerReturns = () => {
   });
   const [createReturnLoading, setCreateReturnLoading] = useState(false);
 
+  // Modal states
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedReturn, setSelectedReturn] = useState(null);
+  const [editReturnLoading, setEditReturnLoading] = useState(false);
+
   // Fetch returns data
   const fetchReturns = async (page = 1) => {
     setLoading(true);
@@ -196,6 +202,126 @@ const StoreManagerReturns = () => {
       setError(err.message);
     } finally {
       setCreateReturnLoading(false);
+    }
+  };
+
+  // Handle view return details
+  const handleViewReturn = async (returnRecord) => {
+    try {
+      console.log(`👁️ Viewing return details for:`, returnRecord._id);
+
+      // Fetch detailed return information
+      const response = await fetch(`/api/store-manager/returns/${returnRecord._id}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to fetch return details');
+      }
+
+      const data = await response.json();
+      console.log(`✅ Return details fetched:`, data.data);
+
+      setSelectedReturn(data.data);
+      setShowViewModal(true);
+    } catch (err) {
+      console.error('❌ Error fetching return details:', err);
+      setError(err.message);
+      alert(`Error: ${err.message}`);
+    }
+  };
+
+  // Handle edit return
+  const handleEditReturn = (returnRecord) => {
+    console.log(`✏️ Editing return:`, returnRecord._id);
+    setSelectedReturn(returnRecord);
+    setShowEditModal(true);
+  };
+
+  // Handle return update
+  const handleUpdateReturn = async (returnId, updateData) => {
+    setEditReturnLoading(true);
+    setError('');
+
+    try {
+      console.log(`🔄 Updating return ${returnId} with data:`, updateData);
+
+      const response = await fetch(`/api/store-manager/returns/${returnId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify(updateData)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to update return');
+      }
+
+      const data = await response.json();
+      console.log(`✅ Return updated successfully:`, data);
+
+      // Refresh returns list and analytics
+      await Promise.all([
+        fetchReturns(),
+        fetchAnalytics()
+      ]);
+
+      // Close edit modal
+      setShowEditModal(false);
+      setSelectedReturn(null);
+
+      alert('Return updated successfully');
+
+    } catch (err) {
+      console.error('❌ Error updating return:', err);
+      setError(err.message);
+      alert(`Error: ${err.message}`);
+    } finally {
+      setEditReturnLoading(false);
+    }
+  };
+
+  // Handle return status change (approve, reject, process)
+  const handleStatusChange = async (returnId, newStatus, notes = '') => {
+    try {
+      console.log(`🔄 Updating return ${returnId} status to ${newStatus}`);
+
+      const response = await fetch(`/api/store-manager/returns/${returnId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          status: newStatus,
+          notes: notes,
+          ...(newStatus === 'rejected' && { rejectionReason: notes })
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to update return status');
+      }
+
+      const data = await response.json();
+      console.log(`✅ Return status updated successfully:`, data);
+
+      // Refresh returns list
+      await fetchReturns();
+
+      alert(`Return status updated to ${newStatus.replace('_', ' ')}`);
+
+    } catch (err) {
+      console.error('❌ Error updating return status:', err);
+      setError(err.message);
+      alert(`Error: ${err.message}`);
     }
   };
 
@@ -598,19 +724,71 @@ const StoreManagerReturns = () => {
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <div className="flex items-center gap-2">
                               <button
-                                onClick={() => {/* View return details */}}
-                                className="text-green-600 hover:text-green-900 p-1 rounded"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  console.log('🔍 View button clicked for return:', returnRecord._id);
+                                  handleViewReturn(returnRecord);
+                                }}
+                                className="text-green-600 hover:text-green-900 p-1 rounded hover:bg-green-50"
                                 title="View Details"
                               >
                                 <Eye className="h-4 w-4" />
                               </button>
                               {returnRecord.status === 'pending' && (
                                 <button
-                                  onClick={() => {/* Edit return */}}
-                                  className="text-blue-600 hover:text-blue-900 p-1 rounded"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    console.log('✏️ Edit button clicked for return:', returnRecord._id);
+                                    handleEditReturn(returnRecord);
+                                  }}
+                                  className="text-blue-600 hover:text-blue-900 p-1 rounded hover:bg-blue-50"
                                   title="Edit Return"
                                 >
                                   <Edit className="h-4 w-4" />
+                                </button>
+                              )}
+                              {returnRecord.status === 'pending' && (
+                                <>
+                                  <button
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      console.log('✅ Approve button clicked for return:', returnRecord._id);
+                                      handleStatusChange(returnRecord._id, 'approved');
+                                    }}
+                                    className="text-green-600 hover:text-green-900 p-1 rounded hover:bg-green-50"
+                                    title="Approve Return"
+                                  >
+                                    <CheckCircle className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      console.log('❌ Reject button clicked for return:', returnRecord._id);
+                                      handleStatusChange(returnRecord._id, 'rejected');
+                                    }}
+                                    className="text-red-600 hover:text-red-900 p-1 rounded hover:bg-red-50"
+                                    title="Reject Return"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                </>
+                              )}
+                              {returnRecord.status === 'approved' && (
+                                <button
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    console.log('🔄 Process button clicked for return:', returnRecord._id);
+                                    handleStatusChange(returnRecord._id, 'processed');
+                                  }}
+                                  className="text-blue-600 hover:text-blue-900 p-1 rounded hover:bg-blue-50"
+                                  title="Process Return"
+                                >
+                                  <RefreshCw className="h-4 w-4" />
                                 </button>
                               )}
                             </div>
@@ -840,6 +1018,269 @@ const StoreManagerReturns = () => {
                     <p className="text-sm text-gray-500 text-center py-4">No inventory impact data available</p>
                   )}
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* View Return Modal */}
+        {showViewModal && selectedReturn && (
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div className="relative top-10 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-2/3 shadow-lg rounded-md bg-white">
+              <div className="mt-3">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">Return Details</h3>
+                  <button
+                    onClick={() => {
+                      setShowViewModal(false);
+                      setSelectedReturn(null);
+                    }}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="h-6 w-6" />
+                  </button>
+                </div>
+
+                <div className="space-y-6">
+                  {/* Return Information */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Return Number</label>
+                      <p className="mt-1 text-sm text-gray-900">{selectedReturn.returnNumber}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Status</label>
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(selectedReturn.status)}`}>
+                        {selectedReturn.status?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                      </span>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Return Date</label>
+                      <p className="mt-1 text-sm text-gray-900">{formatDate(selectedReturn.returnDate)}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Total Amount</label>
+                      <p className="mt-1 text-sm text-gray-900">{formatCurrency(selectedReturn.totalReturnAmount)}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Return Reason</label>
+                      <p className="mt-1 text-sm text-gray-900">
+                        {selectedReturn.returnReason?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Refund Method</label>
+                      <p className="mt-1 text-sm text-gray-900">
+                        {selectedReturn.refundMethod?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Customer Information */}
+                  {selectedReturn.customer && (
+                    <div>
+                      <h4 className="text-md font-medium text-gray-900 mb-2">Customer Information</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Name</label>
+                          <p className="mt-1 text-sm text-gray-900">{selectedReturn.customer.name}</p>
+                        </div>
+                        {selectedReturn.customer.phone && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700">Phone</label>
+                            <p className="mt-1 text-sm text-gray-900">{selectedReturn.customer.phone}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Return Items */}
+                  <div>
+                    <h4 className="text-md font-medium text-gray-900 mb-2">Returned Items</h4>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Medicine
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Quantity
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Unit Price
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Total
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {selectedReturn.items?.map((item, index) => (
+                            <tr key={index}>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="text-sm font-medium text-gray-900">
+                                  {item.medicine?.name || 'Unknown Medicine'}
+                                </div>
+                                <div className="text-sm text-gray-500">
+                                  {item.medicine?.manufacturer}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {item.returnQuantity} {item.unitType}(s)
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {formatCurrency(item.unitPrice)}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {formatCurrency(item.returnQuantity * item.unitPrice)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Additional Details */}
+                  {selectedReturn.returnReasonDetails && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Additional Details</label>
+                      <p className="mt-1 text-sm text-gray-900">{selectedReturn.returnReasonDetails}</p>
+                    </div>
+                  )}
+
+                  {selectedReturn.notes && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Internal Notes</label>
+                      <p className="mt-1 text-sm text-gray-900">{selectedReturn.notes}</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end mt-6">
+                  <button
+                    onClick={() => {
+                      setShowViewModal(false);
+                      setSelectedReturn(null);
+                    }}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Return Modal */}
+        {showEditModal && selectedReturn && (
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div className="relative top-10 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
+              <div className="mt-3">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">Edit Return</h3>
+                  <button
+                    onClick={() => {
+                      setShowEditModal(false);
+                      setSelectedReturn(null);
+                    }}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="h-6 w-6" />
+                  </button>
+                </div>
+
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.target);
+                  const updateData = {
+                    returnReason: formData.get('returnReason'),
+                    returnReasonDetails: formData.get('returnReasonDetails'),
+                    refundMethod: formData.get('refundMethod'),
+                    notes: formData.get('notes')
+                  };
+                  handleUpdateReturn(selectedReturn._id, updateData);
+                }}>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Return Reason</label>
+                      <select
+                        name="returnReason"
+                        defaultValue={selectedReturn.returnReason}
+                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                      >
+                        <option value="defective_product">Defective Product</option>
+                        <option value="expired_medicine">Expired Medicine</option>
+                        <option value="wrong_medicine_dispensed">Wrong Medicine Dispensed</option>
+                        <option value="customer_dissatisfaction">Customer Dissatisfaction</option>
+                        <option value="doctor_prescription_change">Doctor Prescription Change</option>
+                        <option value="adverse_reaction">Adverse Reaction</option>
+                        <option value="duplicate_purchase">Duplicate Purchase</option>
+                        <option value="billing_error">Billing Error</option>
+                        <option value="quality_issue">Quality Issue</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Additional Details</label>
+                      <textarea
+                        name="returnReasonDetails"
+                        defaultValue={selectedReturn.returnReasonDetails}
+                        rows={3}
+                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Refund Method</label>
+                      <select
+                        name="refundMethod"
+                        defaultValue={selectedReturn.refundMethod}
+                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                      >
+                        <option value="cash">Cash</option>
+                        <option value="card">Card</option>
+                        <option value="upi">UPI</option>
+                        <option value="store_credit">Store Credit</option>
+                        <option value="exchange">Exchange</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Internal Notes</label>
+                      <textarea
+                        name="notes"
+                        defaultValue={selectedReturn.notes}
+                        rows={3}
+                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end space-x-3 mt-6">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowEditModal(false);
+                        setSelectedReturn(null);
+                      }}
+                      className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={editReturnLoading}
+                      className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50"
+                    >
+                      {editReturnLoading ? 'Updating...' : 'Update Return'}
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
           </div>

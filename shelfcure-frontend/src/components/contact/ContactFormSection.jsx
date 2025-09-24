@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Send, CheckCircle, User, Mail, Phone, Building, MessageSquare } from 'lucide-react';
+import { createPhoneInputHandler } from '../../utils/inputValidation';
 
 const ContactFormSection = () => {
   const [formData, setFormData] = useState({
@@ -154,7 +155,9 @@ const ContactFormSection = () => {
                         type="tel"
                         name="phone"
                         value={formData.phone}
-                        onChange={handleInputChange}
+                        onChange={createPhoneInputHandler(
+                          (value) => setFormData(prev => ({ ...prev, phone: value }))
+                        )}
                         className="w-full px-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200 bg-white"
                         placeholder="+91 12345 67890"
                       />

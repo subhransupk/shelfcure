@@ -245,12 +245,17 @@ const getUnassignedMedicines = async (req, res) => {
       success: true,
       count: unassignedMedicines.length,
       data: unassignedMedicines.map(medicine => ({
+        _id: medicine._id,
         id: medicine._id,
         name: medicine.name,
         genericName: medicine.genericName,
         manufacturer: medicine.manufacturer,
         category: medicine.category,
         barcode: medicine.barcode,
+        inventory: {
+          stripQuantity: medicine.stripInfo?.stock || 0,
+          individualQuantity: medicine.individualInfo?.stock || 0
+        },
         stock: {
           strips: medicine.stripInfo?.stock || 0,
           individual: medicine.individualInfo?.stock || 0

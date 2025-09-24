@@ -6,6 +6,7 @@ const MasterMedicine = require('../models/MasterMedicine');
 const Sale = require('../models/Sale');
 const Customer = require('../models/Customer');
 const Purchase = require('../models/Purchase');
+const CreditTransaction = require('../models/CreditTransaction');
 
 // ===================
 // DASHBOARD CONTROLLERS
@@ -222,6 +223,30 @@ const getDashboardData = async (req, res) => {
     const pendingCredit = creditStats[0]?.totalCredit || 0;
     const creditCustomers = creditStats[0]?.creditCustomers?.length || 0;
 
+    // Calculate today's specific metrics
+    const todayProfit = todayRevenue * 0.25; // Assuming 25% profit margin for today
+    const todayLoss = todayReturnsAmount; // Returns are considered losses
+
+    // Get today's credit given out
+    const todayCreditStats = await Sale.aggregate([
+      {
+        $match: {
+          store: store._id,
+          createdAt: { $gte: startOfDay },
+          paymentMethod: 'credit'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalTodayCredit: { $sum: '$totalAmount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const todayCredit = todayCreditStats[0]?.totalTodayCredit || 0;
+
     // Calculate comprehensive metrics
     const totalProfit = monthRevenue * 0.25; // Assuming 25% profit margin
     const inStockMedicines = totalMedicines - outOfStock;
@@ -240,10 +265,9 @@ const getDashboardData = async (req, res) => {
       }
     ]);
 
-    // Mock waste and storage data (in real implementation, these would come from actual tracking)
+    // Mock waste data (in real implementation, these would come from actual tracking)
     const wasteImpact = monthRevenue * 0.02; // 2% waste impact
     const preventableWaste = wasteImpact * 0.6; // 60% preventable
-    const storageCosts = monthRevenue * 0.05; // 5% storage costs
     const expiredValue = expiredMedicines * 150; // Average medicine value
     const expiring30DaysValue = expiringMedicines.length * 200;
 
@@ -268,6 +292,9 @@ const getDashboardData = async (req, res) => {
           weekRevenue,
           monthRevenue,
           totalProfit,
+          todayProfit,
+          todayLoss,
+          todayCredit,
           todaySalesCount: todaySales.length,
           weekSalesCount: weekSales.length,
           monthSalesCount: monthSales.length,
@@ -294,10 +321,6 @@ const getDashboardData = async (req, res) => {
           preventableWaste,
           wastePercentage: wasteImpact > 0 ? (preventableWaste / wasteImpact) * 100 : 0,
           wasteIncidents: Math.floor(wasteImpact / 100), // Mock incidents
-
-          // Storage & Costs
-          storageCosts,
-          monthlyStorageCosts: storageCosts,
 
           // Expiry Tracking
           expiredMedicines,
@@ -356,15 +379,23 @@ const getStoreAnalytics = async (req, res) => {
       createdAt: { $gte: startDate, $lte: endDate }
     }).populate('items.medicine', 'name category');
 
+    // Get previous period for comparison
+    const previousPeriodStart = new Date(startDate.getTime() - (endDate.getTime() - startDate.getTime()));
+    const previousSales = await Sale.find({
+      store: store._id,
+      createdAt: { $gte: previousPeriodStart, $lt: startDate }
+    });
+
     // Calculate daily sales
     const dailySales = {};
     sales.forEach(sale => {
       const date = sale.createdAt.toISOString().split('T')[0];
       if (!dailySales[date]) {
-        dailySales[date] = { revenue: 0, count: 0 };
+        dailySales[date] = { revenue: 0, count: 0, transactions: 0 };
       }
       dailySales[date].revenue += sale.totalAmount;
       dailySales[date].count += 1;
+      dailySales[date].transactions += 1;
     });
 
     // Get top selling medicines
@@ -391,6 +422,7 @@ const getStoreAnalytics = async (req, res) => {
         name: stat.medicine.name,
         revenue: stat.revenue,
         quantity: stat.quantity,
+        category: stat.medicine.category,
         growth: 0 // Calculate growth if needed
       }));
 
@@ -399,8 +431,99 @@ const getStoreAnalytics = async (req, res) => {
       date,
       revenue: data.revenue,
       sales: data.count,
+      transactions: data.transactions,
       averageOrderValue: data.count > 0 ? Math.round(data.revenue / data.count) : 0
     })).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    // Calculate growth metrics
+    const currentRevenue = sales.reduce((sum, sale) => sum + sale.totalAmount, 0);
+    const previousRevenue = previousSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
+    const revenueGrowth = previousRevenue > 0 ? Math.round(((currentRevenue - previousRevenue) / previousRevenue) * 100) : 0;
+
+    const currentSalesCount = sales.length;
+    const previousSalesCount = previousSales.length;
+    const salesGrowth = previousSalesCount > 0 ? Math.round(((currentSalesCount - previousSalesCount) / previousSalesCount) * 100) : 0;
+
+    // Get inventory analytics
+    const totalMedicines = await Medicine.countDocuments({ store: store._id, isActive: true });
+    const lowStockMedicines = await Medicine.countDocuments({
+      store: store._id,
+      isActive: true,
+      $expr: { $lte: ['$stock', '$minStock'] }
+    });
+    const outOfStockMedicines = await Medicine.countDocuments({
+      store: store._id,
+      isActive: true,
+      stock: 0
+    });
+
+    // Get customer analytics
+    const totalCustomers = await Customer.countDocuments({ store: store._id });
+    const newCustomers = await Customer.countDocuments({
+      store: store._id,
+      createdAt: { $gte: startDate, $lte: endDate }
+    });
+
+    // Get detailed low stock medicines for DataTable
+    const lowStockMedicinesData = await Medicine.find({
+      store: store._id,
+      isActive: true,
+      $expr: { $lte: ['$stock', '$minStock'] }
+    }).select('name stock minStock category').limit(20);
+
+    // Get top customers for DataTable
+    const topCustomersData = await Sale.aggregate([
+      { $match: { store: store._id, createdAt: { $gte: startDate, $lte: endDate } } },
+      { $group: {
+        _id: '$customer',
+        totalSpent: { $sum: '$totalAmount' },
+        visitCount: { $sum: 1 },
+        lastVisit: { $max: '$createdAt' }
+      }},
+      { $lookup: {
+        from: 'customers',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'customerInfo'
+      }},
+      { $unwind: '$customerInfo' },
+      { $project: {
+        name: '$customerInfo.name',
+        phone: '$customerInfo.phone',
+        totalSpent: 1,
+        visitCount: 1,
+        lastVisit: 1
+      }},
+      { $sort: { totalSpent: -1 } },
+      { $limit: 10 }
+    ]);
+
+    // Calculate hourly transaction pattern
+    const hourlyPattern = Array(24).fill(0);
+    sales.forEach(sale => {
+      const hour = sale.createdAt.getHours();
+      hourlyPattern[hour]++;
+    });
+
+    // Calculate category distribution
+    const categoryStats = {};
+    sales.forEach(sale => {
+      sale.items.forEach(item => {
+        const category = item.medicine.category || 'Other';
+        if (!categoryStats[category]) {
+          categoryStats[category] = { revenue: 0, quantity: 0 };
+        }
+        categoryStats[category].revenue += item.totalPrice;
+        categoryStats[category].quantity += item.quantity;
+      });
+    });
+
+    const categoryDistribution = Object.entries(categoryStats).map(([category, stats]) => ({
+      category,
+      revenue: stats.revenue,
+      quantity: stats.quantity,
+      percentage: Math.round((stats.revenue / currentRevenue) * 100) || 0
+    })).sort((a, b) => b.revenue - a.revenue);
 
     res.status(200).json({
       success: true,
@@ -408,12 +531,31 @@ const getStoreAnalytics = async (req, res) => {
         period,
         dateRange: { startDate, endDate },
         summary: {
-          totalRevenue: sales.reduce((sum, sale) => sum + sale.totalAmount, 0),
-          totalSales: sales.length,
-          averageOrderValue: sales.length > 0 ? Math.round(sales.reduce((sum, sale) => sum + sale.totalAmount, 0) / sales.length) : 0
+          totalRevenue: currentRevenue,
+          totalSales: currentSalesCount,
+          averageOrderValue: currentSalesCount > 0 ? Math.round(currentRevenue / currentSalesCount) : 0,
+          revenueGrowth,
+          salesGrowth
         },
         dailySales: dailySalesArray,
-        topMedicines
+        topMedicines,
+        inventory: {
+          totalMedicines,
+          lowStockMedicines,
+          outOfStockMedicines,
+          stockHealthPercentage: totalMedicines > 0 ? Math.round(((totalMedicines - lowStockMedicines) / totalMedicines) * 100) : 100,
+          lowStockMedicinesData
+        },
+        customers: {
+          totalCustomers,
+          newCustomers,
+          customerGrowth: totalCustomers > 0 ? Math.round((newCustomers / totalCustomers) * 100) : 0,
+          topCustomers: topCustomersData
+        },
+        operations: {
+          hourlyPattern,
+          categoryDistribution
+        }
       }
     });
   } catch (error) {
@@ -684,6 +826,7 @@ const getSales = async (req, res) => {
     const sales = await Sale.find(query)
       .populate('customer', 'name phone email')
       .populate('items.medicine', 'name genericName')
+      .populate('prescription.doctor', 'name specialization')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -917,6 +1060,40 @@ const createSale = async (req, res) => {
 
     const totalAmount = taxableAmount + finalTaxAmount;
 
+    // Handle credit sales validation
+    let customerDoc = null;
+    if (paymentMethod === 'credit') {
+      if (!customer) {
+        return res.status(400).json({
+          success: false,
+          message: 'Customer is required for credit sales'
+        });
+      }
+
+      // Get customer details
+      const Customer = require('../models/Customer');
+      customerDoc = await Customer.findOne({
+        _id: customer,
+        store: store._id
+      });
+
+      if (!customerDoc) {
+        return res.status(400).json({
+          success: false,
+          message: 'Customer not found'
+        });
+      }
+
+      // Check if customer can make credit purchase
+      const creditCheck = customerDoc.canMakeCreditPurchase(totalAmount);
+      if (!creditCheck.allowed) {
+        return res.status(400).json({
+          success: false,
+          message: creditCheck.reason
+        });
+      }
+    }
+
     // Build prescription subdocument if provided
     let prescription = undefined;
     if (prescriptionRequired) {
@@ -1012,6 +1189,45 @@ const createSale = async (req, res) => {
       await medicine.save();
     }
 
+    // Handle credit transaction if payment method is credit
+    if (paymentMethod === 'credit' && customerDoc) {
+      try {
+
+        // Create credit transaction record
+        await CreditTransaction.createTransaction({
+          store: store._id,
+          customer: customerDoc._id,
+          transactionType: 'credit_sale',
+          amount: totalAmount,
+          balanceChange: totalAmount, // Positive because it increases credit balance
+          reference: {
+            type: 'Sale',
+            id: sale._id,
+            number: sale.invoiceNumber || sale._id.toString()
+          },
+          description: `Credit sale - Invoice ${sale.invoiceNumber || sale._id.toString()}`,
+          notes: notes || '',
+          processedBy: req.user.id
+        });
+
+        console.log('✅ Credit transaction created successfully for customer:', customerDoc.name);
+      } catch (creditError) {
+        console.error('❌ Error creating credit transaction:', creditError);
+        // Don't fail the sale if credit transaction creation fails, but log it
+      }
+    }
+
+    // Update customer purchase statistics if customer is provided
+    if (customer && customerDoc) {
+      try {
+        await customerDoc.updatePurchaseStats(totalAmount);
+        console.log('✅ Customer purchase stats updated');
+      } catch (statsError) {
+        console.error('❌ Error updating customer stats:', statsError);
+        // Don't fail the sale if stats update fails
+      }
+    }
+
     // Generate invoice automatically
     const { generateInvoiceForSale } = require('../utils/invoiceGenerator');
     let invoice = null;
@@ -1090,6 +1306,205 @@ const getCustomers = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Server error while fetching customers'
+    });
+  }
+};
+
+// @desc    Get single customer
+// @route   GET /api/store-manager/customers/:id
+// @access  Private (Store Manager only)
+const getCustomer = async (req, res) => {
+  const store = req.store;
+  const customerId = req.params.id;
+
+  try {
+    const customer = await Customer.findOne({
+      _id: customerId,
+      store: store._id
+    });
+
+    if (!customer) {
+      return res.status(404).json({
+        success: false,
+        message: 'Customer not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: customer
+    });
+  } catch (error) {
+    console.error('Get customer error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching customer'
+    });
+  }
+};
+
+// @desc    Update customer
+// @route   PUT /api/store-manager/customers/:id
+// @access  Private (Store Manager only)
+const updateCustomer = async (req, res) => {
+  const store = req.store;
+  const customerId = req.params.id;
+  const { name, phone, email, customerType, address, creditLimit } = req.body;
+
+  try {
+    // Find customer
+    const customer = await Customer.findOne({
+      _id: customerId,
+      store: store._id
+    });
+
+    if (!customer) {
+      return res.status(404).json({
+        success: false,
+        message: 'Customer not found'
+      });
+    }
+
+    // Validate required fields
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Customer name is required'
+      });
+    }
+
+    if (!phone || !phone.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Phone number is required'
+      });
+    }
+
+    // Clean and validate phone
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (!/^\d{10}$/.test(cleanPhone)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please enter a valid 10-digit phone number'
+      });
+    }
+
+    // Check if phone number is already taken by another customer
+    const existingCustomer = await Customer.findOne({
+      store: store._id,
+      phone: cleanPhone,
+      _id: { $ne: customerId } // Exclude current customer
+    });
+
+    if (existingCustomer) {
+      return res.status(400).json({
+        success: false,
+        message: 'Phone number already exists for another customer'
+      });
+    }
+
+    // Validate email if provided
+    if (email && email.trim()) {
+      const emailRegex = /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/;
+      if (!emailRegex.test(email.trim())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please enter a valid email address'
+        });
+      }
+
+      // Check if email is already taken by another customer
+      const existingEmailCustomer = await Customer.findOne({
+        store: store._id,
+        email: email.trim().toLowerCase(),
+        _id: { $ne: customerId }
+      });
+
+      if (existingEmailCustomer) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email already exists for another customer'
+        });
+      }
+    }
+
+    // Update customer data
+    customer.name = name.trim();
+    customer.phone = cleanPhone;
+    customer.customerType = customerType || 'regular';
+    customer.creditLimit = creditLimit || 0;
+    customer.lastUpdatedBy = req.user._id;
+
+    // Update email if provided
+    if (email && email.trim()) {
+      customer.email = email.trim().toLowerCase();
+    } else {
+      customer.email = undefined;
+    }
+
+    // Handle address - convert string to address object if needed
+    if (address && address.trim()) {
+      customer.address = {
+        street: address.trim()
+      };
+    } else {
+      customer.address = undefined;
+    }
+
+    await customer.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Customer updated successfully',
+      data: customer
+    });
+
+  } catch (error) {
+    console.error('Update customer error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while updating customer'
+    });
+  }
+};
+
+// @desc    Delete customer
+// @route   DELETE /api/store-manager/customers/:id
+// @access  Private (Store Manager only)
+const deleteCustomer = async (req, res) => {
+  const store = req.store;
+  const customerId = req.params.id;
+
+  try {
+    // Find customer
+    const customer = await Customer.findOne({
+      _id: customerId,
+      store: store._id
+    });
+
+    if (!customer) {
+      return res.status(404).json({
+        success: false,
+        message: 'Customer not found'
+      });
+    }
+
+    // Check if customer has any sales or transactions
+    // You might want to prevent deletion if customer has purchase history
+    // For now, we'll allow deletion but you can add checks here
+
+    await Customer.findByIdAndDelete(customerId);
+
+    res.status(200).json({
+      success: true,
+      message: 'Customer deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete customer error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while deleting customer'
     });
   }
 };
@@ -1822,22 +2237,16 @@ const getCustomerAnalytics = async (req, res) => {
           segment: {
             $switch: {
               branches: [
-                // Inactive: customers with status 'inactive' or 'blocked'
+                // Blocked: customers with status 'blocked'
                 {
-                  case: {
-                    $or: [
-                      { $eq: ['$status', 'inactive'] },
-                      { $eq: ['$status', 'blocked'] }
-                    ]
-                  },
-                  then: 'Inactive'
+                  case: { $eq: ['$status', 'blocked'] },
+                  then: 'Blocked'
                 },
                 // VIP: high spending active customers
                 {
                   case: {
                     $and: [
                       { $gte: ['$totalSpent', 15000] },
-                      { $ne: ['$status', 'inactive'] },
                       { $ne: ['$status', 'blocked'] }
                     ]
                   },
@@ -1849,7 +2258,6 @@ const getCustomerAnalytics = async (req, res) => {
                     $and: [
                       { $gte: ['$totalSpent', 5000] },
                       { $lt: ['$totalSpent', 15000] },
-                      { $ne: ['$status', 'inactive'] },
                       { $ne: ['$status', 'blocked'] }
                     ]
                   },
@@ -1857,12 +2265,7 @@ const getCustomerAnalytics = async (req, res) => {
                 },
                 // Occasional: customers with some spending or new active customers
                 {
-                  case: {
-                    $and: [
-                      { $ne: ['$status', 'inactive'] },
-                      { $ne: ['$status', 'blocked'] }
-                    ]
-                  },
+                  case: { $ne: ['$status', 'blocked'] },
                   then: 'Occasional'
                 }
               ],
@@ -1885,7 +2288,7 @@ const getCustomerAnalytics = async (req, res) => {
       VIP: { count: 0, color: 'green' },
       Regular: { count: 0, color: 'blue' },
       Occasional: { count: 0, color: 'yellow' },
-      Inactive: { count: 0, color: 'red' }
+      Blocked: { count: 0, color: 'red' }
     };
 
     console.log('📊 Customer segments from aggregation:', customerSegments);
@@ -1966,57 +2369,92 @@ const getCreditManagement = async (req, res) => {
     })));
 
     // Calculate total outstanding
-    const totalOutstanding = creditCustomers.reduce((sum, customer) => sum + customer.creditBalance, 0);
+    const totalOutstanding = creditCustomers.reduce((sum, customer) => sum + (customer.creditBalance || 0), 0);
+    console.log('💰 Total outstanding credit:', totalOutstanding);
 
     // Get overdue customers (assuming 30 days credit period)
     const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
     const overdueCustomers = creditCustomers.filter(customer =>
       customer.lastPurchaseDate && customer.lastPurchaseDate < thirtyDaysAgo && customer.creditBalance > 0
     );
-    const totalOverdue = overdueCustomers.reduce((sum, customer) => sum + customer.creditBalance, 0);
+    const totalOverdue = overdueCustomers.reduce((sum, customer) => sum + (customer.creditBalance || 0), 0);
+    console.log('⚠️ Overdue customers:', overdueCustomers.length, 'Total overdue amount:', totalOverdue);
 
-    // Get current month credit sales
-    const currentMonthCreditSales = await Sale.aggregate([
-      {
-        $match: {
-          store: store._id,
-          paymentMethod: 'credit',
-          createdAt: { $gte: startOfMonth }
+    // Get current month credit sales using CreditTransaction model for accuracy
+    let currentMonthCredit = 0;
+    try {
+      const currentMonthCreditSales = await CreditTransaction.aggregate([
+        {
+          $match: {
+            store: store._id,
+            transactionType: 'credit_sale',
+            transactionDate: { $gte: startOfMonth },
+            status: 'completed'
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalAmount: { $sum: '$amount' },
+            count: { $sum: 1 }
+          }
         }
-      },
-      {
-        $group: {
-          _id: null,
-          totalAmount: { $sum: '$totalAmount' },
-          count: { $sum: 1 }
-        }
-      }
-    ]);
+      ]);
 
-    const currentMonthCredit = currentMonthCreditSales[0]?.totalAmount || 0;
-
-    // Get today's credit payments/collections
-    const todayPayments = await Sale.aggregate([
-      {
-        $match: {
-          store: store._id,
-          paymentMethod: 'cash', // Assuming cash payments are credit collections
-          createdAt: { $gte: startOfDay },
-          // Look for sales that might be credit payments
-          customer: { $in: creditCustomers.map(c => c._id) }
+      currentMonthCredit = currentMonthCreditSales[0]?.totalAmount || 0;
+      console.log('💰 Current month credit sales from CreditTransaction:', currentMonthCredit);
+    } catch (error) {
+      console.warn('⚠️ Error fetching credit transactions, falling back to Sale model:', error.message);
+      // Fallback to Sale model if CreditTransaction fails
+      const fallbackCreditSales = await Sale.aggregate([
+        {
+          $match: {
+            store: store._id,
+            paymentMethod: 'credit',
+            createdAt: { $gte: startOfMonth }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalAmount: { $sum: '$totalAmount' }
+          }
         }
-      },
-      {
-        $group: {
-          _id: null,
-          totalCollected: { $sum: '$totalAmount' },
-          count: { $sum: 1 }
-        }
-      }
-    ]);
+      ]);
+      currentMonthCredit = fallbackCreditSales[0]?.totalAmount || 0;
+      console.log('💰 Current month credit sales from Sale fallback:', currentMonthCredit);
+    }
 
-    const todayCollected = todayPayments[0]?.totalCollected || 0;
-    const todayPaymentCount = todayPayments[0]?.count || 0;
+    // Get today's credit payments/collections using CreditTransaction model
+    let todayCollected = 0;
+    let todayPaymentCount = 0;
+    try {
+      const todayPayments = await CreditTransaction.aggregate([
+        {
+          $match: {
+            store: store._id,
+            transactionType: 'credit_payment',
+            transactionDate: { $gte: startOfDay },
+            status: 'completed'
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalCollected: { $sum: '$amount' },
+            count: { $sum: 1 }
+          }
+        }
+      ]);
+
+      todayCollected = todayPayments[0]?.totalCollected || 0;
+      todayPaymentCount = todayPayments[0]?.count || 0;
+      console.log('💳 Today collected from credit payments:', todayCollected, 'Count:', todayPaymentCount);
+    } catch (error) {
+      console.warn('⚠️ Error fetching today credit payments:', error.message);
+      // For now, keep as 0 since we can't reliably determine credit payments from Sale model alone
+      console.log('💳 Today collected set to 0 due to CreditTransaction error');
+    }
 
     // Format credit customers for table
     const formattedCreditCustomers = creditCustomers.map(customer => {
@@ -2044,15 +2482,15 @@ const getCreditManagement = async (req, res) => {
 
     const responseData = {
       summary: {
-        totalOutstanding,
-        totalOverdueAmount: totalOverdue,
-        overdueCustomerCount: overdueCustomers.length,
-        totalCreditCustomers: creditCustomers.length,
-        currentMonthCredit,
-        todayCollected,
-        todayPaymentCount
+        totalOutstanding: Math.round(totalOutstanding * 100) / 100, // Ensure 2 decimal places
+        totalOverdueAmount: Math.round(totalOverdue * 100) / 100,
+        overdueCustomerCount: overdueCustomers.length || 0,
+        totalCreditCustomers: creditCustomers.length || 0,
+        currentMonthCredit: Math.round(currentMonthCredit * 100) / 100,
+        todayCollected: Math.round(todayCollected * 100) / 100,
+        todayPaymentCount: todayPaymentCount || 0
       },
-      creditCustomers: formattedCreditCustomers
+      creditCustomers: formattedCreditCustomers || []
     };
 
     console.log('📊 Credit management response data:', JSON.stringify(responseData, null, 2));
@@ -2238,7 +2676,10 @@ module.exports = {
   getSales,
   createSale,
   getCustomers,
+  getCustomer,
   createCustomer,
+  updateCustomer,
+  deleteCustomer,
   getCustomerAnalytics,
   getCreditManagement,
   searchMasterMedicines,

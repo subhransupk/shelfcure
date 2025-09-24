@@ -59,13 +59,16 @@ const StoreManagerExpiryAlerts = () => {
         page: currentPage,
         limit: 20,
         sortBy,
-        sortOrder
+        sortOrder,
+        t: Date.now() // Cache busting
       });
 
       const response = await fetch(`/api/store-manager/expiry-alerts?${queryParams}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
         }
       });
 
@@ -88,10 +91,12 @@ const StoreManagerExpiryAlerts = () => {
     try {
       const token = localStorage.getItem('token');
       
-      const response = await fetch('/api/store-manager/expiry-alerts/summary', {
+      const response = await fetch(`/api/store-manager/expiry-alerts/summary?t=${Date.now()}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
         }
       });
 

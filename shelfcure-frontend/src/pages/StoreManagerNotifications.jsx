@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   Bell,
   MessageSquare,
-  Phone,
   Mail,
   AlertTriangle,
   CheckCircle,
@@ -12,9 +11,7 @@ import {
   Users,
   Settings,
   Send,
-  Smartphone,
   Globe,
-  Zap,
   Filter,
   Search,
   Eye,
@@ -56,13 +53,7 @@ const StoreManagerNotifications = () => {
       systemUpdates: false,
       paymentReminders: false
     },
-    sms: {
-      lowStock: false,
-      expiryAlerts: false,
-      customerMessages: false,
-      systemUpdates: false,
-      paymentReminders: true
-    },
+
     push: {
       lowStock: true,
       expiryAlerts: true,
@@ -89,6 +80,27 @@ const StoreManagerNotifications = () => {
     businessApiToken: '',
     webApiSession: false
   });
+
+  // WhatsApp Templates State
+  const [whatsappTemplates, setWhatsappTemplates] = useState({
+    lowStock: {
+      name: 'Low Stock Alert',
+      message: "Hi! We noticed you recently purchased [Medicine Name]. We're running low on stock. Would you like to place an order?"
+    },
+    paymentReminder: {
+      name: 'Payment Reminder',
+      message: "Hello! This is a friendly reminder about your pending payment of ₹[Amount] for invoice #[Number]. Please let us know if you need any assistance."
+    },
+    orderReady: {
+      name: 'Order Ready',
+      message: "Good news! Your order #[OrderNumber] is ready for pickup. Our store is open from 9 AM to 9 PM. Thank you for choosing us!"
+    },
+    medicineReminder: {
+      name: 'Medicine Reminder',
+      message: "Hi! Time for your medication reminder. Don't forget to take your [Medicine Name] as prescribed. Stay healthy!"
+    }
+  });
+  const [editingTemplate, setEditingTemplate] = useState(null);
 
   // Compose Message State
   const [composeData, setComposeData] = useState({
@@ -146,10 +158,34 @@ const StoreManagerNotifications = () => {
           });
 
           // Join store room for notifications
-          // Since we don't have storeId in user object, we'll join after first API call
-          setTimeout(() => {
-            webSocketClient.joinStore('default-store'); // Fallback for now
-          }, 2000);
+          const user = JSON.parse(localStorage.getItem('user') || '{}');
+          const token = localStorage.getItem('token');
+
+          if (user && token) {
+            // Get store ID from user or make API call to get it
+            if (user.storeId) {
+              webSocketClient.joinStore(user.storeId);
+            } else {
+              // Make API call to get store info
+              fetch('/api/store-manager/profile', {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                }
+              })
+              .then(response => response.json())
+              .then(data => {
+                if (data.success && data.data.storeId) {
+                  webSocketClient.joinStore(data.data.storeId);
+                }
+              })
+              .catch(error => {
+                console.error('Error getting store info:', error);
+                // Fallback - try to join with a default store
+                webSocketClient.joinStore('default-store');
+              });
+            }
+          }
         }
       } catch (error) {
         console.error('WebSocket initialization error:', error);
@@ -306,7 +342,7 @@ const StoreManagerNotifications = () => {
       'system': Settings,
       'whatsapp': MessageSquare,
       'email': Mail,
-      'sms': Phone
+
     };
     const IconComponent = icons[type] || Bell;
     return <IconComponent className="h-5 w-5" />;
@@ -324,7 +360,7 @@ const StoreManagerNotifications = () => {
       'system': 'text-purple-600 bg-purple-100',
       'whatsapp': 'text-green-600 bg-green-100',
       'email': 'text-blue-600 bg-blue-100',
-      'sms': 'text-indigo-600 bg-indigo-100'
+
     };
     return colors[type] || 'text-gray-600 bg-gray-100';
   };
@@ -332,8 +368,8 @@ const StoreManagerNotifications = () => {
   const markAsRead = async (notificationIds) => {
     try {
       const token = localStorage.getItem('token');
-      
-      await fetch('/api/store-manager/notifications/mark-read', {
+
+      const response = await fetch('/api/store-manager/notifications/mark-read', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -342,10 +378,224 @@ const StoreManagerNotifications = () => {
         body: JSON.stringify({ notificationIds })
       });
 
-      fetchNotifications();
+      if (response.ok) {
+        // Update local state immediately for better UX
+        setNotifications(prev =>
+          prev.map(notification =>
+            notificationIds.includes(notification._id)
+              ? { ...notification, isRead: true }
+              : notification
+          )
+        );
+        setSelectedNotifications([]);
+        console.log('✅ Notifications marked as read');
+      } else {
+        console.error('Failed to mark notifications as read');
+        // Fallback to refetch
+        fetchNotifications();
+      }
     } catch (error) {
       console.error('Mark as read error:', error);
+      // Fallback to refetch
+      fetchNotifications();
     }
+  };
+
+  // Handle notification action (navigate to action URL)
+  const handleNotificationAction = (notification) => {
+    if (notification.actionUrl) {
+      // Mark as read first if not already read
+      if (!notification.isRead) {
+        markAsRead([notification._id]);
+      }
+
+      // Navigate to action URL
+      window.location.href = notification.actionUrl;
+    }
+  };
+
+  // Handle bulk actions
+  const handleBulkAction = async (action) => {
+    if (selectedNotifications.length === 0) {
+      alert('Please select notifications first');
+      return;
+    }
+
+    switch (action) {
+      case 'mark-read':
+        await markAsRead(selectedNotifications);
+        break;
+      case 'delete':
+        await deleteNotifications(selectedNotifications);
+        break;
+      default:
+        console.log('Unknown bulk action:', action);
+    }
+  };
+
+  // Delete notifications (placeholder - would need backend route)
+  const deleteNotifications = async (notificationIds) => {
+    try {
+      // For now, just remove from local state
+      setNotifications(prev =>
+        prev.filter(notification => !notificationIds.includes(notification._id))
+      );
+      setSelectedNotifications([]);
+      console.log('✅ Notifications removed from view');
+    } catch (error) {
+      console.error('Delete notifications error:', error);
+    }
+  };
+
+  // Generate test notifications
+  const generateTestNotifications = async () => {
+    try {
+      const token = localStorage.getItem('token');
+
+      const response = await fetch('/api/store-manager/notifications/generate', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        console.log('✅ Notification generation triggered');
+        // Refresh notifications after a short delay
+        setTimeout(() => {
+          fetchNotifications();
+        }, 2000);
+      } else {
+        console.error('Failed to generate notifications');
+      }
+    } catch (error) {
+      console.error('Generate notifications error:', error);
+    }
+  };
+
+  // WhatsApp Template Functions
+  const handleTemplateEdit = (templateKey) => {
+    setEditingTemplate(templateKey);
+  };
+
+  const handleTemplateSave = (templateKey) => {
+    setEditingTemplate(null);
+    // Here you could save to backend
+    console.log('✅ Template saved:', templateKey, whatsappTemplates[templateKey]);
+  };
+
+  const handleTemplateCancel = () => {
+    setEditingTemplate(null);
+  };
+
+  const handleTemplateChange = (templateKey, field, value) => {
+    setWhatsappTemplates(prev => ({
+      ...prev,
+      [templateKey]: {
+        ...prev[templateKey],
+        [field]: value
+      }
+    }));
+  };
+
+  const handleUseTemplate = (templateKey) => {
+    const template = whatsappTemplates[templateKey];
+    // Copy template message to compose tab
+    setComposeData(prev => ({
+      ...prev,
+      message: template.message,
+      type: 'whatsapp'
+    }));
+    // Switch to compose tab
+    setActiveTab('compose');
+  };
+
+  // Compose Message Functions
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+
+    if (!composeData.message.trim()) {
+      alert('Please enter a message');
+      return;
+    }
+
+    if (composeData.recipients.length === 0) {
+      alert('Please select recipients');
+      return;
+    }
+
+    try {
+      if (composeData.type === 'whatsapp') {
+        await handleSendWhatsAppMessage();
+      } else if (composeData.type === 'email') {
+        await handleSendEmailMessage();
+      }
+    } catch (error) {
+      console.error('Send message error:', error);
+      alert('Failed to send message. Please try again.');
+    }
+  };
+
+  const handleSendWhatsAppMessage = async () => {
+    // For WhatsApp, we'll generate click-to-chat links
+    const phoneNumber = whatsappSettings.phoneNumber.replace(/[^0-9]/g, '');
+
+    if (!phoneNumber) {
+      alert('Please configure your WhatsApp phone number in the WhatsApp Integration tab first.');
+      return;
+    }
+
+    // Generate WhatsApp links for each recipient
+    const whatsappLinks = composeData.recipients.map(recipient => {
+      const encodedMessage = encodeURIComponent(composeData.message);
+      return {
+        recipient,
+        link: `https://wa.me/${phoneNumber}?text=${encodedMessage}`,
+        message: composeData.message
+      };
+    });
+
+    // For now, we'll show the links to the user
+    // In a real implementation, you might want to save these or integrate with a WhatsApp API
+    console.log('WhatsApp Links Generated:', whatsappLinks);
+
+    // Show success message with links
+    const linksList = whatsappLinks.map(item =>
+      `${item.recipient}: ${item.link}`
+    ).join('\n\n');
+
+    alert(`WhatsApp links generated successfully!\n\n${linksList}\n\nClick these links to send messages via WhatsApp.`);
+
+    // Reset form
+    setComposeData({
+      type: 'whatsapp',
+      recipients: [],
+      message: '',
+      scheduled: false,
+      scheduledTime: ''
+    });
+  };
+
+  const handleSendEmailMessage = async () => {
+    // Email sending logic would go here
+    console.log('Sending email:', composeData);
+    alert('Email functionality would be implemented here with your email service provider.');
+
+    // Reset form
+    setComposeData({
+      type: 'email',
+      recipients: [],
+      message: '',
+      scheduled: false,
+      scheduledTime: ''
+    });
+  };
+
+  const handleSaveDraft = () => {
+    // Save draft logic
+    console.log('Saving draft:', composeData);
+    alert('Draft saved successfully!');
   };
 
   const sendWhatsAppMessage = async (phoneNumber, message) => {
@@ -488,9 +738,12 @@ const StoreManagerNotifications = () => {
             <Settings className="h-5 w-5" />
             <span>Notification Settings</span>
           </button>
-          <button className="bg-purple-600 text-white p-4 rounded-lg hover:bg-purple-700 flex items-center justify-center space-x-2">
+          <button
+            onClick={generateTestNotifications}
+            className="bg-purple-600 text-white p-4 rounded-lg hover:bg-purple-700 flex items-center justify-center space-x-2"
+          >
             <Bell className="h-5 w-5" />
-            <span>Alert Preferences</span>
+            <span>Generate Alerts</span>
           </button>
         </div>
       </div>
@@ -528,11 +781,11 @@ const StoreManagerNotifications = () => {
 
           <div>
             <button
-              onClick={() => markAsRead(selectedNotifications)}
+              onClick={() => handleBulkAction('mark-read')}
               disabled={selectedNotifications.length === 0}
               className="w-full px-4 py-2 border border-green-600 rounded-md text-sm font-medium text-green-600 bg-white hover:bg-green-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50"
             >
-              Mark as Read
+              Mark as Read ({selectedNotifications.length})
             </button>
           </div>
 
@@ -593,7 +846,10 @@ const StoreManagerNotifications = () => {
                       </p>
                       {notification.actionRequired && (
                         <div className="mt-2 flex items-center space-x-2">
-                          <button className="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded-md text-green-700 bg-green-100 hover:bg-green-200">
+                          <button
+                            onClick={() => handleNotificationAction(notification)}
+                            className="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded-md text-green-700 bg-green-100 hover:bg-green-200"
+                          >
                             Take Action
                           </button>
                           {notification.type === 'whatsapp' && (
@@ -607,10 +863,19 @@ const StoreManagerNotifications = () => {
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <button className="text-gray-400 hover:text-gray-600">
-                      <Eye className="h-4 w-4" />
-                    </button>
-                    <button className="text-gray-400 hover:text-gray-600">
+                    {!notification.isRead && (
+                      <button
+                        onClick={() => markAsRead([notification._id])}
+                        className="text-gray-400 hover:text-green-600"
+                        title="Mark as read"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                    )}
+                    <button
+                      className="text-gray-400 hover:text-gray-600"
+                      title="More options"
+                    >
                       <MoreVertical className="h-4 w-4" />
                     </button>
                   </div>
@@ -647,32 +912,23 @@ const StoreManagerNotifications = () => {
         </div>
       </div>
 
-      {/* WhatsApp Methods */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+      {/* WhatsApp Method */}
+      <div className="mb-6">
         {/* Click-to-Chat */}
-        <div className={`bg-white rounded-xl shadow-lg p-6 border-2 ${whatsappMethod === 'click-to-chat' ? 'border-green-500' : 'border-gray-200'}`}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center">
-              <div className="p-3 bg-gradient-to-r from-green-500 to-green-600 rounded-full">
-                <Globe className="h-6 w-6 text-white" />
-              </div>
-              <div className="ml-3">
-                <h3 className="text-lg font-semibold text-gray-900">Click-to-Chat</h3>
-                <p className="text-sm text-green-600">Recommended</p>
-              </div>
+        <div className="bg-white rounded-xl shadow-lg p-6 border-2 border-green-500">
+          <div className="flex items-center mb-4">
+            <div className="p-3 bg-gradient-to-r from-green-500 to-green-600 rounded-full">
+              <Globe className="h-6 w-6 text-white" />
             </div>
-            <input
-              type="radio"
-              name="whatsappMethod"
-              checked={whatsappMethod === 'click-to-chat'}
-              onChange={() => setWhatsappMethod('click-to-chat')}
-              className="h-4 w-4 text-green-600 focus:ring-green-500"
-            />
+            <div className="ml-3">
+              <h3 className="text-lg font-semibold text-gray-900">Click-to-Chat</h3>
+              <p className="text-sm text-green-600">Simple & Effective</p>
+            </div>
           </div>
           <p className="text-sm text-gray-600 mb-4">
             No setup required. Generate WhatsApp links that open customer's WhatsApp with pre-filled messages.
           </p>
-          <div className="space-y-2">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="flex items-center text-xs text-green-600">
               <CheckCircle className="h-3 w-3 mr-1" />
               No API setup required
@@ -687,166 +943,34 @@ const StoreManagerNotifications = () => {
             </div>
           </div>
         </div>
-
-        {/* WhatsApp Web API */}
-        <div className={`bg-white rounded-xl shadow-lg p-6 border-2 ${whatsappMethod === 'web-api' ? 'border-green-500' : 'border-gray-200'}`}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center">
-              <div className="p-3 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full">
-                <Smartphone className="h-6 w-6 text-white" />
-              </div>
-              <div className="ml-3">
-                <h3 className="text-lg font-semibold text-gray-900">WhatsApp Web API</h3>
-                <p className="text-sm text-blue-600">Automatic</p>
-              </div>
-            </div>
-            <input
-              type="radio"
-              name="whatsappMethod"
-              checked={whatsappMethod === 'web-api'}
-              onChange={() => setWhatsappMethod('web-api')}
-              className="h-4 w-4 text-green-600 focus:ring-green-500"
-            />
-          </div>
-          <p className="text-sm text-gray-600 mb-4">
-            Automated messaging via Node.js server integration with WhatsApp Web.
-          </p>
-          <div className="space-y-2">
-            <div className="flex items-center text-xs text-blue-600">
-              <CheckCircle className="h-3 w-3 mr-1" />
-              Automated messaging
-            </div>
-            <div className="flex items-center text-xs text-blue-600">
-              <CheckCircle className="h-3 w-3 mr-1" />
-              Bulk messaging support
-            </div>
-            <div className="flex items-center text-xs text-yellow-600">
-              <AlertTriangle className="h-3 w-3 mr-1" />
-              Requires phone connection
-            </div>
-          </div>
-        </div>
-
-        {/* WhatsApp Business API */}
-        <div className={`bg-white rounded-xl shadow-lg p-6 border-2 ${whatsappMethod === 'business-api' ? 'border-green-500' : 'border-gray-200'}`}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center">
-              <div className="p-3 bg-gradient-to-r from-purple-500 to-purple-600 rounded-full">
-                <Zap className="h-6 w-6 text-white" />
-              </div>
-              <div className="ml-3">
-                <h3 className="text-lg font-semibold text-gray-900">Business API</h3>
-                <p className="text-sm text-purple-600">Enterprise</p>
-              </div>
-            </div>
-            <input
-              type="radio"
-              name="whatsappMethod"
-              checked={whatsappMethod === 'business-api'}
-              onChange={() => setWhatsappMethod('business-api')}
-              className="h-4 w-4 text-green-600 focus:ring-green-500"
-            />
-          </div>
-          <p className="text-sm text-gray-600 mb-4">
-            Official WhatsApp Business API with advanced features and reliability.
-          </p>
-          <div className="space-y-2">
-            <div className="flex items-center text-xs text-purple-600">
-              <CheckCircle className="h-3 w-3 mr-1" />
-              Official API
-            </div>
-            <div className="flex items-center text-xs text-purple-600">
-              <CheckCircle className="h-3 w-3 mr-1" />
-              Advanced features
-            </div>
-            <div className="flex items-center text-xs text-yellow-600">
-              <AlertTriangle className="h-3 w-3 mr-1" />
-              Approval required
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* WhatsApp Configuration */}
       <div className="bg-white shadow rounded-lg p-6 mb-6">
         <h3 className="text-lg font-medium text-gray-900 mb-4 text-left">Configuration</h3>
-        
-        {whatsappMethod === 'click-to-chat' && (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Store Phone Number</label>
-              <input
-                type="tel"
-                placeholder="+91 9876543210"
-                value={whatsappSettings.phoneNumber}
-                onChange={(e) => setWhatsappSettings(prev => ({ ...prev, phoneNumber: e.target.value }))}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                Include country code (e.g., +91 for India)
-              </p>
-            </div>
-            
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <h4 className="text-sm font-medium text-green-800 mb-2">Preview WhatsApp Link:</h4>
-              <code className="text-xs text-green-700 bg-white p-2 rounded border block">
-                https://wa.me/{whatsappSettings.phoneNumber.replace(/[^0-9]/g, '')}?text=Hello%20from%20ShelfCure%20Store
-              </code>
-            </div>
-          </div>
-        )}
 
-        {whatsappMethod === 'web-api' && (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Phone Number</label>
-              <input
-                type="tel"
-                placeholder="+91 9876543210"
-                value={whatsappSettings.phoneNumber}
-                onChange={(e) => setWhatsappSettings(prev => ({ ...prev, phoneNumber: e.target.value }))}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
-              />
-            </div>
-            
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                checked={whatsappSettings.webApiSession}
-                onChange={(e) => setWhatsappSettings(prev => ({ ...prev, webApiSession: e.target.checked }))}
-                className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
-              />
-              <label className="ml-2 text-sm text-gray-700">WhatsApp Web session active</label>
-            </div>
-            
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <p className="text-sm text-blue-800">
-                To use Web API, scan the QR code with your phone to connect WhatsApp Web session.
-              </p>
-            </div>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Store Phone Number</label>
+            <input
+              type="tel"
+              placeholder="+91 9876543210"
+              value={whatsappSettings.phoneNumber}
+              onChange={(e) => setWhatsappSettings(prev => ({ ...prev, phoneNumber: e.target.value }))}
+              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Include country code (e.g., +91 for India)
+            </p>
           </div>
-        )}
 
-        {whatsappMethod === 'business-api' && (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Business API Token</label>
-              <input
-                type="password"
-                placeholder="Enter your WhatsApp Business API token"
-                value={whatsappSettings.businessApiToken}
-                onChange={(e) => setWhatsappSettings(prev => ({ ...prev, businessApiToken: e.target.value }))}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
-              />
-            </div>
-            
-            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-              <p className="text-sm text-purple-800">
-                WhatsApp Business API requires approval and setup. Contact WhatsApp Business for access.
-              </p>
-            </div>
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+            <h4 className="text-sm font-medium text-green-800 mb-2">Preview WhatsApp Link:</h4>
+            <code className="text-xs text-green-700 bg-white p-2 rounded border block">
+              https://wa.me/{whatsappSettings.phoneNumber.replace(/[^0-9]/g, '')}?text=Hello%20from%20ShelfCure%20Store
+            </code>
           </div>
-        )}
+        </div>
 
         <div className="mt-6 flex justify-end">
           <button className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700">
@@ -857,40 +981,78 @@ const StoreManagerNotifications = () => {
 
       {/* WhatsApp Templates */}
       <div className="bg-white shadow rounded-lg p-6">
-        <h3 className="text-lg font-medium text-gray-900 mb-4 text-left">Message Templates</h3>
-        
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-medium text-gray-900 text-left">Message Templates</h3>
+          <p className="text-sm text-gray-500">Click Edit to customize templates</p>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="border border-gray-200 rounded-lg p-4">
-            <h4 className="font-medium text-gray-900 mb-2">Low Stock Alert</h4>
-            <p className="text-sm text-gray-600 mb-3">
-              "Hi! We noticed you recently purchased [Medicine Name]. We're running low on stock. Would you like to place an order?"
-            </p>
-            <button className="text-green-600 text-sm hover:text-green-700">Use Template</button>
-          </div>
-          
-          <div className="border border-gray-200 rounded-lg p-4">
-            <h4 className="font-medium text-gray-900 mb-2">Payment Reminder</h4>
-            <p className="text-sm text-gray-600 mb-3">
-              "Hello! This is a friendly reminder about your pending payment of ₹[Amount] for invoice #[Number]. Please let us know if you need any assistance."
-            </p>
-            <button className="text-green-600 text-sm hover:text-green-700">Use Template</button>
-          </div>
-          
-          <div className="border border-gray-200 rounded-lg p-4">
-            <h4 className="font-medium text-gray-900 mb-2">Order Ready</h4>
-            <p className="text-sm text-gray-600 mb-3">
-              "Good news! Your order #[OrderNumber] is ready for pickup. Our store is open from 9 AM to 9 PM. Thank you for choosing us!"
-            </p>
-            <button className="text-green-600 text-sm hover:text-green-700">Use Template</button>
-          </div>
-          
-          <div className="border border-gray-200 rounded-lg p-4">
-            <h4 className="font-medium text-gray-900 mb-2">Medicine Reminder</h4>
-            <p className="text-sm text-gray-600 mb-3">
-              "Hi! Time for your medication reminder. Don't forget to take your [Medicine Name] as prescribed. Stay healthy!"
-            </p>
-            <button className="text-green-600 text-sm hover:text-green-700">Use Template</button>
-          </div>
+          {Object.entries(whatsappTemplates).map(([templateKey, template]) => (
+            <div key={templateKey} className="border border-gray-200 rounded-lg p-4">
+              {editingTemplate === templateKey ? (
+                // Edit Mode
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    value={template.name}
+                    onChange={(e) => handleTemplateChange(templateKey, 'name', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                  />
+                  <textarea
+                    value={template.message}
+                    onChange={(e) => handleTemplateChange(templateKey, 'message', e.target.value)}
+                    rows={4}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    placeholder="Enter your template message..."
+                  />
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => handleTemplateSave(templateKey)}
+                      className="px-3 py-1 bg-green-600 text-white text-xs rounded-md hover:bg-green-700"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={handleTemplateCancel}
+                      className="px-3 py-1 bg-gray-300 text-gray-700 text-xs rounded-md hover:bg-gray-400"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                // View Mode
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-2">{template.name}</h4>
+                  <p className="text-sm text-gray-600 mb-3 min-h-[60px]">
+                    "{template.message}"
+                  </p>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => handleUseTemplate(templateKey)}
+                      className="text-green-600 text-sm hover:text-green-700 font-medium"
+                    >
+                      Use Template
+                    </button>
+                    <span className="text-gray-300">|</span>
+                    <button
+                      onClick={() => handleTemplateEdit(templateKey)}
+                      className="text-blue-600 text-sm hover:text-blue-700"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-sm text-blue-800">
+            <strong>Template Variables:</strong> Use [Medicine Name], [Amount], [OrderNumber], [Customer Name] etc. in your templates.
+            These will be automatically replaced with actual values when sending messages.
+          </p>
         </div>
       </div>
     </div>
@@ -902,7 +1064,7 @@ const StoreManagerNotifications = () => {
         <div className="sm:flex-auto">
           <h1 className="text-2xl font-semibold text-gray-900 text-left">Compose Message</h1>
           <p className="mt-2 text-sm text-gray-700 text-left">
-            Send messages to customers via WhatsApp, SMS, or email.
+            Send messages to customers via WhatsApp or email.
           </p>
         </div>
         <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
@@ -916,7 +1078,7 @@ const StoreManagerNotifications = () => {
       </div>
 
       <div className="bg-white shadow rounded-lg p-6">
-        <form className="space-y-6">
+        <form onSubmit={handleSendMessage} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label className="block text-sm font-medium text-gray-700">Message Type</label>
@@ -926,7 +1088,7 @@ const StoreManagerNotifications = () => {
                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
               >
                 <option value="whatsapp">WhatsApp</option>
-                <option value="sms">SMS</option>
+
                 <option value="email">Email</option>
               </select>
             </div>
@@ -935,6 +1097,11 @@ const StoreManagerNotifications = () => {
               <label className="block text-sm font-medium text-gray-700">Recipients</label>
               <select
                 multiple
+                value={composeData.recipients}
+                onChange={(e) => {
+                  const selectedOptions = Array.from(e.target.selectedOptions, option => option.value);
+                  setComposeData(prev => ({ ...prev, recipients: selectedOptions }));
+                }}
                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
               >
                 <option value="all_customers">All Customers</option>
@@ -942,7 +1109,9 @@ const StoreManagerNotifications = () => {
                 <option value="credit_customers">Credit Customers</option>
                 <option value="vip_customers">VIP Customers</option>
               </select>
-              <p className="mt-1 text-xs text-gray-500">Hold Ctrl/Cmd to select multiple</p>
+              <p className="mt-1 text-xs text-gray-500">
+                Hold Ctrl/Cmd to select multiple. Selected: {composeData.recipients.length}
+              </p>
             </div>
           </div>
 
@@ -956,6 +1125,23 @@ const StoreManagerNotifications = () => {
               className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
             />
             <p className="mt-1 text-xs text-gray-500">{composeData.message.length} characters</p>
+
+            {composeData.type === 'whatsapp' && (
+              <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <div className="flex items-start">
+                  <MessageSquare className="h-4 w-4 text-green-600 mt-0.5 mr-2" />
+                  <div className="text-sm text-green-800">
+                    <p className="font-medium">WhatsApp Click-to-Chat</p>
+                    <p className="mt-1">
+                      This will generate WhatsApp links that open the customer's WhatsApp with your message pre-filled.
+                      {!whatsappSettings.phoneNumber && (
+                        <span className="text-red-600 font-medium"> Please configure your phone number in WhatsApp Integration first.</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center">
@@ -983,6 +1169,7 @@ const StoreManagerNotifications = () => {
           <div className="flex justify-end space-x-3">
             <button
               type="button"
+              onClick={handleSaveDraft}
               className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
             >
               Save as Draft
@@ -991,7 +1178,7 @@ const StoreManagerNotifications = () => {
               type="submit"
               className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700"
             >
-              {composeData.scheduled ? 'Schedule Message' : 'Send Message'}
+              {composeData.scheduled ? 'Schedule Message' : (composeData.type === 'whatsapp' ? 'Generate WhatsApp Links' : 'Send Message')}
             </button>
           </div>
         </form>
@@ -1144,35 +1331,7 @@ const StoreManagerNotifications = () => {
                   </div>
                 </div>
 
-                {/* SMS Notifications */}
-                <div>
-                  <h3 className="text-base font-medium text-gray-900 mb-4 flex items-center">
-                    <Phone className="h-5 w-5 mr-2 text-purple-500" />
-                    SMS Notifications
-                  </h3>
-                  <div className="space-y-3">
-                    {Object.entries({
-                      lowStock: 'Low Stock Alerts',
-                      expiryAlerts: 'Medicine Expiry Alerts',
-                      customerMessages: 'Customer Messages',
-                      systemUpdates: 'System Updates',
-                      paymentReminders: 'Payment Reminders'
-                    }).map(([key, label]) => (
-                      <div key={key} className="flex items-center justify-between">
-                        <span className="text-sm text-gray-700">{label}</span>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            className="sr-only peer"
-                            checked={notificationSettings.sms[key]}
-                            onChange={(e) => handleSettingChange('sms', key, e.target.checked)}
-                          />
-                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-green-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+
 
                 {/* Push Notifications */}
                 <div>

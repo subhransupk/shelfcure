@@ -6,6 +6,7 @@ import {
   Package
 } from 'lucide-react';
 import { createRack, updateRack } from '../../services/rackService';
+import { createNumericInputHandler, VALIDATION_OPTIONS } from '../../utils/inputValidation';
 
 const RackForm = ({ rack = null, onSave, onCancel }) => {
   const [formData, setFormData] = useState({
@@ -181,7 +182,11 @@ const RackForm = ({ rack = null, onSave, onCancel }) => {
                 min="1"
                 max="20"
                 value={formData.numberOfShelves}
-                onChange={(e) => handleInputChange('numberOfShelves', parseInt(e.target.value) || 1)}
+                onChange={createNumericInputHandler(
+                  (value) => handleInputChange('numberOfShelves', value),
+                  null,
+                  { ...VALIDATION_OPTIONS.INTEGER, min: 1, max: 20 }
+                )}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                 required
               />

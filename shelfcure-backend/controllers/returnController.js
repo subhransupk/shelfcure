@@ -441,8 +441,20 @@ const createReturn = async (req, res) => {
 // Helper function to process inventory restoration
 const processInventoryRestoration = async (returnRecord, userId) => {
   try {
+    console.log('🔄 Starting inventory restoration for return:', returnRecord.returnNumber);
+    console.log('🔍 Items to process:', returnRecord.items.map(item => ({
+      medicine: item.medicine,
+      restoreToInventory: item.restoreToInventory,
+      inventoryRestored: item.inventoryRestored,
+      returnQuantity: item.returnQuantity,
+      unitType: item.unitType
+    })));
+
     for (const item of returnRecord.items) {
+      console.log(`🔍 Processing restoration for item: ${item.medicine}, restoreToInventory: ${item.restoreToInventory}, inventoryRestored: ${item.inventoryRestored}`);
+
       if (!item.restoreToInventory || item.inventoryRestored) {
+        console.log(`⏭️ Skipping item ${item.medicine} - not marked for restoration or already restored`);
         continue;
       }
 
@@ -494,6 +506,96 @@ const processInventoryRestoration = async (returnRecord, userId) => {
 
   } catch (error) {
     console.error('Inventory restoration error:', error);
+    throw error;
+  }
+};
+
+// Helper function to reverse inventory restoration when return is rejected
+const reverseInventoryRestoration = async (returnRecord, userId) => {
+  try {
+    console.log('🔄 Starting inventory restoration reversal for return:', returnRecord.returnNumber);
+    console.log('🔍 Return items details:', returnRecord.items.map(item => ({
+      medicine: item.medicine,
+      restoreToInventory: item.restoreToInventory,
+      inventoryRestored: item.inventoryRestored,
+      returnQuantity: item.returnQuantity,
+      unitType: item.unitType
+    })));
+
+    for (const item of returnRecord.items) {
+      console.log(`🔍 Processing item: ${item.medicine}, restoreToInventory: ${item.restoreToInventory}, inventoryRestored: ${item.inventoryRestored}`);
+
+      // Only check if item was marked for restoration - don't require inventoryRestored flag
+      if (!item.restoreToInventory) {
+        console.log(`⏭️ Skipping item ${item.medicine} - not marked for restoration`);
+        continue;
+      }
+
+      const medicine = await Medicine.findById(item.medicine);
+      if (!medicine) {
+        console.error(`❌ Medicine not found for reversal: ${item.medicine}`);
+        continue;
+      }
+
+      console.log(`🔄 Reversing inventory for medicine: ${medicine.name}`);
+      console.log(`📊 Current stock - Strips: ${medicine.stripInfo?.stock || 0}, Individual: ${medicine.individualInfo?.stock || 0}`);
+
+      const unitsPerStrip = medicine.unitTypes?.unitsPerStrip || 10;
+      let stripQuantityReversed = 0;
+      let individualQuantityReversed = 0;
+
+      if (item.unitType === 'strip') {
+        // Reverse strip restoration (subtract the quantity that was added)
+        const currentStripStock = medicine.stripInfo?.stock || 0;
+        const quantityToReverse = Math.min(item.returnQuantity, currentStripStock);
+
+        medicine.stripInfo.stock -= quantityToReverse;
+        medicine.inventory.stripQuantity -= quantityToReverse;
+        stripQuantityReversed = quantityToReverse;
+
+        console.log(`📦 Reversed ${quantityToReverse} strips from stock`);
+      } else if (item.unitType === 'individual') {
+        // Reverse individual restoration (subtract the quantity that was added)
+        const currentIndividualStock = medicine.individualInfo?.stock || 0;
+        const quantityToReverse = Math.min(item.returnQuantity, currentIndividualStock);
+
+        medicine.individualInfo.stock -= quantityToReverse;
+        medicine.inventory.individualQuantity -= quantityToReverse;
+        individualQuantityReversed = quantityToReverse;
+
+        console.log(`💊 Reversed ${quantityToReverse} individual units from stock`);
+      }
+
+      // Ensure stock doesn't go negative
+      if (medicine.stripInfo?.stock < 0) medicine.stripInfo.stock = 0;
+      if (medicine.individualInfo?.stock < 0) medicine.individualInfo.stock = 0;
+      if (medicine.inventory?.stripQuantity < 0) medicine.inventory.stripQuantity = 0;
+      if (medicine.inventory?.individualQuantity < 0) medicine.inventory.individualQuantity = 0;
+
+      await medicine.save();
+
+      console.log(`✅ Updated stock - Strips: ${medicine.stripInfo?.stock || 0}, Individual: ${medicine.individualInfo?.stock || 0}`);
+
+      // Update return item reversal details
+      item.inventoryRestored = false;
+      item.inventoryReversed = true;
+      item.reversalDetails = {
+        reversedAt: new Date(),
+        reversedBy: userId,
+        stripQuantityReversed,
+        individualQuantityReversed,
+        reason: 'Return rejected'
+      };
+    }
+
+    // Update overall restoration status
+    returnRecord.inventoryRestorationStatus = 'reversed';
+    await returnRecord.save();
+
+    console.log('✅ Inventory restoration reversal completed for return:', returnRecord.returnNumber);
+
+  } catch (error) {
+    console.error('❌ Inventory restoration reversal error:', error);
     throw error;
   }
 };
@@ -604,6 +706,30 @@ const updateReturn = async (req, res) => {
     if (status === 'approved') {
       returnRecord.approvedBy = user._id;
       returnRecord.approvedAt = new Date();
+    }
+
+    // Handle return rejection - reverse inventory changes if inventory was restored
+    if (status === 'rejected') {
+      console.log('🔍 Return rejection detected:', {
+        returnNumber: returnRecord.returnNumber,
+        restoreInventory: returnRecord.restoreInventory,
+        inventoryRestorationStatus: returnRecord.inventoryRestorationStatus,
+        itemsCount: returnRecord.items.length,
+        status: status
+      });
+
+      // Always try to reverse if restoreInventory is true, regardless of current status
+      if (returnRecord.restoreInventory) {
+        console.log('✅ Attempting inventory reversal for return:', returnRecord.returnNumber);
+        try {
+          await reverseInventoryRestoration(returnRecord, user._id);
+          console.log('✅ Inventory reversal completed successfully');
+        } catch (error) {
+          console.error('❌ Error during inventory reversal:', error);
+        }
+      } else {
+        console.log('❌ Inventory reversal not needed - restoreInventory is false');
+      }
     }
 
     if (refundStatus === 'completed') {
@@ -877,5 +1003,6 @@ module.exports = {
   restoreInventory,
   getReturnAnalytics,
   processInventoryRestoration,
+  reverseInventoryRestoration,
   updateOriginalSaleStatus
 };

@@ -487,7 +487,10 @@ const CustomerPurchaseHistory = () => {
                                   Original: {item.quantity} {item.unit}
                                 </p>
                                 <p className="text-sm text-gray-500">
-                                  Price: ₹{item.price?.toFixed(2) || '0.00'}
+                                  Unit Price: ₹{item.unitPrice?.toFixed(2) || '0.00'}
+                                </p>
+                                <p className="text-sm text-gray-500">
+                                  Total: ₹{item.totalPrice?.toFixed(2) || '0.00'}
                                 </p>
                               </div>
 

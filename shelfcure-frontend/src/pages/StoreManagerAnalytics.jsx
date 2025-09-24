@@ -125,10 +125,11 @@ const StoreManagerAnalytics = () => {
       const token = localStorage.getItem('token');
 
       if (!token) {
-        throw new Error('No authentication token found. Please log in again.');
+        setError('No authentication token found. Please log in again.');
+        return;
       }
 
-      const response = await fetch(`/api/store-manager/analytics?period=${period}`, {
+      const response = await fetch(`http://localhost:5000/api/store-manager/analytics?period=${period}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -137,36 +138,31 @@ const StoreManagerAnalytics = () => {
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Authentication failed. Please log in again.');
+          setError('Authentication failed. Please log in again.');
+          // Clear invalid token
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          return;
         } else if (response.status === 403) {
-          throw new Error('Access denied. You need store manager permissions.');
+          setError('Access denied. You need store manager permissions.');
+          return;
         } else {
           const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.message || 'Failed to fetch analytics');
+          setError(errorData.message || 'Failed to fetch analytics');
+          return;
         }
       }
 
       const data = await response.json();
-      setAnalyticsData(data.data);
-    } catch (error) {
-      console.warn('Analytics API unavailable, using demo data:', error.message);
-
-      try {
-        // Set realistic demo data for development/demo purposes
-        const demoData = generateDemoAnalyticsData(period);
-        setAnalyticsData(demoData);
-
-        // Show a development notice with proper error message
-        const errorMessage = error.message || error.toString() || 'Failed to load analytics data';
-        if (errorMessage.includes('Authentication failed') || errorMessage.includes('Access denied') || errorMessage.includes('permissions')) {
-          setError(`${errorMessage} - Showing demo data for development purposes.`);
-        } else {
-          setError(`${errorMessage} - Showing demo data for development purposes.`);
-        }
-      } catch (demoError) {
-        console.error('Failed to generate demo data:', demoError);
-        setError('Unable to load analytics data. Please try again later.');
+      if (data.success) {
+        setAnalyticsData(data.data);
+        setError(''); // Clear any previous errors
+      } else {
+        setError(data.message || 'Failed to load analytics data');
       }
+    } catch (error) {
+      console.error('Analytics API error:', error);
+      setError(`Failed to load analytics data: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -186,7 +182,74 @@ const StoreManagerAnalytics = () => {
 
   // Handle export
   const handleExport = () => {
-    console.log('Exporting store manager analytics data...');
+    if (!analyticsData) {
+      alert('No data available to export');
+      return;
+    }
+
+    try {
+      // Create CSV content
+      let csvContent = "data:text/csv;charset=utf-8,";
+
+      // Add summary data
+      csvContent += "ShelfCure Store Analytics Report\n";
+      csvContent += `Period: ${getPeriodLabel(period)}\n`;
+      csvContent += `Generated: ${new Date().toLocaleString()}\n\n`;
+
+      csvContent += "SUMMARY METRICS\n";
+      csvContent += "Metric,Value\n";
+      csvContent += `Total Revenue,${analyticsData.summary.totalRevenue}\n`;
+      csvContent += `Total Sales,${analyticsData.summary.totalSales}\n`;
+      csvContent += `Average Order Value,${analyticsData.summary.averageOrderValue}\n`;
+      csvContent += `Revenue Growth,${analyticsData.summary.revenueGrowth || 0}%\n`;
+      csvContent += `Sales Growth,${analyticsData.summary.salesGrowth || 0}%\n\n`;
+
+      // Add daily sales data
+      csvContent += "DAILY SALES\n";
+      csvContent += "Date,Revenue,Sales,Transactions,Average Order Value\n";
+      analyticsData.dailySales?.forEach(day => {
+        csvContent += `${day.date},${day.revenue},${day.sales},${day.transactions},${day.averageOrderValue}\n`;
+      });
+
+      csvContent += "\nTOP MEDICINES\n";
+      csvContent += "Medicine,Revenue,Quantity,Category\n";
+      analyticsData.topMedicines?.forEach(medicine => {
+        csvContent += `${medicine.name},${medicine.revenue},${medicine.quantity},${medicine.category || 'N/A'}\n`;
+      });
+
+      // Add inventory data if available
+      if (analyticsData.inventory) {
+        csvContent += "\nINVENTORY METRICS\n";
+        csvContent += "Metric,Value\n";
+        csvContent += `Total Medicines,${analyticsData.inventory.totalMedicines}\n`;
+        csvContent += `Low Stock Medicines,${analyticsData.inventory.lowStockMedicines}\n`;
+        csvContent += `Out of Stock Medicines,${analyticsData.inventory.outOfStockMedicines}\n`;
+        csvContent += `Stock Health Percentage,${analyticsData.inventory.stockHealthPercentage}%\n`;
+      }
+
+      // Add customer data if available
+      if (analyticsData.customers) {
+        csvContent += "\nCUSTOMER METRICS\n";
+        csvContent += "Metric,Value\n";
+        csvContent += `Total Customers,${analyticsData.customers.totalCustomers}\n`;
+        csvContent += `New Customers,${analyticsData.customers.newCustomers}\n`;
+        csvContent += `Customer Growth,${analyticsData.customers.customerGrowth}%\n`;
+      }
+
+      // Create and download file
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `store-analytics-${period}-${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      console.log('Analytics data exported successfully');
+    } catch (error) {
+      console.error('Export failed:', error);
+      alert('Failed to export data. Please try again.');
+    }
   };
 
   // Format currency
@@ -247,6 +310,18 @@ const StoreManagerAnalytics = () => {
           onRefresh={handleRefresh}
           onExport={handleExport}
           loading={loading || refreshing}
+          customFilters={[
+            {
+              label: 'Period',
+              options: [
+                { value: '7d', label: 'Last 7 Days' },
+                { value: '30d', label: 'Last 30 Days' },
+                { value: '90d', label: 'Last 90 Days' }
+              ],
+              value: period,
+              onChange: setPeriod
+            }
+          ]}
         />
 
         {error && (
@@ -302,8 +377,8 @@ const StoreManagerAnalytics = () => {
                 value={formatCurrency(analyticsData?.summary?.totalRevenue || 0)}
                 subtitle={`${getPeriodLabel(period)} revenue`}
                 icon={DollarSign}
-                trend="up"
-                trendValue="+12% from last period"
+                trend={analyticsData?.summary?.revenueGrowth > 0 ? "up" : analyticsData?.summary?.revenueGrowth < 0 ? "down" : "neutral"}
+                trendValue={analyticsData?.summary?.revenueGrowth ? `${analyticsData.summary.revenueGrowth > 0 ? '+' : ''}${analyticsData.summary.revenueGrowth}% from last period` : "No previous data"}
                 color="green"
                 loading={loading}
               />
@@ -312,8 +387,8 @@ const StoreManagerAnalytics = () => {
                 value={analyticsData?.summary?.totalSales || 0}
                 subtitle="Number of transactions"
                 icon={ShoppingCart}
-                trend="up"
-                trendValue="+8% from last period"
+                trend={analyticsData?.summary?.salesGrowth > 0 ? "up" : analyticsData?.summary?.salesGrowth < 0 ? "down" : "neutral"}
+                trendValue={analyticsData?.summary?.salesGrowth ? `${analyticsData.summary.salesGrowth > 0 ? '+' : ''}${analyticsData.summary.salesGrowth}% from last period` : "No previous data"}
                 color="blue"
                 loading={loading}
               />
@@ -323,7 +398,7 @@ const StoreManagerAnalytics = () => {
                 subtitle="Per transaction"
                 icon={TrendingUp}
                 trend="neutral"
-                trendValue="Same as last period"
+                trendValue="Average per sale"
                 color="purple"
                 loading={loading}
               />
@@ -540,21 +615,25 @@ const StoreManagerAnalytics = () => {
               data={analyticsData?.topMedicines || []}
               columns={[
                 { key: 'name', label: 'Medicine Name' },
-                { key: 'quantitySold', label: 'Quantity Sold' },
+                { key: 'quantity', label: 'Quantity Sold' },
                 {
                   key: 'revenue',
                   label: 'Revenue',
                   render: (value) => formatCurrency(value)
                 },
+                { key: 'category', label: 'Category' },
                 {
-                  key: 'profit',
-                  label: 'Profit',
-                  render: (value) => formatCurrency(value)
-                },
-                {
-                  key: 'profitMargin',
-                  label: 'Profit Margin',
-                  render: (value) => `${value}%`
+                  key: 'growth',
+                  label: 'Growth',
+                  render: (value) => (
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      value > 0 ? 'bg-green-100 text-green-800' :
+                      value < 0 ? 'bg-red-100 text-red-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      {value > 0 ? '+' : ''}{value}%
+                    </span>
+                  )
                 }
               ]}
               loading={loading}
@@ -572,14 +651,14 @@ const StoreManagerAnalytics = () => {
               <MetricCard
                 title="Total Medicines"
                 value={analyticsData?.inventory?.totalMedicines || 0}
-                subtitle="In stock"
+                subtitle="Active medicines"
                 icon={Package}
                 color="blue"
                 loading={loading}
               />
               <MetricCard
                 title="Low Stock Items"
-                value={analyticsData?.inventory?.lowStockItems || 0}
+                value={analyticsData?.inventory?.lowStockMedicines || 0}
                 subtitle="Need restocking"
                 icon={AlertTriangle}
                 color="orange"
@@ -587,17 +666,17 @@ const StoreManagerAnalytics = () => {
               />
               <MetricCard
                 title="Out of Stock"
-                value={analyticsData?.inventory?.outOfStockItems || 0}
+                value={analyticsData?.inventory?.outOfStockMedicines || 0}
                 subtitle="Currently unavailable"
                 icon={Package}
                 color="red"
                 loading={loading}
               />
               <MetricCard
-                title="Inventory Value"
-                value={formatCurrency(analyticsData?.inventory?.totalValue || 0)}
-                subtitle="Total stock value"
-                icon={DollarSign}
+                title="Stock Health"
+                value={`${analyticsData?.inventory?.stockHealthPercentage || 0}%`}
+                subtitle="Healthy stock levels"
+                icon={TrendingUp}
                 color="green"
                 loading={loading}
               />
@@ -613,12 +692,12 @@ const StoreManagerAnalytics = () => {
               >
                 <Doughnut
                   data={{
-                    labels: ['In Stock', 'Low Stock', 'Out of Stock'],
+                    labels: ['Healthy Stock', 'Low Stock', 'Out of Stock'],
                     datasets: [{
                       data: [
-                        analyticsData?.inventory?.inStockItems || 0,
-                        analyticsData?.inventory?.lowStockItems || 0,
-                        analyticsData?.inventory?.outOfStockItems || 0
+                        (analyticsData?.inventory?.totalMedicines || 0) - (analyticsData?.inventory?.lowStockMedicines || 0) - (analyticsData?.inventory?.outOfStockMedicines || 0),
+                        analyticsData?.inventory?.lowStockMedicines || 0,
+                        analyticsData?.inventory?.outOfStockMedicines || 0
                       ],
                       backgroundColor: [
                         'rgba(34, 197, 94, 0.8)',
@@ -672,17 +751,17 @@ const StoreManagerAnalytics = () => {
             {/* Low Stock Alert Table */}
             <DataTable
               title="Low Stock Alerts"
-              data={analyticsData?.inventory?.lowStockMedicines || []}
+              data={analyticsData?.inventory?.lowStockMedicinesData || []}
               columns={[
                 { key: 'name', label: 'Medicine Name' },
-                { key: 'currentStock', label: 'Current Stock' },
+                { key: 'stock', label: 'Current Stock' },
                 { key: 'minStock', label: 'Min Stock Level' },
                 { key: 'category', label: 'Category' },
                 {
                   key: 'urgency',
                   label: 'Urgency',
                   render: (value, row) => {
-                    const urgency = row.currentStock <= row.minStock * 0.5 ? 'High' : 'Medium';
+                    const urgency = row.stock <= row.minStock * 0.5 ? 'High' : 'Medium';
                     return (
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                         urgency === 'High'
@@ -718,24 +797,24 @@ const StoreManagerAnalytics = () => {
               <MetricCard
                 title="New Customers"
                 value={analyticsData?.customers?.newCustomers || 0}
-                subtitle={`This ${period}`}
+                subtitle={`This ${getPeriodLabel(period)}`}
                 icon={UserCheck}
                 color="green"
                 loading={loading}
               />
               <MetricCard
-                title="Repeat Customers"
-                value={analyticsData?.customers?.repeatCustomers || 0}
-                subtitle="Multiple purchases"
-                icon={Activity}
+                title="Customer Growth"
+                value={`${analyticsData?.customers?.customerGrowth || 0}%`}
+                subtitle="Growth rate"
+                icon={TrendingUp}
                 color="purple"
                 loading={loading}
               />
               <MetricCard
-                title="Customer Retention"
-                value={`${analyticsData?.customers?.retentionRate || 0}%`}
-                subtitle="Retention rate"
-                icon={TrendingUp}
+                title="Active Customers"
+                value={analyticsData?.customers?.totalCustomers || 0}
+                subtitle="Total active"
+                icon={Activity}
                 color="orange"
                 loading={loading}
               />
@@ -818,13 +897,17 @@ const StoreManagerAnalytics = () => {
               columns={[
                 { key: 'name', label: 'Customer Name' },
                 { key: 'phone', label: 'Phone' },
-                { key: 'totalPurchases', label: 'Total Purchases' },
+                { key: 'visitCount', label: 'Total Visits' },
                 {
                   key: 'totalSpent',
                   label: 'Total Spent',
                   render: (value) => formatCurrency(value)
                 },
-                { key: 'lastVisit', label: 'Last Visit' },
+                {
+                  key: 'lastVisit',
+                  label: 'Last Visit',
+                  render: (value) => value ? new Date(value).toLocaleDateString() : 'N/A'
+                },
                 {
                   key: 'customerType',
                   label: 'Type',
@@ -957,6 +1040,77 @@ const StoreManagerAnalytics = () => {
                     maintainAspectRatio: false,
                     plugins: {
                       legend: { position: 'top' }
+                    },
+                    scales: {
+                      y: { beginAtZero: true }
+                    }
+                  }}
+                />
+              </ChartContainer>
+            </div>
+
+            {/* Category Distribution */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <ChartContainer
+                title="Sales by Category"
+                subtitle="Revenue distribution by medicine category"
+                loading={loading}
+              >
+                <Doughnut
+                  data={{
+                    labels: analyticsData?.operations?.categoryDistribution?.map(cat => cat.category) || [],
+                    datasets: [{
+                      data: analyticsData?.operations?.categoryDistribution?.map(cat => cat.revenue) || [],
+                      backgroundColor: [
+                        'rgba(34, 197, 94, 0.8)',
+                        'rgba(59, 130, 246, 0.8)',
+                        'rgba(168, 85, 247, 0.8)',
+                        'rgba(249, 115, 22, 0.8)',
+                        'rgba(239, 68, 68, 0.8)',
+                        'rgba(14, 165, 233, 0.8)'
+                      ],
+                      borderColor: [
+                        'rgba(34, 197, 94, 1)',
+                        'rgba(59, 130, 246, 1)',
+                        'rgba(168, 85, 247, 1)',
+                        'rgba(249, 115, 22, 1)',
+                        'rgba(239, 68, 68, 1)',
+                        'rgba(14, 165, 233, 1)'
+                      ],
+                      borderWidth: 2
+                    }]
+                  }}
+                  options={{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                      legend: { position: 'bottom' }
+                    }
+                  }}
+                />
+              </ChartContainer>
+
+              <ChartContainer
+                title="Top Medicine Categories"
+                subtitle="Best performing categories"
+                loading={loading}
+              >
+                <Bar
+                  data={{
+                    labels: analyticsData?.operations?.categoryDistribution?.slice(0, 5).map(cat => cat.category) || [],
+                    datasets: [{
+                      label: 'Revenue',
+                      data: analyticsData?.operations?.categoryDistribution?.slice(0, 5).map(cat => cat.revenue) || [],
+                      backgroundColor: 'rgba(34, 197, 94, 0.8)',
+                      borderColor: 'rgba(34, 197, 94, 1)',
+                      borderWidth: 1
+                    }]
+                  }}
+                  options={{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                      legend: { display: false }
                     },
                     scales: {
                       y: { beginAtZero: true }

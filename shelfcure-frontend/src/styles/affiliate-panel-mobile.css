@@ -1,0 +1,283 @@
+/* Affiliate Panel Mobile Optimizations */
+
+/* Touch-friendly interactions */
+.touch-manipulation {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Improved touch targets for mobile */
+@media (max-width: 768px) {
+  /* Minimum touch target size of 44px */
+  button, 
+  .btn, 
+  input[type="button"], 
+  input[type="submit"], 
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Better spacing for form elements */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="tel"],
+  input[type="number"],
+  select,
+  textarea {
+    font-size: 16px; /* Prevents zoom on iOS */
+    padding: 12px 16px;
+    line-height: 1.5;
+  }
+
+  /* Improved dropdown menus */
+  select {
+    background-size: 20px;
+    padding-right: 40px;
+  }
+
+  /* Better card spacing */
+  .mobile-card {
+    margin-bottom: 16px;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+
+  /* Improved table alternatives */
+  .mobile-table-card {
+    background: white;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+    border: 1px solid #e5e7eb;
+  }
+
+  .mobile-table-card:active {
+    background-color: #f9fafb;
+  }
+
+  /* Better typography for mobile */
+  .mobile-title {
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  .mobile-subtitle {
+    font-size: 14px;
+    color: #6b7280;
+    line-height: 1.4;
+  }
+
+  .mobile-body {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .mobile-caption {
+    font-size: 12px;
+    color: #9ca3af;
+    line-height: 1.4;
+  }
+
+  /* Improved grid layouts */
+  .mobile-grid-1 {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .mobile-grid-2 {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  /* Better spacing */
+  .mobile-spacing-sm {
+    padding: 12px;
+  }
+
+  .mobile-spacing-md {
+    padding: 16px;
+  }
+
+  .mobile-spacing-lg {
+    padding: 20px;
+  }
+
+  /* Improved navigation */
+  .mobile-nav-item {
+    padding: 16px 20px;
+    border-bottom: 1px solid #f3f4f6;
+  }
+
+  .mobile-nav-item:last-child {
+    border-bottom: none;
+  }
+
+  /* Better modal/dropdown positioning */
+  .mobile-dropdown {
+    position: fixed !important;
+    top: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    border-radius: 16px 16px 0 0;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+
+  /* Improved loading states */
+  .mobile-loading {
+    padding: 40px 20px;
+    text-align: center;
+  }
+
+  /* Better empty states */
+  .mobile-empty-state {
+    padding: 60px 20px;
+    text-align: center;
+  }
+
+  .mobile-empty-state svg {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 16px;
+    color: #d1d5db;
+  }
+
+  /* Improved status badges */
+  .mobile-status-badge {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-weight: 500;
+  }
+
+  /* Better action buttons */
+  .mobile-action-btn {
+    width: 100%;
+    padding: 14px 16px;
+    font-size: 16px;
+    font-weight: 500;
+    border-radius: 8px;
+    margin-bottom: 8px;
+  }
+
+  .mobile-action-btn:last-child {
+    margin-bottom: 0;
+  }
+
+  /* Improved search bars */
+  .mobile-search {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: white;
+    padding: 16px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  /* Better pagination */
+  .mobile-pagination {
+    padding: 16px;
+    background: white;
+    border-top: 1px solid #e5e7eb;
+    position: sticky;
+    bottom: 0;
+  }
+
+  .mobile-pagination-btn {
+    flex: 1;
+    padding: 12px 16px;
+    font-size: 16px;
+    font-weight: 500;
+  }
+}
+
+/* Landscape phone optimizations */
+@media (max-width: 768px) and (orientation: landscape) {
+  .mobile-landscape-compact {
+    padding: 8px 12px;
+  }
+
+  .mobile-landscape-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+}
+
+/* Small phone optimizations */
+@media (max-width: 375px) {
+  .small-mobile-text {
+    font-size: 13px;
+  }
+
+  .small-mobile-title {
+    font-size: 16px;
+  }
+
+  .small-mobile-spacing {
+    padding: 12px;
+  }
+}
+
+/* High DPI displays */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .mobile-icon {
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+  }
+}
+
+/* Dark mode support for mobile */
+@media (prefers-color-scheme: dark) and (max-width: 768px) {
+  .mobile-card {
+    background-color: #1f2937;
+    border-color: #374151;
+    color: #f9fafb;
+  }
+
+  .mobile-table-card {
+    background-color: #1f2937;
+    border-color: #374151;
+  }
+
+  .mobile-search {
+    background-color: #1f2937;
+    border-color: #374151;
+  }
+}
+
+/* Accessibility improvements for mobile */
+@media (max-width: 768px) {
+  /* Focus indicators */
+  button:focus,
+  input:focus,
+  select:focus,
+  textarea:focus {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
+  }
+
+  /* High contrast mode support */
+  @media (prefers-contrast: high) {
+    .mobile-card {
+      border-width: 2px;
+    }
+
+    .mobile-status-badge {
+      border: 1px solid currentColor;
+    }
+  }
+
+  /* Reduced motion support */
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

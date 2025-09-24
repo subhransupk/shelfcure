@@ -20,8 +20,20 @@ const affiliateCommissionSchema = new mongoose.Schema({
   // Commission Details
   type: {
     type: String,
-    enum: ['initial', 'recurring', 'bonus'],
+    enum: ['initial', 'recurring', 'bonus', 'referral_onetime'],
     required: true
+  },
+  commissionLevel: {
+    type: Number,
+    default: 0, // 0 = direct sale, 1 = level 1 referral, 2 = level 2 referral
+    min: 0,
+    max: 2
+  },
+  // For multi-level commissions - tracks the selling affiliate
+  sellingAffiliate: {
+    type: mongoose.Schema.ObjectId,
+    ref: 'Affiliate',
+    default: null // Only set for referral commissions
   },
   period: {
     month: {
@@ -160,6 +172,9 @@ const affiliateCommissionSchema = new mongoose.Schema({
 // Indexes
 affiliateCommissionSchema.index({ affiliate: 1 });
 affiliateCommissionSchema.index({ store: 1 });
+affiliateCommissionSchema.index({ sellingAffiliate: 1 });
+affiliateCommissionSchema.index({ type: 1 });
+affiliateCommissionSchema.index({ commissionLevel: 1 });
 affiliateCommissionSchema.index({ status: 1 });
 affiliateCommissionSchema.index({ paymentStatus: 1 });
 affiliateCommissionSchema.index({ earnedDate: -1 });
@@ -223,6 +238,135 @@ affiliateCommissionSchema.methods.markAsPaid = function(paymentDetails) {
   this.paidDate = new Date();
   this.payment = { ...this.payment, ...paymentDetails };
   return this.save();
+};
+
+// Static method to create multi-level commissions for a store sale
+affiliateCommissionSchema.statics.createMultiLevelCommissions = async function(saleData) {
+  const Affiliate = require('./Affiliate');
+  const commissions = [];
+
+  try {
+    // Find the selling affiliate
+    const sellingAffiliate = await Affiliate.findOne({
+      affiliateCode: saleData.affiliateCode,
+      status: 'active'
+    });
+
+    if (!sellingAffiliate) {
+      throw new Error('Selling affiliate not found or inactive');
+    }
+
+    // 1. Create recurring commission for the selling affiliate
+    const recurringCommission = await this.create({
+      affiliate: sellingAffiliate._id,
+      store: saleData.storeId,
+      invoice: saleData.invoiceId,
+      type: 'recurring',
+      commissionLevel: 0,
+      sellingAffiliate: sellingAffiliate._id,
+      period: {
+        month: new Date().getMonth() + 1,
+        year: new Date().getFullYear()
+      },
+      baseAmount: saleData.amount,
+      commissionRate: sellingAffiliate.commission.rate,
+      commissionAmount: this.calculateCommission(
+        saleData.amount,
+        sellingAffiliate.commission.rate,
+        sellingAffiliate.commission.type
+      ),
+      status: 'pending',
+      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      subscription: saleData.subscription,
+      customerAcquisitionDate: new Date()
+    });
+
+    commissions.push(recurringCommission);
+
+    // 2. Create one-time commission for direct referrer (Level 1)
+    if (sellingAffiliate.referredBy) {
+      const directReferrer = await Affiliate.findById(sellingAffiliate.referredBy);
+
+      if (directReferrer && directReferrer.status === 'active' &&
+          directReferrer.commission.referralCommission.enabled) {
+
+        const oneTimeCommission = await this.create({
+          affiliate: directReferrer._id,
+          store: saleData.storeId,
+          invoice: saleData.invoiceId,
+          type: 'referral_onetime',
+          commissionLevel: 1,
+          sellingAffiliate: sellingAffiliate._id,
+          period: {
+            month: new Date().getMonth() + 1,
+            year: new Date().getFullYear()
+          },
+          baseAmount: saleData.amount,
+          commissionRate: directReferrer.commission.referralCommission.oneTimeRate,
+          commissionAmount: this.calculateCommission(
+            saleData.amount,
+            directReferrer.commission.referralCommission.oneTimeRate,
+            'percentage'
+          ),
+          status: 'pending',
+          dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          subscription: saleData.subscription,
+          customerAcquisitionDate: new Date(),
+          notes: `One-time referral commission for referring ${sellingAffiliate.name}`
+        });
+
+        commissions.push(oneTimeCommission);
+      }
+    }
+
+    // Note: Level 2 referrers do NOT get commission as per requirements
+    // The system is limited to exactly 2 levels (selling affiliate + direct referrer only)
+
+    return commissions;
+
+  } catch (error) {
+    console.error('Error creating multi-level commissions:', error);
+    throw error;
+  }
+};
+
+// Static method to create commissions for affiliate referral (when affiliate refers another affiliate)
+affiliateCommissionSchema.statics.createAffiliateReferralCommission = async function(referrerAffiliate, newAffiliate, firstSaleData) {
+  try {
+    // Only create commission when the referred affiliate makes their first sale
+    if (!firstSaleData) return null;
+
+    const commission = await this.create({
+      affiliate: referrerAffiliate._id,
+      store: firstSaleData.storeId,
+      invoice: firstSaleData.invoiceId,
+      type: 'referral_onetime',
+      commissionLevel: 1,
+      sellingAffiliate: newAffiliate._id,
+      period: {
+        month: new Date().getMonth() + 1,
+        year: new Date().getFullYear()
+      },
+      baseAmount: firstSaleData.amount,
+      commissionRate: referrerAffiliate.commission.referralCommission.oneTimeRate,
+      commissionAmount: this.calculateCommission(
+        firstSaleData.amount,
+        referrerAffiliate.commission.referralCommission.oneTimeRate,
+        'percentage'
+      ),
+      status: 'pending',
+      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      subscription: firstSaleData.subscription,
+      customerAcquisitionDate: new Date(),
+      notes: `Affiliate referral commission for referring ${newAffiliate.name}`
+    });
+
+    return commission;
+
+  } catch (error) {
+    console.error('Error creating affiliate referral commission:', error);
+    throw error;
+  }
 };
 
 module.exports = mongoose.model('AffiliateCommission', affiliateCommissionSchema);

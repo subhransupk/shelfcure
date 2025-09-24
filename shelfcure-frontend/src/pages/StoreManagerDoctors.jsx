@@ -75,15 +75,68 @@ const StoreManagerDoctors = () => {
     return () => clearTimeout(timeoutId);
   }, [currentPage, searchTerm, specializationFilter, statusFilter]);
 
+  // Reset page to 1 when search term or filters change
+  useEffect(() => {
+    if (currentPage !== 1) {
+      setCurrentPage(1);
+    }
+  }, [searchTerm, specializationFilter, statusFilter]);
+
   useEffect(() => {
     if (activeTab === 'commissions') {
       fetchCommissions();
     }
   }, [activeTab]); // Remove changing dependencies
 
+  // Fetch commission stats on component load for summary cards
+  useEffect(() => {
+    fetchCommissionStats();
+  }, []);
+
+  // Fetch commission stats (separate from full commission data)
+  const fetchCommissionStats = async () => {
+    try {
+      const token = localStorage.getItem('token');
+
+      const statsResponse = await fetch('/api/store-manager/doctors/stats', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (statsResponse.ok) {
+        const statsData = await statsResponse.json();
+        setCommissionStats(statsData.data);
+      }
+    } catch (error) {
+      console.error('Fetch commission stats error:', error);
+    }
+  };
+
+  // Calculate top referrer based on total prescriptions
+  const getTopReferrer = () => {
+    if (!doctors || doctors.length === 0) {
+      return { name: 'No data', prescriptions: 0 };
+    }
+
+    const topDoctor = doctors.reduce((prev, current) => {
+      const prevPrescriptions = prev.totalPrescriptions || 0;
+      const currentPrescriptions = current.totalPrescriptions || 0;
+      return currentPrescriptions > prevPrescriptions ? current : prev;
+    });
+
+    return {
+      name: topDoctor.name || 'Unknown',
+      prescriptions: topDoctor.totalPrescriptions || 0
+    };
+  };
+
   // Separate useEffect for commission filters
   useEffect(() => {
     if (activeTab === 'commissions') {
+      console.log('Commission tab activated, fetching commissions...');
+      console.log('Current filters:', { commissionFilter, commissionDateRange });
       fetchCommissions();
     }
   }, [commissionFilter, commissionDateRange]);
@@ -242,8 +295,13 @@ const StoreManagerDoctors = () => {
     try {
       const token = localStorage.getItem('token');
 
-      // Fetch commission stats
-      const statsResponse = await fetch('/api/store-manager/doctors/stats', {
+      // Fetch commission stats with filters
+      const statsParams = new URLSearchParams({
+        dateRange: commissionDateRange,
+        status: commissionFilter !== 'all' ? commissionFilter : ''
+      });
+
+      const statsResponse = await fetch(`/api/store-manager/doctors/stats?${statsParams}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -261,6 +319,8 @@ const StoreManagerDoctors = () => {
         status: commissionFilter !== 'all' ? commissionFilter : ''
       });
 
+      console.log('Fetching commission history with params:', params.toString());
+
       const historyResponse = await fetch(`/api/store-manager/doctors/commissions?${params}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -268,9 +328,17 @@ const StoreManagerDoctors = () => {
         }
       });
 
+      console.log('Commission history response status:', historyResponse.status);
+
       if (historyResponse.ok) {
         const historyData = await historyResponse.json();
+        console.log('Commission history data received:', historyData);
+        console.log('Commission history array:', historyData.data);
         setCommissionHistory(historyData.data || []);
+      } else {
+        console.error('Failed to fetch commission history:', historyResponse.status);
+        const errorData = await historyResponse.json();
+        console.error('Error details:', errorData);
       }
 
     } catch (error) {
@@ -282,6 +350,7 @@ const StoreManagerDoctors = () => {
 
   // Mark commission as paid
   const markCommissionPaid = async (commissionId) => {
+    console.log('Attempting to mark commission as paid:', commissionId);
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(`/api/store-manager/doctors/commissions/${commissionId}/pay`, {
@@ -292,10 +361,19 @@ const StoreManagerDoctors = () => {
         }
       });
 
+      console.log('Mark commission paid response status:', response.status);
+
       if (response.ok) {
+        const data = await response.json();
+        console.log('Mark commission paid success:', data);
+        setError(''); // Clear any previous errors
+        // Show success message briefly
+        setError('Commission marked as paid successfully!');
+        setTimeout(() => setError(''), 3000);
         await fetchCommissions(); // Refresh data
       } else {
         const data = await response.json();
+        console.error('Mark commission paid failed:', data);
         setError(data.message || 'Failed to mark commission as paid');
       }
     } catch (error) {
@@ -315,6 +393,14 @@ const StoreManagerDoctors = () => {
         ...(searchTerm && { search: searchTerm }),
         ...(specializationFilter && { specialization: specializationFilter }),
         ...(statusFilter && statusFilter !== 'all' && { status: statusFilter })
+      });
+
+      console.log('Search parameters:', {
+        searchTerm,
+        specializationFilter,
+        statusFilter,
+        currentPage,
+        paramsString: params.toString()
       });
 
       const response = await fetch(`/api/store-manager/doctors?${params}`, {
@@ -414,8 +500,8 @@ const StoreManagerDoctors = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Active Prescriptions</p>
-              <p className="text-2xl font-bold text-gray-900">156</p>
-              <p className="text-xs text-blue-600">+18 this week</p>
+              <p className="text-2xl font-bold text-gray-900">{commissionStats.totalPrescriptions || 0}</p>
+              <p className="text-xs text-blue-600">Total prescriptions</p>
             </div>
             <div className="p-3 bg-gradient-to-r from-green-500 to-green-600 rounded-full">
               <FileText className="h-6 w-6 text-white" />
@@ -427,7 +513,7 @@ const StoreManagerDoctors = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Total Commissions</p>
-              <p className="text-2xl font-bold text-gray-900">₹12,450</p>
+              <p className="text-2xl font-bold text-gray-900">₹{commissionStats.thisMonthCommissions?.toLocaleString() || 0}</p>
               <p className="text-xs text-purple-600">This month</p>
             </div>
             <div className="p-3 bg-gradient-to-r from-purple-500 to-purple-600 rounded-full">
@@ -440,8 +526,8 @@ const StoreManagerDoctors = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Top Referrer</p>
-              <p className="text-lg font-bold text-gray-900">Dr. Sharma</p>
-              <p className="text-xs text-orange-600">45 referrals</p>
+              <p className="text-lg font-bold text-gray-900">Dr. {getTopReferrer().name}</p>
+              <p className="text-xs text-orange-600">{getTopReferrer().prescriptions} prescriptions</p>
             </div>
             <div className="p-3 bg-gradient-to-r from-orange-500 to-orange-600 rounded-full">
               <Award className="h-6 w-6 text-white" />
@@ -501,6 +587,8 @@ const StoreManagerDoctors = () => {
               onClick={() => {
                 setSearchTerm('');
                 setSpecializationFilter('');
+                setStatusFilter('all');
+                setCurrentPage(1);
               }}
               className="w-full px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
             >
@@ -770,6 +858,12 @@ const StoreManagerDoctors = () => {
       {/* Commission Details */}
       <div className="bg-white shadow rounded-lg p-6">
         <h3 className="text-lg font-medium text-gray-900 mb-4 text-left">Commission Details</h3>
+        {/* Debug info */}
+        <div className="mb-4 p-2 bg-gray-100 rounded text-xs">
+          <strong>Debug:</strong> Commission History Length: {commissionHistory.length} |
+          Loading: {loadingCommissions ? 'Yes' : 'No'} |
+          Filters: {commissionDateRange} / {commissionFilter}
+        </div>
         {loadingCommissions ? (
           <div className="flex items-center justify-center h-32">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
@@ -798,13 +892,18 @@ const StoreManagerDoctors = () => {
                     Status
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Date
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions
                   </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {commissionHistory.length > 0 ? (
-                  commissionHistory.map((commission) => (
+                  commissionHistory.map((commission) => {
+                    console.log('Rendering commission:', commission);
+                    return (
                     <tr key={commission._id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
@@ -848,6 +947,13 @@ const StoreManagerDoctors = () => {
                           {commission.status === 'paid' ? 'Paid' : commission.status === 'pending' ? 'Pending' : 'Draft'}
                         </span>
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {new Date(commission.createdAt).toLocaleDateString('en-IN', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric'
+                        })}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         {commission.status === 'pending' && (
                           <button
@@ -860,10 +966,11 @@ const StoreManagerDoctors = () => {
                         )}
                       </td>
                     </tr>
-                  ))
+                    );
+                  })
                 ) : (
                   <tr>
-                    <td colSpan="7" className="px-6 py-4 text-center text-gray-500">
+                    <td colSpan="8" className="px-6 py-4 text-center text-gray-500">
                       No commission data found for the selected filters
                     </td>
                   </tr>

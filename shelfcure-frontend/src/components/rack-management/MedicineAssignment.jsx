@@ -41,9 +41,9 @@ const MedicineAssignment = ({ onBack }) => {
         getUnassignedMedicines(),
         getRacks()
       ]);
-      
-      setUnassignedMedicines(medicinesResponse.data.medicines || []);
-      setRacks(racksResponse.data.racks || []);
+
+      setUnassignedMedicines(medicinesResponse.data || []);
+      setRacks(racksResponse.data || []);
       setError('');
     } catch (err) {
       console.error('Error fetching data:', err);
@@ -69,15 +69,16 @@ const MedicineAssignment = ({ onBack }) => {
 
     try {
       setAssigning(true);
+
       await assignMedicineToLocation({
         medicineId: selectedMedicine._id,
         rackId: selectedRack._id,
-        shelf,
-        position,
-        quantity: {
-          strips: selectedMedicine.inventory?.stripQuantity || 0,
-          individual: selectedMedicine.inventory?.individualQuantity || 0
-        }
+        shelf: String(shelf),
+        position: String(position),
+        stripQuantity: selectedMedicine.inventory?.stripQuantity || 0,
+        individualQuantity: selectedMedicine.inventory?.individualQuantity || 0,
+        priority: 'primary',
+        notes: 'Assigned via rack management interface'
       });
 
       // Refresh data
@@ -85,7 +86,7 @@ const MedicineAssignment = ({ onBack }) => {
       setSelectedMedicine(null);
       setSelectedRack(null);
       setRackLayout(null);
-      
+
       alert('Medicine assigned successfully!');
     } catch (err) {
       console.error('Error assigning medicine:', err);
@@ -233,7 +234,12 @@ const MedicineAssignment = ({ onBack }) => {
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2 text-left">Select Rack</label>
                   <div className="space-y-2">
-                    {racks.map((rack) => (
+                    {racks.length === 0 ? (
+                      <div className="text-center py-4 text-gray-500">
+                        No racks available
+                      </div>
+                    ) : (
+                      racks.map((rack) => (
                       <button
                         key={rack._id}
                         onClick={() => handleRackSelect(rack)}
@@ -253,41 +259,44 @@ const MedicineAssignment = ({ onBack }) => {
                           </div>
                         </div>
                       </button>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </div>
 
                 {/* Position Selection */}
-                {selectedRack && rackLayout && (
+                {selectedRack && rackLayout && rackLayout.layout && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2 text-left">Select Position</label>
                     <div className="border border-gray-200 rounded-md p-4 bg-gray-50">
-                      <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${rackLayout.dimensions.columns}, 1fr)` }}>
-                        {Array.from({ length: rackLayout.dimensions.rows }, (_, rowIndex) =>
-                          Array.from({ length: rackLayout.dimensions.columns }, (_, colIndex) => {
-                            const position = rackLayout.positions.find(p => 
-                              p.shelf === rowIndex + 1 && p.position === colIndex + 1
-                            );
-                            const isOccupied = position && position.medicine;
-                            
-                            return (
-                              <button
-                                key={`${rowIndex}-${colIndex}`}
-                                onClick={() => !isOccupied && handleAssignMedicine(rowIndex + 1, colIndex + 1)}
-                                disabled={isOccupied || assigning}
-                                className={`aspect-square text-xs font-medium rounded border-2 transition-colors ${
-                                  isOccupied
-                                    ? 'border-red-300 bg-red-100 text-red-700 cursor-not-allowed'
-                                    : 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100 cursor-pointer'
-                                } ${assigning ? 'opacity-50' : ''}`}
-                                title={isOccupied ? `Occupied by ${position.medicine.name}` : `Available position ${rowIndex + 1}-${colIndex + 1}`}
-                              >
-                                {isOccupied ? '●' : '+'}
-                              </button>
-                            );
-                          })
-                        )}
-                      </div>
+                      {rackLayout.layout.map((shelf) => (
+                        <div key={shelf.shelfNumber} className="mb-4">
+                          <h4 className="text-sm font-medium text-gray-700 mb-2 text-left">
+                            Shelf {shelf.shelfNumber}
+                          </h4>
+                          <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(shelf.positions.length, 12)}, 1fr)` }}>
+                            {shelf.positions.map((position) => {
+                              const isOccupied = position.isOccupied;
+
+                              return (
+                                <button
+                                  key={`${shelf.shelfNumber}-${position.positionNumber}`}
+                                  onClick={() => !isOccupied && handleAssignMedicine(shelf.shelfNumber, position.positionNumber)}
+                                  disabled={isOccupied || assigning}
+                                  className={`aspect-square text-xs font-medium rounded border-2 transition-colors ${
+                                    isOccupied
+                                      ? 'border-red-300 bg-red-100 text-red-700 cursor-not-allowed'
+                                      : 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100 cursor-pointer'
+                                  } ${assigning ? 'opacity-50' : ''}`}
+                                  title={isOccupied ? `Occupied by ${position.medicine?.name}` : `Available position ${shelf.shelfNumber}-${position.positionNumber}`}
+                                >
+                                  {isOccupied ? '●' : position.positionNumber}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
                       <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
                         <div className="flex items-center space-x-4">
                           <div className="flex items-center space-x-1">

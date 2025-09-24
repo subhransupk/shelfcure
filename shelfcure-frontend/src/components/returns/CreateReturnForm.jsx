@@ -270,7 +270,6 @@ const CreateReturnForm = ({ onSubmit, onCancel, loading = false, preSelectedSale
           returnQuantity: 0,
           unitType: item.unitType,
           unitPrice: item.unitPrice,
-          itemReturnReason: 'customer_request',
           restoreToInventory: true,
           selected: false,
           availableQuantity: item.availableQuantity,
@@ -383,6 +382,26 @@ const CreateReturnForm = ({ onSubmit, onCancel, loading = false, preSelectedSale
     setErrors({});
   };
 
+  // Helper function to calculate correct unit price based on unit conversion
+  const calculateUnitPrice = (item) => {
+    const returnUnitType = item.unitType;
+    const medicine = item.medicine;
+
+    // Use the actual selling price from medicine data based on return unit type
+    if (returnUnitType === 'strip') {
+      // Return strip selling price from medicine data
+      const stripPrice = medicine?.stripInfo?.sellingPrice || medicine?.pricing?.stripSellingPrice;
+      return stripPrice || item.unitPrice;
+    } else if (returnUnitType === 'individual') {
+      // Return individual selling price from medicine data
+      const individualPrice = medicine?.individualInfo?.sellingPrice || medicine?.pricing?.individualSellingPrice;
+      return individualPrice || item.unitPrice;
+    }
+
+    // Fallback to original price
+    return item.unitPrice;
+  };
+
   // Calculate return totals
   const calculateTotals = () => {
     // Safety check to ensure returnItems is an array
@@ -397,7 +416,8 @@ const CreateReturnForm = ({ onSubmit, onCancel, loading = false, preSelectedSale
 
     const selectedItems = returnItems.filter(item => item && item.selected && item.returnQuantity > 0);
     const subtotal = selectedItems.reduce((total, item) => {
-      return total + (item.returnQuantity * item.unitPrice);
+      const correctUnitPrice = calculateUnitPrice(item);
+      return total + (item.returnQuantity * correctUnitPrice);
     }, 0);
 
     return {
@@ -420,7 +440,6 @@ const CreateReturnForm = ({ onSubmit, onCancel, loading = false, preSelectedSale
         originalSaleItem: item.originalSaleItem,
         returnQuantity: item.returnQuantity,
         unitType: item.unitType,
-        itemReturnReason: item.itemReturnReason,
         restoreToInventory: item.restoreToInventory
       })),
       ...returnDetails
@@ -662,7 +681,7 @@ const CreateReturnForm = ({ onSubmit, onCancel, loading = false, preSelectedSale
 
                     <div className="text-right">
                       <p className="text-sm text-gray-500">Unit Price</p>
-                      <p className="font-medium">{formatCurrency(item.unitPrice)}</p>
+                      <p className="font-medium">{formatCurrency(calculateUnitPrice(item))}</p>
                     </div>
                   </div>
 
@@ -778,31 +797,7 @@ const CreateReturnForm = ({ onSubmit, onCancel, loading = false, preSelectedSale
                       )}
                     </div>
 
-                    {/* Return Reason */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Reason
-                      </label>
-                      <select
-                        value={item.itemReturnReason}
-                        onChange={(e) => {
-                          const newItems = [...returnItems];
-                          newItems[index].itemReturnReason = e.target.value;
-                          setReturnItems(newItems);
-                        }}
-                        disabled={!item.selected}
-                        className="w-full px-3 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500 disabled:bg-gray-100"
-                      >
-                        <option value="customer_request">Customer Request</option>
-                        <option value="defective">Defective</option>
-                        <option value="expired">Expired</option>
-                        <option value="wrong_medicine">Wrong Medicine</option>
-                        <option value="doctor_change">Doctor Change</option>
-                        <option value="side_effects">Side Effects</option>
-                        <option value="duplicate_purchase">Duplicate Purchase</option>
-                        <option value="other">Other</option>
-                      </select>
-                    </div>
+
                   </div>
 
                   {/* Inventory Restoration Toggle */}
@@ -829,7 +824,7 @@ const CreateReturnForm = ({ onSubmit, onCancel, loading = false, preSelectedSale
                     <div className="mt-3 text-right">
                       <p className="text-sm text-gray-500">Return Amount</p>
                       <p className="text-lg font-semibold text-green-600">
-                        {formatCurrency(item.returnQuantity * item.unitPrice)}
+                        {formatCurrency(item.returnQuantity * calculateUnitPrice(item))}
                       </p>
                     </div>
                   )}
@@ -1015,7 +1010,7 @@ const CreateReturnForm = ({ onSubmit, onCancel, loading = false, preSelectedSale
                   <div>
                     <p className="font-medium text-gray-900">{item.medicine?.name}</p>
                     <p className="text-sm text-gray-500">
-                      {item.returnQuantity} {item.unitType}(s) - {item.itemReturnReason.replace(/_/g, ' ')}
+                      {item.returnQuantity} {item.unitType}(s)
                     </p>
                     {!item.restoreToInventory && (
                       <p className="text-xs text-orange-600 mt-1">
@@ -1024,7 +1019,7 @@ const CreateReturnForm = ({ onSubmit, onCancel, loading = false, preSelectedSale
                     )}
                   </div>
                   <div className="text-right">
-                    <p className="font-medium">{formatCurrency(item.returnQuantity * item.unitPrice)}</p>
+                    <p className="font-medium">{formatCurrency(item.returnQuantity * calculateUnitPrice(item))}</p>
                   </div>
                 </div>
               </div>

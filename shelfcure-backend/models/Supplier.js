@@ -116,6 +116,16 @@ const SupplierSchema = new mongoose.Schema({
   lastPurchaseDate: {
     type: Date
   },
+
+  // Outstanding Balance (how much store owes to this supplier)
+  outstandingBalance: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  lastPaymentDate: {
+    type: Date
+  },
   
   // Additional Information
   notes: {
@@ -150,6 +160,43 @@ SupplierSchema.pre('save', function(next) {
   this.updatedAt = new Date();
   next();
 });
+
+// Method to update outstanding balance
+SupplierSchema.methods.updateOutstandingBalance = function(amount) {
+  this.outstandingBalance += amount;
+
+  // Ensure balance doesn't go negative
+  if (this.outstandingBalance < 0) {
+    this.outstandingBalance = 0;
+  }
+
+  return this.save();
+};
+
+// Method to get available credit from supplier
+SupplierSchema.methods.getAvailableCredit = function() {
+  if (this.creditLimit === 0) {
+    return Infinity; // No limit set
+  }
+  return Math.max(0, this.creditLimit - this.outstandingBalance);
+};
+
+// Method to check if can purchase on credit
+SupplierSchema.methods.canPurchaseOnCredit = function(amount) {
+  if (this.creditLimit <= 0) {
+    return { allowed: false, reason: 'No credit facility available from supplier' };
+  }
+
+  const newBalance = this.outstandingBalance + amount;
+  if (newBalance > this.creditLimit) {
+    return {
+      allowed: false,
+      reason: `Credit limit exceeded. Available credit: ₹${this.getAvailableCredit()}`
+    };
+  }
+
+  return { allowed: true };
+};
 
 // Virtual for full address
 SupplierSchema.virtual('fullAddress').get(function() {

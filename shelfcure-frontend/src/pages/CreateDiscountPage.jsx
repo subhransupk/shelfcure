@@ -6,6 +6,7 @@ import {
   ArrowLeft, Save, Eye, Calendar, Percent,
   FileText, Users, Settings, CheckCircle, RefreshCw
 } from 'lucide-react';
+import { createNumericInputHandler, VALIDATION_OPTIONS } from '../utils/inputValidation';
 
 const CreateDiscountPage = () => {
   const navigate = useNavigate();
@@ -338,7 +339,11 @@ const CreateDiscountPage = () => {
                     type="number"
                     name="discountValue"
                     value={formData.discountValue}
-                    onChange={handleInputChange}
+                    onChange={createNumericInputHandler(
+                      (value) => setFormData(prev => ({ ...prev, discountValue: value })),
+                      null,
+                      formData.discountType === 'percentage' ? VALIDATION_OPTIONS.PERCENTAGE : VALIDATION_OPTIONS.PRICE
+                    )}
                     min="0"
                     step={formData.discountType === 'percentage' ? '0.01' : '1'}
                     max={formData.discountType === 'percentage' ? '100' : undefined}
@@ -360,7 +365,11 @@ const CreateDiscountPage = () => {
                     type="number"
                     name="minOrderAmount"
                     value={formData.minOrderAmount}
-                    onChange={handleInputChange}
+                    onChange={createNumericInputHandler(
+                      (value) => setFormData(prev => ({ ...prev, minOrderAmount: value })),
+                      null,
+                      VALIDATION_OPTIONS.PRICE
+                    )}
                     min="0"
                     step="0.01"
                     placeholder="0.00"

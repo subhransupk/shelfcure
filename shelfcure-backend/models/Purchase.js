@@ -8,11 +8,11 @@ const purchaseSchema = new mongoose.Schema({
     required: true
   },
 
-  // Supplier reference - REQUIRED for tracking purchases by supplier
+  // Supplier reference - OPTIONAL (can be assigned later)
   supplier: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Supplier',
-    required: true
+    required: false
   },
 
   // Purchase identification
@@ -164,6 +164,11 @@ const purchaseSchema = new mongoose.Schema({
   },
 
   // Payment information
+  paymentMethod: {
+    type: String,
+    enum: ['cash', 'card', 'upi', 'bank_transfer', 'check', 'credit'],
+    default: 'cash'
+  },
   paymentTerms: {
     type: String,
     enum: ['Cash on delivery', '15 days', '30 days', '45 days', '60 days', '90 days'],
@@ -184,6 +189,11 @@ const purchaseSchema = new mongoose.Schema({
     default: 0,
     min: 0
   },
+  creditAmount: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
   paymentDate: Date,
   dueDate: Date,
 
@@ -193,7 +203,18 @@ const purchaseSchema = new mongoose.Schema({
     enum: ['draft', 'ordered', 'confirmed', 'shipped', 'received', 'completed', 'cancelled'],
     default: 'draft'
   },
-  
+
+  // Inventory management tracking
+  inventoryUpdated: {
+    type: Boolean,
+    default: false
+  },
+  inventoryUpdateDate: Date,
+  inventoryUpdateBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+
   // Important dates
   purchaseDate: {
     type: Date,
@@ -202,6 +223,7 @@ const purchaseSchema = new mongoose.Schema({
   orderDate: Date,
   expectedDeliveryDate: Date,
   deliveryDate: Date,
+  receivedDate: Date,
   
   // Created and managed by
   createdBy: {

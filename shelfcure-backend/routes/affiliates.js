@@ -4,8 +4,14 @@ const { protect, authorize } = require('../middleware/auth');
 const Affiliate = require('../models/Affiliate');
 const AffiliateCommission = require('../models/AffiliateCommission');
 const AffiliateSettings = require('../models/AffiliateSettings');
+const PharmacySubmission = require('../models/PharmacySubmission');
 const Store = require('../models/Store');
+const User = require('../models/User');
+const Subscription = require('../models/Subscription');
 const CommissionService = require('../services/commissionService');
+const { sendEmail } = require('../utils/sendEmail');
+const { sendSMS } = require('../utils/sendSMS');
+const bcrypt = require('bcryptjs');
 
 // @desc    Get all affiliates (Admin only)
 // @route   GET /api/affiliates/admin
@@ -1288,6 +1294,678 @@ router.post('/admin/commissions/manual', protect, authorize('superadmin', 'admin
     res.status(500).json({
       success: false,
       message: 'Server error creating manual commission',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Get all pharmacy submissions (Admin only)
+// @route   GET /api/affiliates/admin/pharmacy-submissions
+// @access  Private/Admin
+router.get('/admin/pharmacy-submissions', protect, authorize('superadmin', 'admin'), async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    const status = req.query.status;
+    const affiliateId = req.query.affiliate;
+
+    // Build query
+    const query = {};
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+    if (affiliateId) {
+      query.affiliate = affiliateId;
+    }
+
+    // Get submissions with pagination
+    const submissions = await PharmacySubmission.find(query)
+      .populate('affiliate', 'name email affiliateCode')
+      .populate('reviewedBy approvedBy rejectedBy', 'name')
+      .populate('generatedStoreOwner', 'name email')
+      .populate('generatedStore', 'name code')
+      .sort({ submittedDate: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await PharmacySubmission.countDocuments(query);
+
+    // Get status counts
+    const statusCounts = await PharmacySubmission.aggregate([
+      { $group: { _id: '$status', count: { $sum: 1 } } }
+    ]);
+
+    const counts = {
+      pending: 0,
+      under_review: 0,
+      approved: 0,
+      activated: 0,
+      rejected: 0,
+      total: 0
+    };
+
+    statusCounts.forEach(item => {
+      counts[item._id] = item.count;
+      counts.total += item.count;
+    });
+
+    res.status(200).json({
+      success: true,
+      data: submissions,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      },
+      statusCounts: counts
+    });
+  } catch (error) {
+    console.error('Get pharmacy submissions error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error fetching pharmacy submissions',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Get single pharmacy submission (Admin only)
+// @route   GET /api/affiliates/admin/pharmacy-submissions/:id
+// @access  Private/Admin
+router.get('/admin/pharmacy-submissions/:id', protect, authorize('superadmin', 'admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const submission = await PharmacySubmission.findOne({
+      $or: [
+        { _id: id },
+        { submissionId: id }
+      ]
+    }).populate('affiliate', 'name email affiliateCode phone')
+      .populate('reviewedBy approvedBy rejectedBy', 'name email')
+      .populate('generatedStoreOwner', 'name email phone')
+      .populate('generatedStore', 'name code')
+      .populate('generatedSubscription', 'plan status');
+
+    if (!submission) {
+      return res.status(404).json({
+        success: false,
+        message: 'Pharmacy submission not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: submission
+    });
+  } catch (error) {
+    console.error('Get pharmacy submission details error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error fetching pharmacy submission details',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Update pharmacy submission status (Admin only)
+// @route   PUT /api/affiliates/admin/pharmacy-submissions/:id/status
+// @access  Private/Admin
+router.put('/admin/pharmacy-submissions/:id/status', protect, authorize('superadmin', 'admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, adminNotes, rejectionReason } = req.body;
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: 'Status is required'
+      });
+    }
+
+    const validStatuses = ['pending', 'under_review', 'approved', 'activated', 'rejected'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid status'
+      });
+    }
+
+    const submission = await PharmacySubmission.findOne({
+      $or: [
+        { _id: id },
+        { submissionId: id }
+      ]
+    }).populate('affiliate', 'name email phone');
+
+    if (!submission) {
+      return res.status(404).json({
+        success: false,
+        message: 'Pharmacy submission not found'
+      });
+    }
+
+    // Update submission
+    submission.status = status;
+    if (adminNotes) submission.adminNotes = adminNotes;
+    if (rejectionReason) submission.rejectionReason = rejectionReason;
+
+    // Set appropriate admin user based on status
+    switch (status) {
+      case 'under_review':
+        submission.reviewedBy = req.user.id;
+        break;
+      case 'approved':
+        submission.approvedBy = req.user.id;
+        break;
+      case 'rejected':
+        submission.rejectedBy = req.user.id;
+        break;
+    }
+
+    submission.updatedBy = req.user.id;
+    await submission.save();
+
+    // Send notification to affiliate
+    try {
+      let emailSubject, emailMessage, smsMessage;
+
+      switch (status) {
+        case 'under_review':
+          emailSubject = 'Pharmacy Submission Under Review';
+          emailMessage = `Your pharmacy submission (${submission.submissionId}) for ${submission.pharmacyName} is now under review. We will notify you once the review is complete.`;
+          smsMessage = `ShelfCure: Your pharmacy submission ${submission.submissionId} is under review. You'll be notified once complete.`;
+          break;
+        case 'approved':
+          emailSubject = 'Pharmacy Submission Approved';
+          emailMessage = `Great news! Your pharmacy submission (${submission.submissionId}) for ${submission.pharmacyName} has been approved. We will now proceed with account setup and activation.`;
+          smsMessage = `ShelfCure: Your pharmacy submission ${submission.submissionId} has been approved! Account setup will begin shortly.`;
+          break;
+        case 'rejected':
+          emailSubject = 'Pharmacy Submission Rejected';
+          emailMessage = `Unfortunately, your pharmacy submission (${submission.submissionId}) for ${submission.pharmacyName} has been rejected. Reason: ${rejectionReason || 'Please contact support for details.'}`;
+          smsMessage = `ShelfCure: Your pharmacy submission ${submission.submissionId} has been rejected. Please contact support for details.`;
+          break;
+      }
+
+      if (emailSubject) {
+        await sendEmail({
+          email: submission.affiliate.email,
+          subject: emailSubject,
+          message: emailMessage
+        });
+
+        if (submission.affiliate.phone && smsMessage) {
+          await sendSMS(submission.affiliate.phone, smsMessage);
+        }
+      }
+    } catch (notificationError) {
+      console.error('Error sending notification:', notificationError);
+      // Continue with success response even if notification fails
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Pharmacy submission status updated to ${status}`,
+      data: submission
+    });
+  } catch (error) {
+    console.error('Update pharmacy submission status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error updating pharmacy submission status',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Activate pharmacy submission (Create store owner, store, and subscription)
+// @route   POST /api/affiliates/admin/pharmacy-submissions/:id/activate
+// @access  Private/Admin
+router.post('/admin/pharmacy-submissions/:id/activate', protect, authorize('superadmin', 'admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { billingDuration = 'monthly', startWithTrial = true } = req.body;
+
+    const submission = await PharmacySubmission.findOne({
+      $or: [
+        { _id: id },
+        { submissionId: id }
+      ]
+    }).populate('affiliate', 'name email affiliateCode');
+
+    if (!submission) {
+      return res.status(404).json({
+        success: false,
+        message: 'Pharmacy submission not found'
+      });
+    }
+
+    if (submission.status !== 'approved') {
+      return res.status(400).json({
+        success: false,
+        message: 'Pharmacy submission must be approved before activation'
+      });
+    }
+
+    if (submission.generatedStoreOwner) {
+      return res.status(400).json({
+        success: false,
+        message: 'Pharmacy has already been activated'
+      });
+    }
+
+    // Check if email or phone already exists
+    const existingUser = await User.findOne({
+      $or: [
+        { email: submission.email },
+        { phone: submission.contactNumber }
+      ]
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'A user with this email or phone number already exists'
+      });
+    }
+
+    // Generate temporary password
+    const tempPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-4).toUpperCase();
+    const hashedPassword = await bcrypt.hash(tempPassword, 12);
+
+    // Create store owner
+    const storeOwnerData = {
+      name: submission.ownerName,
+      email: submission.email,
+      phone: submission.contactNumber,
+      password: hashedPassword,
+      role: 'store_owner',
+      address: submission.address,
+      isActive: true,
+      emailVerified: true, // Auto-verify for admin-created accounts
+      phoneVerified: true,
+      createdBy: req.user.id,
+      affiliate: {
+        affiliateId: submission.affiliate._id,
+        affiliateCode: submission.affiliate.affiliateCode,
+        referralDate: submission.submittedDate
+      }
+    };
+
+    const storeOwner = await User.create(storeOwnerData);
+
+    // Get plan configuration
+    const planConfig = Subscription.getPlanFeatures(submission.subscriptionPlan);
+
+    // Calculate subscription dates
+    const startDate = new Date(submission.startDate);
+    let endDate = new Date(startDate);
+
+    if (startWithTrial) {
+      endDate.setDate(endDate.getDate() + 30); // 30-day trial
+    } else {
+      switch (billingDuration) {
+        case 'monthly':
+          endDate.setMonth(endDate.getMonth() + 1);
+          break;
+        case 'quarterly':
+          endDate.setMonth(endDate.getMonth() + 3);
+          break;
+        case 'yearly':
+          endDate.setFullYear(endDate.getFullYear() + 1);
+          break;
+      }
+    }
+
+    // Create subscription
+    const subscriptionData = {
+      storeOwner: storeOwner._id,
+      plan: submission.subscriptionPlan,
+      status: startWithTrial ? 'trial' : 'active',
+      billingDuration,
+      startDate,
+      endDate,
+      trialEndDate: startWithTrial ? endDate : null,
+      storeCountLimit: planConfig.storeCountLimit,
+      currentStoreCount: 0,
+      features: planConfig.features,
+      limits: planConfig.limits,
+      pricing: {
+        amount: planConfig.pricing.amount,
+        currency: 'INR',
+        taxAmount: Math.round(planConfig.pricing.amount * 0.18), // 18% GST
+        discountAmount: 0,
+        totalAmount: Math.round(planConfig.pricing.amount * 1.18)
+      },
+      paymentStatus: startWithTrial ? 'pending' : 'paid',
+      autoRenewal: true,
+      createdBy: req.user.id
+    };
+
+    const subscription = await Subscription.create(subscriptionData);
+
+    // Create store
+    const storeCode = await Store.generateUniqueCode();
+    const storeData = {
+      name: submission.pharmacyName,
+      code: storeCode,
+      owner: storeOwner._id,
+      address: submission.address,
+      contactInfo: {
+        phone: submission.contactNumber,
+        email: submission.email
+      },
+      isActive: true,
+      createdBy: req.user.id
+    };
+
+    const store = await Store.create(storeData);
+
+    // Update subscription store count
+    subscription.currentStoreCount = 1;
+    await subscription.save();
+
+    // Update store owner's current store
+    storeOwner.currentStore = store._id;
+    storeOwner.stores = [store._id];
+    await storeOwner.save();
+
+    // Update pharmacy submission
+    submission.status = 'activated';
+    submission.generatedStoreOwner = storeOwner._id;
+    submission.generatedStore = store._id;
+    submission.generatedSubscription = subscription._id;
+    submission.generatedCredentials = {
+      username: submission.email,
+      temporaryPassword: tempPassword,
+      passwordSent: false
+    };
+    submission.updatedBy = req.user.id;
+    await submission.save();
+
+    // Send credentials to pharmacy owner
+    try {
+      await sendEmail({
+        email: submission.email,
+        subject: 'Welcome to ShelfCure - Your Account is Ready!',
+        message: `Dear ${submission.ownerName},
+
+Welcome to ShelfCure! Your pharmacy "${submission.pharmacyName}" has been successfully activated.
+
+Your login credentials:
+- Website: ${process.env.FRONTEND_URL || 'https://app.shelfcure.com'}
+- Username: ${submission.email}
+- Temporary Password: ${tempPassword}
+
+Please log in and change your password immediately for security.
+
+Your subscription details:
+- Plan: ${submission.subscriptionPlan.charAt(0).toUpperCase() + submission.subscriptionPlan.slice(1)}
+- Status: ${startWithTrial ? 'Trial (30 days)' : 'Active'}
+- Store Code: ${storeCode}
+
+Thank you for choosing ShelfCure!
+
+Best regards,
+ShelfCure Team`
+      });
+
+      // Send SMS notification
+      await sendSMS(submission.contactNumber,
+        `Welcome to ShelfCure! Your pharmacy account is ready. Login at ${process.env.FRONTEND_URL || 'app.shelfcure.com'} with email: ${submission.email} and password sent via email.`
+      );
+
+      // Update credentials sent status
+      submission.generatedCredentials.passwordSent = true;
+      submission.generatedCredentials.credentialsSentDate = new Date();
+      await submission.save();
+
+    } catch (notificationError) {
+      console.error('Error sending credentials:', notificationError);
+      // Continue with success response even if notification fails
+    }
+
+    // Generate commission for affiliate
+    try {
+      const commissionAmount = Math.round(subscription.pricing.totalAmount * (submission.affiliate.commission?.rate || 10) / 100);
+
+      const commissionData = {
+        affiliate: submission.affiliate._id,
+        store: store._id,
+        storeOwner: storeOwner._id,
+        commissionType: 'signup',
+        commissionAmount,
+        baseAmount: subscription.pricing.totalAmount,
+        commissionRate: submission.affiliate.commission?.rate || 10,
+        status: 'pending',
+        earnedDate: new Date(),
+        subscription: {
+          planName: submission.subscriptionPlan,
+          planType: billingDuration,
+          subscriptionStartDate: startDate,
+          subscriptionEndDate: endDate,
+          isRenewal: false
+        },
+        referralSource: 'affiliate_submission',
+        customerAcquisitionDate: submission.submittedDate
+      };
+
+      await AffiliateCommission.create(commissionData);
+
+      // Update submission commission info
+      submission.commissionGenerated = true;
+      submission.commissionAmount = commissionAmount;
+      await submission.save();
+
+    } catch (commissionError) {
+      console.error('Error generating commission:', commissionError);
+      // Continue with success response even if commission generation fails
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Pharmacy activated successfully',
+      data: {
+        submission,
+        storeOwner: {
+          id: storeOwner._id,
+          name: storeOwner.name,
+          email: storeOwner.email
+        },
+        store: {
+          id: store._id,
+          name: store.name,
+          code: store.code
+        },
+        subscription: {
+          id: subscription._id,
+          plan: subscription.plan,
+          status: subscription.status
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Activate pharmacy submission error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error activating pharmacy submission',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Get affiliate referral hierarchy
+// @route   GET /api/affiliates/:id/hierarchy
+// @access  Private/Admin
+router.get('/:id/hierarchy', protect, authorize('superadmin', 'admin'), async (req, res) => {
+  try {
+    const affiliate = await Affiliate.findById(req.params.id);
+    if (!affiliate) {
+      return res.status(404).json({
+        success: false,
+        message: 'Affiliate not found'
+      });
+    }
+
+    // Get referral hierarchy (who referred this affiliate)
+    const hierarchy = await affiliate.getReferralHierarchy();
+
+    // Get direct referrals (affiliates referred by this affiliate)
+    const directReferrals = await affiliate.getDirectReferrals();
+
+    res.json({
+      success: true,
+      data: {
+        affiliate: {
+          id: affiliate._id,
+          name: affiliate.name,
+          email: affiliate.email,
+          affiliateCode: affiliate.affiliateCode,
+          referralLevel: affiliate.referralLevel
+        },
+        hierarchy, // Who referred this affiliate (up the chain)
+        directReferrals // Who this affiliate has referred
+      }
+    });
+  } catch (error) {
+    console.error('Get affiliate hierarchy error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error getting affiliate hierarchy',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Get multi-level commission breakdown
+// @route   GET /api/affiliates/:id/commissions/breakdown
+// @access  Private/Admin
+router.get('/:id/commissions/breakdown', protect, authorize('superadmin', 'admin'), async (req, res) => {
+  try {
+    const affiliate = await Affiliate.findById(req.params.id);
+    if (!affiliate) {
+      return res.status(404).json({
+        success: false,
+        message: 'Affiliate not found'
+      });
+    }
+
+    // Get commission breakdown by type and level
+    const commissionBreakdown = await AffiliateCommission.aggregate([
+      { $match: { affiliate: affiliate._id } },
+      {
+        $group: {
+          _id: {
+            type: '$type',
+            level: '$commissionLevel'
+          },
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$commissionAmount' },
+          pendingAmount: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'pending'] }, '$commissionAmount', 0]
+            }
+          },
+          paidAmount: {
+            $sum: {
+              $cond: [{ $eq: ['$paymentStatus', 'paid'] }, '$commissionAmount', 0]
+            }
+          }
+        }
+      },
+      {
+        $sort: { '_id.type': 1, '_id.level': 1 }
+      }
+    ]);
+
+    // Get commissions where this affiliate is the selling affiliate (others earned from their sales)
+    const referralCommissions = await AffiliateCommission.find({
+      sellingAffiliate: affiliate._id,
+      type: 'referral_onetime'
+    }).populate('affiliate', 'name email affiliateCode');
+
+    res.json({
+      success: true,
+      data: {
+        affiliate: {
+          id: affiliate._id,
+          name: affiliate.name,
+          email: affiliate.email,
+          affiliateCode: affiliate.affiliateCode
+        },
+        commissionBreakdown,
+        referralCommissions: referralCommissions.map(comm => ({
+          id: comm._id,
+          referrer: comm.affiliate,
+          amount: comm.commissionAmount,
+          status: comm.status,
+          earnedDate: comm.earnedDate
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Get commission breakdown error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error getting commission breakdown',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Get all multi-level commissions overview
+// @route   GET /api/affiliates/admin/multi-level-overview
+// @access  Private/Admin
+router.get('/admin/multi-level-overview', protect, authorize('superadmin', 'admin'), async (req, res) => {
+  try {
+    // Get overview of multi-level commission structure
+    const overview = await AffiliateCommission.aggregate([
+      {
+        $group: {
+          _id: {
+            type: '$type',
+            level: '$commissionLevel'
+          },
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$commissionAmount' },
+          avgAmount: { $avg: '$commissionAmount' }
+        }
+      },
+      {
+        $sort: { '_id.level': 1, '_id.type': 1 }
+      }
+    ]);
+
+    // Get affiliate referral statistics
+    const referralStats = await Affiliate.aggregate([
+      {
+        $group: {
+          _id: '$referralLevel',
+          count: { $sum: 1 },
+          totalAffiliateReferrals: { $sum: '$stats.totalAffiliateReferrals' },
+          totalEarnings: { $sum: '$stats.totalEarnings' }
+        }
+      },
+      {
+        $sort: { '_id': 1 }
+      }
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        commissionOverview: overview,
+        affiliatesByLevel: referralStats
+      }
+    });
+  } catch (error) {
+    console.error('Get multi-level overview error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error getting multi-level overview',
       error: error.message
     });
   }

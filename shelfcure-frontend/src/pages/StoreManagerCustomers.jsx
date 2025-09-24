@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Users, 
-  Search, 
-  Plus, 
-  Eye, 
-  Edit, 
-  Phone, 
+import {
+  Users,
+  Search,
+  Plus,
+  Eye,
+  Edit,
+  Phone,
   Mail,
   MapPin,
   Calendar,
@@ -21,9 +21,12 @@ import {
   Receipt,
   History,
   Star,
-  Filter
+  Filter,
+  X,
+  Trash2
 } from 'lucide-react';
 import StoreManagerLayout from '../components/store-manager/StoreManagerLayout';
+import { createNumericInputHandler, createPhoneInputHandler, VALIDATION_OPTIONS } from '../utils/inputValidation';
 
 const StoreManagerCustomers = () => {
   const [customers, setCustomers] = useState([]);
@@ -37,6 +40,7 @@ const StoreManagerCustomers = () => {
   const [activeTab, setActiveTab] = useState('list'); // 'list', 'analytics', 'credit', 'add'
   const [customerType, setCustomerType] = useState(''); // '', 'vip', 'regular', 'credit'
   const [creditStatus, setCreditStatus] = useState(''); // '', 'good', 'overdue', 'defaulter'
+  const [exportingData, setExportingData] = useState(false);
 
   // Add Customer Form State
   const [newCustomer, setNewCustomer] = useState({
@@ -48,6 +52,11 @@ const StoreManagerCustomers = () => {
     allowCredit: false
   });
   const [addingCustomer, setAddingCustomer] = useState(false);
+
+  // Edit Customer State
+  const [editingCustomer, setEditingCustomer] = useState(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [updatingCustomer, setUpdatingCustomer] = useState(false);
   
   // Analytics state
   const [customerAnalytics, setCustomerAnalytics] = useState(null);
@@ -57,7 +66,31 @@ const StoreManagerCustomers = () => {
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [creditLoading, setCreditLoading] = useState(false);
 
+  // Credit Management Modal States
+  const [showCreditPaymentModal, setShowCreditPaymentModal] = useState(false);
+  const [showCreditAdjustmentModal, setShowCreditAdjustmentModal] = useState(false);
+  const [showCreditHistoryModal, setShowCreditHistoryModal] = useState(false);
+  const [selectedCreditCustomer, setSelectedCreditCustomer] = useState(null);
+  const [creditHistory, setCreditHistory] = useState([]);
+  const [creditHistoryLoading, setCreditHistoryLoading] = useState(false);
 
+  // Credit Payment Form State
+  const [creditPaymentForm, setCreditPaymentForm] = useState({
+    amount: '',
+    paymentMethod: 'cash',
+    transactionId: '',
+    notes: ''
+  });
+  const [processingPayment, setProcessingPayment] = useState(false);
+
+  // Credit Adjustment Form State
+  const [creditAdjustmentForm, setCreditAdjustmentForm] = useState({
+    amount: '',
+    adjustmentType: 'add',
+    reason: 'manual_adjustment',
+    notes: ''
+  });
+  const [processingAdjustment, setProcessingAdjustment] = useState(false);
 
   useEffect(() => {
     fetchCustomers();
@@ -189,6 +222,209 @@ const StoreManagerCustomers = () => {
     window.location.href = `/store-panel/customers/${customer._id}/history`;
   };
 
+  const editCustomer = (customer) => {
+    setEditingCustomer({
+      id: customer._id,
+      name: customer.name,
+      phone: customer.phone,
+      email: customer.email || '',
+      customerType: customer.customerType || 'regular',
+      address: customer.address?.street || '',
+      creditLimit: customer.creditLimit || 0,
+      allowCredit: customer.creditLimit > 0
+    });
+    setShowEditModal(true);
+  };
+
+  const handleUpdateCustomer = async (e) => {
+    e.preventDefault();
+
+    // Basic validation
+    if (!editingCustomer.name.trim()) {
+      alert('Please enter customer name');
+      return;
+    }
+    if (!editingCustomer.phone.trim()) {
+      alert('Please enter phone number');
+      return;
+    }
+    if (!/^\d{10}$/.test(editingCustomer.phone.trim())) {
+      alert('Please enter a valid 10-digit phone number');
+      return;
+    }
+
+    try {
+      setUpdatingCustomer(true);
+      const token = localStorage.getItem('token');
+
+      const requestData = {
+        name: editingCustomer.name.trim(),
+        phone: editingCustomer.phone.trim(),
+        email: editingCustomer.email.trim() || undefined,
+        customerType: editingCustomer.customerType || 'regular',
+        address: editingCustomer.address.trim() || undefined,
+        creditLimit: editingCustomer.allowCredit ? (editingCustomer.creditLimit || 5000) : 0
+      };
+
+      console.log('Updating customer data:', requestData);
+
+      const response = await fetch(`/api/store-manager/customers/${editingCustomer.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestData)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Customer updated successfully:', data);
+
+        // Reset form
+        setEditingCustomer(null);
+        setShowEditModal(false);
+
+        // Refresh customers list
+        fetchCustomers();
+
+        alert('Customer updated successfully!');
+      } else {
+        const errorData = await response.json();
+        console.error('Customer update error:', errorData);
+
+        let errorMessage = 'Failed to update customer';
+        if (errorData.message) {
+          errorMessage = errorData.message;
+        } else if (errorData.errors && Array.isArray(errorData.errors)) {
+          errorMessage = errorData.errors.join(', ');
+        }
+
+        alert(errorMessage);
+      }
+    } catch (error) {
+      console.error('Error updating customer:', error);
+      alert('Failed to update customer');
+    } finally {
+      setUpdatingCustomer(false);
+    }
+  };
+
+  const deleteCustomer = async (customer) => {
+    if (!window.confirm(`Are you sure you want to delete customer "${customer.name}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+
+      const response = await fetch(`/api/store-manager/customers/${customer._id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        alert('Customer deleted successfully!');
+        fetchCustomers(); // Refresh the list
+      } else {
+        const errorData = await response.json();
+        alert(errorData.message || 'Failed to delete customer');
+      }
+    } catch (error) {
+      console.error('Error deleting customer:', error);
+      alert('Failed to delete customer');
+    }
+  };
+
+  // Export functionality
+  const exportCustomersToCSV = async () => {
+    try {
+      setExportingData(true);
+      const token = localStorage.getItem('token');
+
+      // Fetch all customers for export (without pagination)
+      const response = await fetch('/api/store-manager/customers?limit=1000', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch customers for export');
+      }
+
+      const data = await response.json();
+      const customersToExport = data.data || [];
+
+      if (customersToExport.length === 0) {
+        alert('No customers found to export');
+        return;
+      }
+
+      // Prepare CSV data
+      const csvHeaders = [
+        'Customer ID',
+        'Name',
+        'Phone',
+        'Email',
+        'Customer Type',
+        'Status',
+        'Total Purchases',
+        'Total Spent (₹)',
+        'Credit Limit (₹)',
+        'Credit Balance (₹)',
+        'Credit Status',
+        'Last Purchase Date',
+        'Registration Date',
+        'Address'
+      ];
+
+      const csvRows = customersToExport.map(customer => [
+        customer._id.slice(-8), // Last 8 characters of ID
+        customer.name || '',
+        customer.phone || '',
+        customer.email || '',
+        customer.customerType || 'regular',
+        customer.status || 'active',
+        customer.totalPurchases || 0,
+        customer.totalSpent || 0,
+        customer.creditLimit || 0,
+        customer.creditBalance || 0,
+        customer.creditStatus || 'good',
+        customer.lastPurchaseDate ? new Date(customer.lastPurchaseDate).toLocaleDateString() : '',
+        customer.registrationDate ? new Date(customer.registrationDate).toLocaleDateString() : '',
+        customer.address?.street || ''
+      ]);
+
+      // Create CSV content
+      const csvContent = [
+        csvHeaders.join(','),
+        ...csvRows.map(row => row.map(field => `"${field}"`).join(','))
+      ].join('\n');
+
+      // Create and download file
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `customers_export_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      alert(`Successfully exported ${customersToExport.length} customers to CSV!`);
+    } catch (error) {
+      console.error('Export error:', error);
+      alert('Failed to export customers. Please try again.');
+    } finally {
+      setExportingData(false);
+    }
+  };
+
   const handleAddCustomer = async (e) => {
     e.preventDefault();
 
@@ -268,6 +504,146 @@ const StoreManagerCustomers = () => {
     }
   };
 
+  // Credit Management Functions
+  const openCreditPaymentModal = (customer) => {
+    setSelectedCreditCustomer(customer);
+    setCreditPaymentForm({
+      amount: '',
+      paymentMethod: 'cash',
+      transactionId: '',
+      notes: ''
+    });
+    setShowCreditPaymentModal(true);
+  };
+
+  const openCreditAdjustmentModal = (customer) => {
+    setSelectedCreditCustomer(customer);
+    setCreditAdjustmentForm({
+      amount: '',
+      adjustmentType: 'add',
+      reason: 'manual_adjustment',
+      notes: ''
+    });
+    setShowCreditAdjustmentModal(true);
+  };
+
+  const openCreditHistoryModal = async (customer) => {
+    setSelectedCreditCustomer(customer);
+    setShowCreditHistoryModal(true);
+    await fetchCreditHistory(customer.id);
+  };
+
+  const fetchCreditHistory = async (customerId) => {
+    try {
+      setCreditHistoryLoading(true);
+      const token = localStorage.getItem('token');
+
+      const response = await fetch(`/api/store-manager/credit/customers/${customerId}/credit-history`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setCreditHistory(data.data.transactions || []);
+      } else {
+        console.error('Failed to fetch credit history');
+        setCreditHistory([]);
+      }
+    } catch (error) {
+      console.error('Error fetching credit history:', error);
+      setCreditHistory([]);
+    } finally {
+      setCreditHistoryLoading(false);
+    }
+  };
+
+  const handleCreditPayment = async (e) => {
+    e.preventDefault();
+
+    if (!creditPaymentForm.amount || parseFloat(creditPaymentForm.amount) <= 0) {
+      alert('Please enter a valid payment amount');
+      return;
+    }
+
+    try {
+      setProcessingPayment(true);
+      const token = localStorage.getItem('token');
+
+      const response = await fetch(`/api/store-manager/credit/customers/${selectedCreditCustomer.id}/credit-payment`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          amount: parseFloat(creditPaymentForm.amount),
+          paymentMethod: creditPaymentForm.paymentMethod,
+          transactionId: creditPaymentForm.transactionId,
+          notes: creditPaymentForm.notes
+        })
+      });
+
+      if (response.ok) {
+        alert('Credit payment recorded successfully!');
+        setShowCreditPaymentModal(false);
+        fetchCreditManagement(); // Refresh credit data
+      } else {
+        const errorData = await response.json();
+        alert(errorData.message || 'Failed to record credit payment');
+      }
+    } catch (error) {
+      console.error('Error recording credit payment:', error);
+      alert('Failed to record credit payment');
+    } finally {
+      setProcessingPayment(false);
+    }
+  };
+
+  const handleCreditAdjustment = async (e) => {
+    e.preventDefault();
+
+    if (!creditAdjustmentForm.amount || parseFloat(creditAdjustmentForm.amount) <= 0) {
+      alert('Please enter a valid adjustment amount');
+      return;
+    }
+
+    try {
+      setProcessingAdjustment(true);
+      const token = localStorage.getItem('token');
+
+      const response = await fetch(`/api/store-manager/credit/customers/${selectedCreditCustomer.id}/credit-adjustment`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          amount: parseFloat(creditAdjustmentForm.amount),
+          adjustmentType: creditAdjustmentForm.adjustmentType,
+          reason: creditAdjustmentForm.reason,
+          notes: creditAdjustmentForm.notes
+        })
+      });
+
+      if (response.ok) {
+        alert(`Credit ${creditAdjustmentForm.adjustmentType} processed successfully!`);
+        setShowCreditAdjustmentModal(false);
+        fetchCreditManagement(); // Refresh credit data
+      } else {
+        const errorData = await response.json();
+        alert(errorData.message || 'Failed to process credit adjustment');
+      }
+    } catch (error) {
+      console.error('Error processing credit adjustment:', error);
+      alert('Failed to process credit adjustment');
+    } finally {
+      setProcessingAdjustment(false);
+    }
+  };
+
   const filteredCustomers = customers.filter(customer =>
     customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     customer.phone.includes(searchTerm) ||
@@ -305,9 +681,17 @@ const StoreManagerCustomers = () => {
                   <Plus className="h-4 w-4 mr-2" />
                   Add Customer
                 </button>
-                <button className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
-                  <Download className="h-4 w-4 mr-2" />
-                  Export
+                <button
+                  onClick={exportCustomersToCSV}
+                  disabled={exportingData}
+                  className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {exportingData ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600 mr-2"></div>
+                  ) : (
+                    <Download className="h-4 w-4 mr-2" />
+                  )}
+                  {exportingData ? 'Exporting...' : 'Export'}
                 </button>
               </div>
             </div>
@@ -457,9 +841,17 @@ const StoreManagerCustomers = () => {
                     <History className="h-5 w-5" />
                     <span>Purchase History</span>
                   </button>
-                  <button className="bg-green-600 text-white p-4 rounded-lg hover:bg-green-700 flex items-center justify-center space-x-2">
-                    <Download className="h-5 w-5" />
-                    <span>Export Report</span>
+                  <button
+                    onClick={exportCustomersToCSV}
+                    disabled={exportingData}
+                    className="bg-green-600 text-white p-4 rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                  >
+                    {exportingData ? (
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    ) : (
+                      <Download className="h-5 w-5" />
+                    )}
+                    <span>{exportingData ? 'Exporting...' : 'Export Report'}</span>
                   </button>
                 </div>
               </div>
@@ -528,11 +920,25 @@ const StoreManagerCustomers = () => {
                             <Eye className="h-5 w-5" />
                           </button>
                           <button
-                            onClick={() => viewCustomerPurchaseHistory(customer)}
+                            onClick={() => editCustomer(customer)}
                             className="text-blue-600 hover:text-blue-700"
+                            title="Edit Customer"
+                          >
+                            <Edit className="h-5 w-5" />
+                          </button>
+                          <button
+                            onClick={() => viewCustomerPurchaseHistory(customer)}
+                            className="text-purple-600 hover:text-purple-700"
                             title="Purchase History & Regular Medicines"
                           >
                             <History className="h-5 w-5" />
+                          </button>
+                          <button
+                            onClick={() => deleteCustomer(customer)}
+                            className="text-red-600 hover:text-red-700"
+                            title="Delete Customer"
+                          >
+                            <Trash2 className="h-5 w-5" />
                           </button>
                         </div>
                       </div>
@@ -548,10 +954,17 @@ const StoreManagerCustomers = () => {
                             <span>{customer.email}</span>
                           </div>
                         )}
-                        {customer.address && (
+                        {customer.address && (customer.address.street || customer.address.city || customer.address.state) && (
                           <div className="flex items-center text-sm text-gray-600">
                             <MapPin className="h-4 w-4 mr-2" />
-                            <span>{customer.address.city}, {customer.address.state}</span>
+                            <span>
+                              {[
+                                customer.address.street,
+                                customer.address.city,
+                                customer.address.state,
+                                customer.address.pincode
+                              ].filter(Boolean).join(', ')}
+                            </span>
                           </div>
                         )}
                         <div className="flex items-center text-sm text-gray-600">
@@ -719,9 +1132,9 @@ const StoreManagerCustomers = () => {
                         VIP: { bg: 'bg-green-50', dot: 'bg-green-500', text: 'text-green-600' },
                         Regular: { bg: 'bg-blue-50', dot: 'bg-blue-500', text: 'text-blue-600' },
                         Occasional: { bg: 'bg-yellow-50', dot: 'bg-yellow-500', text: 'text-yellow-600' },
-                        Inactive: { bg: 'bg-red-50', dot: 'bg-red-500', text: 'text-red-600' }
+                        Blocked: { bg: 'bg-red-50', dot: 'bg-red-500', text: 'text-red-600' }
                       };
-                      const colors = colorMap[segment] || colorMap.Inactive;
+                      const colors = colorMap[segment] || colorMap.Blocked;
 
                       return (
                         <div key={segment} className={`flex items-center justify-between p-3 ${colors.bg} rounded-lg`}>
@@ -920,13 +1333,32 @@ const StoreManagerCustomers = () => {
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                               <div className="flex space-x-2">
-                                <button className="text-green-600 hover:text-green-900" title="View Receipt">
-                                  <Receipt className="h-4 w-4" />
+                                <button
+                                  onClick={() => openCreditHistoryModal(record)}
+                                  className="text-green-600 hover:text-green-900"
+                                  title="View Credit History"
+                                >
+                                  <History className="h-4 w-4" />
                                 </button>
-                                <button className="text-blue-600 hover:text-blue-900" title="Record Payment">
+                                <button
+                                  onClick={() => openCreditPaymentModal(record)}
+                                  className="text-blue-600 hover:text-blue-900"
+                                  title="Record Payment"
+                                >
                                   <DollarSign className="h-4 w-4" />
                                 </button>
-                                <button className="text-purple-600 hover:text-purple-900" title="Call Customer">
+                                <button
+                                  onClick={() => openCreditAdjustmentModal(record)}
+                                  className="text-purple-600 hover:text-purple-900"
+                                  title="Adjust Credit"
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </button>
+                                <button
+                                  onClick={() => window.open(`tel:${record.phone}`, '_self')}
+                                  className="text-gray-600 hover:text-gray-900"
+                                  title="Call Customer"
+                                >
                                   <Phone className="h-4 w-4" />
                                 </button>
                               </div>
@@ -1118,14 +1550,16 @@ const StoreManagerCustomers = () => {
                   </div>
                 </div>
 
-                {selectedCustomer.address && (
+                {selectedCustomer.address && (selectedCustomer.address.street || selectedCustomer.address.city || selectedCustomer.address.state || selectedCustomer.address.pincode) && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 text-left">Address</label>
                     <p className="mt-1 text-sm text-gray-900 text-left">
-                      {selectedCustomer.address.street && `${selectedCustomer.address.street}, `}
-                      {selectedCustomer.address.city && `${selectedCustomer.address.city}, `}
-                      {selectedCustomer.address.state && `${selectedCustomer.address.state} `}
-                      {selectedCustomer.address.pincode}
+                      {[
+                        selectedCustomer.address.street,
+                        selectedCustomer.address.city,
+                        selectedCustomer.address.state,
+                        selectedCustomer.address.pincode
+                      ].filter(Boolean).join(', ')}
                     </p>
                   </div>
                 )}
@@ -1159,7 +1593,452 @@ const StoreManagerCustomers = () => {
         </div>
       )}
 
+      {/* Edit Customer Modal */}
+      {showEditModal && editingCustomer && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900 text-left">Edit Customer</h3>
+                <button
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setEditingCustomer(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
 
+              <form onSubmit={handleUpdateCustomer} className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 text-left">Name *</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingCustomer.name}
+                      onChange={(e) => setEditingCustomer({ ...editingCustomer, name: e.target.value })}
+                      className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                      placeholder="Enter customer name"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 text-left">Phone *</label>
+                    <input
+                      type="tel"
+                      required
+                      value={editingCustomer.phone}
+                      onChange={(e) => setEditingCustomer({ ...editingCustomer, phone: e.target.value })}
+                      className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                      placeholder="Enter 10-digit phone number"
+                      maxLength="10"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 text-left">Email</label>
+                    <input
+                      type="email"
+                      value={editingCustomer.email}
+                      onChange={(e) => setEditingCustomer({ ...editingCustomer, email: e.target.value })}
+                      className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                      placeholder="Enter email address"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 text-left">Customer Type</label>
+                    <select
+                      value={editingCustomer.customerType}
+                      onChange={(e) => setEditingCustomer({ ...editingCustomer, customerType: e.target.value })}
+                      className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                    >
+                      <option value="regular">Regular</option>
+                      <option value="vip">VIP</option>
+                      <option value="premium">Premium</option>
+                      <option value="wholesale">Wholesale</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 text-left">Address</label>
+                  <textarea
+                    rows={3}
+                    value={editingCustomer.address}
+                    onChange={(e) => setEditingCustomer({ ...editingCustomer, address: e.target.value })}
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                    placeholder="Enter complete address"
+                  />
+                </div>
+
+                <div className="flex items-center space-x-4">
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="editAllowCredit"
+                      checked={editingCustomer.allowCredit}
+                      onChange={(e) => setEditingCustomer({ ...editingCustomer, allowCredit: e.target.checked })}
+                      className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="editAllowCredit" className="ml-2 block text-sm text-gray-900">
+                      Allow Credit Purchases
+                    </label>
+                  </div>
+
+                  {editingCustomer.allowCredit && (
+                    <div className="flex-1">
+                      <label className="block text-sm font-medium text-gray-700 text-left">Credit Limit (₹)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editingCustomer.creditLimit}
+                        onChange={createNumericInputHandler(
+                          (value) => setEditingCustomer({ ...editingCustomer, creditLimit: value }),
+                          null,
+                          VALIDATION_OPTIONS.POSITIVE_NUMBER
+                        )}
+                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                        placeholder="Enter credit limit"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEditModal(false);
+                      setEditingCustomer(null);
+                    }}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={updatingCustomer}
+                    className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 flex items-center"
+                  >
+                    {updatingCustomer && (
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    )}
+                    {updatingCustomer ? 'Updating...' : 'Update Customer'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Credit Payment Modal */}
+      {showCreditPaymentModal && selectedCreditCustomer && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <h3 className="text-lg font-medium text-gray-900 text-left mb-4">
+                Record Credit Payment
+              </h3>
+              <div className="mb-4 p-3 bg-gray-50 rounded-md">
+                <p className="text-sm text-gray-600 text-left">Customer: {selectedCreditCustomer.name}</p>
+                <p className="text-sm text-gray-600 text-left">Outstanding: ₹{selectedCreditCustomer.outstandingAmount?.toLocaleString()}</p>
+              </div>
+
+              <form onSubmit={handleCreditPayment} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 text-left mb-1">
+                    Payment Amount *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    max={selectedCreditCustomer.outstandingAmount}
+                    value={creditPaymentForm.amount}
+                    onChange={(e) => setCreditPaymentForm({...creditPaymentForm, amount: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 text-left mb-1">
+                    Payment Method *
+                  </label>
+                  <select
+                    value={creditPaymentForm.paymentMethod}
+                    onChange={(e) => setCreditPaymentForm({...creditPaymentForm, paymentMethod: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    required
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="card">Card</option>
+                    <option value="upi">UPI</option>
+                    <option value="bank_transfer">Bank Transfer</option>
+                    <option value="check">Check</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 text-left mb-1">
+                    Transaction ID
+                  </label>
+                  <input
+                    type="text"
+                    value={creditPaymentForm.transactionId}
+                    onChange={(e) => setCreditPaymentForm({...creditPaymentForm, transactionId: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="Optional reference number"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 text-left mb-1">
+                    Notes
+                  </label>
+                  <textarea
+                    value={creditPaymentForm.notes}
+                    onChange={(e) => setCreditPaymentForm({...creditPaymentForm, notes: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    rows="3"
+                    placeholder="Optional notes"
+                  />
+                </div>
+
+                <div className="flex justify-end space-x-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreditPaymentModal(false)}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={processingPayment}
+                    className="px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+                  >
+                    {processingPayment ? 'Processing...' : 'Record Payment'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Credit Adjustment Modal */}
+      {showCreditAdjustmentModal && selectedCreditCustomer && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <h3 className="text-lg font-medium text-gray-900 text-left mb-4">
+                Credit Adjustment
+              </h3>
+              <div className="mb-4 p-3 bg-gray-50 rounded-md">
+                <p className="text-sm text-gray-600 text-left">Customer: {selectedCreditCustomer.name}</p>
+                <p className="text-sm text-gray-600 text-left">Current Balance: ₹{selectedCreditCustomer.outstandingAmount?.toLocaleString()}</p>
+              </div>
+
+              <form onSubmit={handleCreditAdjustment} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 text-left mb-1">
+                    Adjustment Type *
+                  </label>
+                  <select
+                    value={creditAdjustmentForm.adjustmentType}
+                    onChange={(e) => setCreditAdjustmentForm({...creditAdjustmentForm, adjustmentType: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    required
+                  >
+                    <option value="add">Add Credit</option>
+                    <option value="deduct">Deduct Credit</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 text-left mb-1">
+                    Amount *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={creditAdjustmentForm.amount}
+                    onChange={createNumericInputHandler(
+                      (value) => setCreditAdjustmentForm({...creditAdjustmentForm, amount: value}),
+                      null,
+                      VALIDATION_OPTIONS.PRICE
+                    )}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 text-left mb-1">
+                    Reason *
+                  </label>
+                  <select
+                    value={creditAdjustmentForm.reason}
+                    onChange={(e) => setCreditAdjustmentForm({...creditAdjustmentForm, reason: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    required
+                  >
+                    <option value="manual_adjustment">Manual Adjustment</option>
+                    <option value="promotional_credit">Promotional Credit</option>
+                    <option value="compensation">Compensation</option>
+                    <option value="correction">Correction</option>
+                    <option value="goodwill">Goodwill</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 text-left mb-1">
+                    Notes
+                  </label>
+                  <textarea
+                    value={creditAdjustmentForm.notes}
+                    onChange={(e) => setCreditAdjustmentForm({...creditAdjustmentForm, notes: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    rows="3"
+                    placeholder="Optional notes"
+                  />
+                </div>
+
+                <div className="flex justify-end space-x-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreditAdjustmentModal(false)}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={processingAdjustment}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-md text-sm font-medium hover:bg-purple-700 disabled:opacity-50"
+                  >
+                    {processingAdjustment ? 'Processing...' : `${creditAdjustmentForm.adjustmentType === 'add' ? 'Add' : 'Deduct'} Credit`}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Credit History Modal */}
+      {showCreditHistoryModal && selectedCreditCustomer && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-10 mx-auto p-5 border w-4/5 max-w-4xl shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-medium text-gray-900 text-left">
+                  Credit History - {selectedCreditCustomer.name}
+                </h3>
+                <button
+                  onClick={() => setShowCreditHistoryModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <span className="sr-only">Close</span>
+                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="mb-4 p-3 bg-gray-50 rounded-md">
+                <div className="grid grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <p className="text-gray-600 text-left">Current Balance</p>
+                    <p className="font-medium text-left">₹{selectedCreditCustomer.outstandingAmount?.toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600 text-left">Credit Limit</p>
+                    <p className="font-medium text-left">₹{selectedCreditCustomer.creditLimit?.toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600 text-left">Status</p>
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      selectedCreditCustomer.status === 'overdue'
+                        ? 'bg-red-100 text-red-800'
+                        : 'bg-green-100 text-green-800'
+                    }`}>
+                      {selectedCreditCustomer.status === 'overdue' ? 'Overdue' : 'Current'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="max-h-96 overflow-y-auto">
+                {creditHistoryLoading ? (
+                  <div className="flex justify-center items-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+                  </div>
+                ) : creditHistory.length > 0 ? (
+                  <div className="space-y-3">
+                    {creditHistory.map((transaction, index) => (
+                      <div key={index} className="border border-gray-200 rounded-md p-4">
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-2">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                transaction.transactionType === 'credit_sale'
+                                  ? 'bg-red-100 text-red-800'
+                                  : transaction.transactionType === 'credit_payment'
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-blue-100 text-blue-800'
+                              }`}>
+                                {transaction.transactionType.replace('_', ' ').toUpperCase()}
+                              </span>
+                              <span className="text-sm text-gray-500">
+                                {new Date(transaction.transactionDate).toLocaleDateString()}
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-900 mt-1 text-left">{transaction.description}</p>
+                            {transaction.notes && (
+                              <p className="text-xs text-gray-600 mt-1 text-left">{transaction.notes}</p>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <p className={`text-sm font-medium ${
+                              transaction.balanceChange >= 0 ? 'text-red-600' : 'text-green-600'
+                            }`}>
+                              {transaction.balanceChange >= 0 ? '+' : ''}₹{Math.abs(transaction.balanceChange).toLocaleString()}
+                            </p>
+                            <p className="text-xs text-gray-500">Balance: ₹{transaction.newBalance.toLocaleString()}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    No credit transactions found
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end pt-4">
+                <button
+                  onClick={() => setShowCreditHistoryModal(false)}
+                  className="px-4 py-2 bg-gray-600 text-white rounded-md text-sm font-medium hover:bg-gray-700"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
         </div>
       </div>

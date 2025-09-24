@@ -32,6 +32,8 @@ const StoreManagerDashboard = () => {
   const [dashboardData, setDashboardData] = useState(null);
   const [expiryAlertsSummary, setExpiryAlertsSummary] = useState(null);
   const [doctorStats, setDoctorStats] = useState(null);
+  const [doctorStatsLoading, setDoctorStatsLoading] = useState(true);
+  const [expiryAlertsLoading, setExpiryAlertsLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -39,6 +41,14 @@ const StoreManagerDashboard = () => {
     fetchDashboardData();
     fetchExpiryAlertsSummary();
     fetchDoctorStats();
+  }, []);
+
+  // Force refresh of expiry alerts every 5 seconds to ensure data consistency
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchExpiryAlertsSummary();
+    }, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const fetchDashboardData = async () => {
@@ -69,26 +79,63 @@ const StoreManagerDashboard = () => {
 
   const fetchExpiryAlertsSummary = async () => {
     try {
+      setExpiryAlertsLoading(true);
+      // Force complete state reset
+      setExpiryAlertsSummary(null);
       const token = localStorage.getItem('token');
 
-      const response = await fetch('/api/store-manager/expiry-alerts/summary', {
+      // Force a completely fresh request with aggressive cache busting
+      const timestamp = Date.now();
+      const random = Math.random();
+      const response = await fetch(`/api/store-manager/expiry-alerts/summary?bust=${timestamp}&rand=${random}&force=true`, {
+        method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'If-None-Match': '*'
         }
       });
 
       if (response.ok) {
         const data = await response.json();
+        console.log('🔍 Frontend received expiry alerts data:', data.data);
+        console.log('🔍 Total count from API:', data.data?.summary?.total?.count);
         setExpiryAlertsSummary(data.data);
+      } else {
+        // Set default values if API fails
+        setExpiryAlertsSummary({
+          summary: {
+            expired: { count: 0, value: 0 },
+            critical: { count: 0, value: 0 },
+            warning: { count: 0, value: 0 },
+            upcoming: { count: 0, value: 0 },
+            total: { count: 0, value: 0 }
+          }
+        });
       }
     } catch (error) {
       console.error('Expiry alerts summary fetch error:', error);
+      // Set default values if API fails
+      setExpiryAlertsSummary({
+        summary: {
+          expired: { count: 0, value: 0 },
+          critical: { count: 0, value: 0 },
+          warning: { count: 0, value: 0 },
+          upcoming: { count: 0, value: 0 },
+          total: { count: 0, value: 0 }
+        }
+      });
+    } finally {
+      setExpiryAlertsLoading(false);
     }
   };
 
   const fetchDoctorStats = async () => {
     try {
+      setDoctorStatsLoading(true);
       const token = localStorage.getItem('token');
 
       const response = await fetch('/api/store-manager/doctors/stats', {
@@ -101,9 +148,24 @@ const StoreManagerDashboard = () => {
       if (response.ok) {
         const data = await response.json();
         setDoctorStats(data.data);
+      } else {
+        // Set default values if API fails
+        setDoctorStats({
+          totalCommissionEarned: 0,
+          activeDoctors: 0,
+          pendingCommissions: 0
+        });
       }
     } catch (error) {
       console.error('Doctor stats fetch error:', error);
+      // Set default values if API fails
+      setDoctorStats({
+        totalCommissionEarned: 0,
+        activeDoctors: 0,
+        pendingCommissions: 0
+      });
+    } finally {
+      setDoctorStatsLoading(false);
     }
   };
 
@@ -120,8 +182,23 @@ const StoreManagerDashboard = () => {
   if (error) {
     return (
       <StoreManagerLayout>
-        <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <div className="text-red-800">{error}</div>
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-4">
+              <div className="text-red-800">{error}</div>
+            </div>
+            <button
+              onClick={() => {
+                setError('');
+                fetchDashboardData();
+                fetchExpiryAlertsSummary();
+                fetchDoctorStats();
+              }}
+              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+            >
+              Retry
+            </button>
+          </div>
         </div>
       </StoreManagerLayout>
     );
@@ -131,6 +208,34 @@ const StoreManagerDashboard = () => {
   const recentSales = dashboardData?.recentSales || [];
   const expiringMedicines = dashboardData?.expiringMedicines || [];
   const alerts = dashboardData?.alerts || {};
+
+  // Safety check for critical metrics
+  const safeMetrics = {
+    todayRevenue: metrics.todayRevenue || 0,
+    monthRevenue: metrics.monthRevenue || 0,
+    totalProfit: metrics.totalProfit || 0,
+    todayProfit: metrics.todayProfit || 0,
+    todayLoss: metrics.todayLoss || 0,
+    todayCredit: metrics.todayCredit || 0,
+    todaySalesCount: metrics.todaySalesCount || 0,
+    monthSalesCount: metrics.monthSalesCount || 0,
+    totalMedicines: metrics.totalMedicines || 0,
+    inStockMedicines: metrics.inStockMedicines || 0,
+    stockValue: metrics.stockValue || 0,
+    totalStrips: metrics.totalStrips || 0,
+    totalIndividualUnits: metrics.totalIndividualUnits || 0,
+    pendingCredit: metrics.pendingCredit || 0,
+    creditCustomers: metrics.creditCustomers || 0,
+    todayReturns: metrics.todayReturns || 0,
+    pendingReturns: metrics.pendingReturns || 0,
+    outOfStock: metrics.outOfStock || 0,
+    expiredMedicines: metrics.expiredMedicines || 0,
+    lowStockMedicines: metrics.lowStockMedicines || 0,
+    wasteImpact: metrics.wasteImpact || 0,
+    preventableWaste: metrics.preventableWaste || 0,
+    wastePercentage: metrics.wastePercentage || 0,
+    wasteIncidents: metrics.wasteIncidents || 0
+  };
 
   return (
     <StoreManagerLayout>
@@ -155,7 +260,7 @@ const StoreManagerDashboard = () => {
                 <h3 className="text-sm font-medium text-yellow-800">Attention Required</h3>
               </div>
               <div className="mt-2 text-sm text-yellow-700">
-                {alerts.lowStock && <p>• {metrics.lowStockMedicines} medicines are running low on stock</p>}
+                {alerts.lowStock && <p>• {safeMetrics.lowStockMedicines} medicines are running low on stock</p>}
                 {alerts.expiringSoon && <p>• {expiringMedicines.length} medicines are expiring soon</p>}
               </div>
             </div>
@@ -173,12 +278,12 @@ const StoreManagerDashboard = () => {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-600">Today's Sales</p>
-                    <p className="text-2xl font-bold text-gray-900">₹{metrics.todayRevenue?.toFixed(2) || '0.00'}</p>
+                    <p className="text-2xl font-bold text-gray-900">₹{safeMetrics.todayRevenue.toFixed(2)}</p>
                   </div>
                 </div>
               </div>
               <div className="mt-2 text-sm text-gray-500">
-                {metrics.todaySalesCount || 0} transactions
+                {safeMetrics.todaySalesCount} transactions
               </div>
             </div>
 
@@ -191,12 +296,12 @@ const StoreManagerDashboard = () => {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-600">This Month</p>
-                    <p className="text-2xl font-bold text-gray-900">₹{metrics.monthRevenue?.toFixed(2) || '0.00'}</p>
+                    <p className="text-2xl font-bold text-gray-900">₹{safeMetrics.monthRevenue.toFixed(2)}</p>
                   </div>
                 </div>
               </div>
               <div className="mt-2 text-sm text-gray-500">
-                {metrics.monthSalesCount || 0} transactions
+                {safeMetrics.monthSalesCount} transactions
               </div>
             </div>
 
@@ -209,13 +314,32 @@ const StoreManagerDashboard = () => {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-600">Total Profit</p>
-                    <p className="text-2xl font-bold text-gray-900">₹{metrics.totalProfit?.toFixed(2) || '0.00'}</p>
+                    <p className="text-2xl font-bold text-gray-900">₹{safeMetrics.totalProfit.toFixed(2)}</p>
                   </div>
                 </div>
               </div>
-              <div className="mt-2 text-sm text-green-600 flex items-center">
-                <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                No return impact
+              <div className={`mt-2 text-sm flex items-center ${safeMetrics.todayReturns > 0 ? 'text-orange-600' : 'text-green-600'}`}>
+                <span className={`w-2 h-2 rounded-full mr-2 ${safeMetrics.todayReturns > 0 ? 'bg-orange-500' : 'bg-green-500'}`}></span>
+                {safeMetrics.todayReturns > 0 ? `₹${safeMetrics.todayReturns.toFixed(2)} return impact` : 'No return impact'}
+              </div>
+            </div>
+
+            {/* Today Profit */}
+            <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-emerald-500">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <div className="p-2 bg-emerald-100 rounded-lg mr-3">
+                    <TrendingUp className="h-6 w-6 text-emerald-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Today Profit</p>
+                    <p className="text-2xl font-bold text-gray-900">₹{safeMetrics.todayProfit.toFixed(2)}</p>
+                  </div>
+                </div>
+              </div>
+              <div className={`mt-2 text-sm flex items-center ${safeMetrics.todayProfit > 0 ? 'text-emerald-600' : 'text-gray-600'}`}>
+                <span className={`w-2 h-2 rounded-full mr-2 ${safeMetrics.todayProfit > 0 ? 'bg-emerald-500' : 'bg-gray-500'}`}></span>
+                {safeMetrics.todayProfit > 0 ? 'Profitable day' : 'No profit today'}
               </div>
             </div>
 
@@ -228,12 +352,12 @@ const StoreManagerDashboard = () => {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-600">Total Medicines</p>
-                    <p className="text-2xl font-bold text-gray-900">{metrics.totalMedicines || 0}</p>
+                    <p className="text-2xl font-bold text-gray-900">{safeMetrics.totalMedicines}</p>
                   </div>
                 </div>
               </div>
               <div className="mt-2 text-sm text-gray-500">
-                {metrics.inStockMedicines || 0} in stock
+                {safeMetrics.inStockMedicines} in stock
               </div>
             </div>
 
@@ -247,12 +371,12 @@ const StoreManagerDashboard = () => {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-600">Stock Value</p>
-                    <p className="text-2xl font-bold text-gray-900">₹{metrics.stockValue?.toFixed(2) || '0.00'}</p>
+                    <p className="text-2xl font-bold text-gray-900">₹{safeMetrics.stockValue.toFixed(2)}</p>
                   </div>
                 </div>
               </div>
               <div className="mt-2 text-sm text-gray-500">
-                {metrics.totalItems || 0} items valued
+                {(safeMetrics.totalStrips + safeMetrics.totalIndividualUnits).toLocaleString()} items valued
               </div>
             </div>
 
@@ -265,12 +389,31 @@ const StoreManagerDashboard = () => {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-600">Pending Credit</p>
-                    <p className="text-2xl font-bold text-gray-900">₹{metrics.pendingCredit?.toFixed(2) || '0.00'}</p>
+                    <p className="text-2xl font-bold text-gray-900">₹{safeMetrics.pendingCredit.toFixed(2)}</p>
                   </div>
                 </div>
               </div>
               <div className="mt-2 text-sm text-gray-500">
-                {metrics.creditCustomers || 0} credit customers
+                {safeMetrics.creditCustomers} credit customers
+              </div>
+            </div>
+
+            {/* Today Credit */}
+            <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-amber-500">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <div className="p-2 bg-amber-100 rounded-lg mr-3">
+                    <Clock className="h-6 w-6 text-amber-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Today Credit</p>
+                    <p className="text-2xl font-bold text-gray-900">₹{safeMetrics.todayCredit.toFixed(2)}</p>
+                  </div>
+                </div>
+              </div>
+              <div className={`mt-2 text-sm flex items-center ${safeMetrics.todayCredit > 0 ? 'text-amber-600' : 'text-green-600'}`}>
+                <span className={`w-2 h-2 rounded-full mr-2 ${safeMetrics.todayCredit > 0 ? 'bg-amber-500' : 'bg-green-500'}`}></span>
+                {safeMetrics.todayCredit > 0 ? 'Credit given today' : 'No credit given today'}
               </div>
             </div>
 
@@ -283,12 +426,31 @@ const StoreManagerDashboard = () => {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-600">Today's Returns</p>
-                    <p className="text-2xl font-bold text-gray-900">₹{metrics.todayReturns?.toFixed(2) || '0.00'}</p>
+                    <p className="text-2xl font-bold text-gray-900">₹{safeMetrics.todayReturns.toFixed(2)}</p>
                   </div>
                 </div>
               </div>
               <div className="mt-2 text-sm text-gray-500">
-                {metrics.pendingReturns || 0} pending
+                {safeMetrics.pendingReturns} pending
+              </div>
+            </div>
+
+            {/* Today Loss */}
+            <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-rose-500">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <div className="p-2 bg-rose-100 rounded-lg mr-3">
+                    <TrendingDown className="h-6 w-6 text-rose-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Today Loss</p>
+                    <p className="text-2xl font-bold text-gray-900">₹{safeMetrics.todayLoss.toFixed(2)}</p>
+                  </div>
+                </div>
+              </div>
+              <div className={`mt-2 text-sm flex items-center ${safeMetrics.todayLoss > 0 ? 'text-rose-600' : 'text-green-600'}`}>
+                <span className={`w-2 h-2 rounded-full mr-2 ${safeMetrics.todayLoss > 0 ? 'bg-rose-500' : 'bg-green-500'}`}></span>
+                {safeMetrics.todayLoss > 0 ? 'Loss incurred today' : 'No losses today'}
               </div>
             </div>
 
@@ -301,33 +463,16 @@ const StoreManagerDashboard = () => {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-600">Out of Stock</p>
-                    <p className="text-2xl font-bold text-gray-900">{metrics.outOfStock || 0}</p>
+                    <p className="text-2xl font-bold text-gray-900">{safeMetrics.outOfStock}</p>
                   </div>
                 </div>
               </div>
               <div className="mt-2 text-sm text-gray-500">
-                {metrics.expiredMedicines || 0} expired
+                {safeMetrics.expiredMedicines} expired
               </div>
             </div>
 
             {/* Row 3: Waste Management & Expiry Tracking */}
-            {/* Storage Costs */}
-            <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-purple-500">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <div className="p-2 bg-purple-100 rounded-lg mr-3">
-                    <Archive className="h-6 w-6 text-purple-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">Storage Costs</p>
-                    <p className="text-2xl font-bold text-gray-900">₹{metrics.storageCosts?.toFixed(2) || '0.00'}</p>
-                  </div>
-                </div>
-              </div>
-              <div className="mt-2 text-sm text-gray-500">
-                ₹{metrics.monthlyStorageCosts?.toFixed(2) || '0.00'} this month
-              </div>
-            </div>
 
             {/* Waste Impact */}
             <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-red-500">
@@ -338,12 +483,12 @@ const StoreManagerDashboard = () => {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-600">Waste Impact</p>
-                    <p className="text-2xl font-bold text-gray-900">₹{metrics.wasteImpact?.toFixed(2) || '0.00'}</p>
+                    <p className="text-2xl font-bold text-gray-900">₹{safeMetrics.wasteImpact.toFixed(2)}</p>
                   </div>
                 </div>
               </div>
               <div className="mt-2 text-sm text-gray-500">
-                {metrics.wasteIncidents || 0} incidents
+                {safeMetrics.wasteIncidents} incidents
               </div>
             </div>
 
@@ -356,20 +501,17 @@ const StoreManagerDashboard = () => {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-600">Preventable Waste</p>
-                    <p className="text-2xl font-bold text-gray-900">₹{metrics.preventableWaste?.toFixed(2) || '0.00'}</p>
+                    <p className="text-2xl font-bold text-gray-900">₹{safeMetrics.preventableWaste.toFixed(2)}</p>
                   </div>
                 </div>
               </div>
               <div className="mt-2 text-sm text-gray-500">
-                {metrics.wastePercentage?.toFixed(1) || '0.0'}% of total waste
+                {safeMetrics.wastePercentage.toFixed(1)}% of total waste
               </div>
             </div>
 
             {/* Low Stock Card */}
-            <div
-              className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-red-500 cursor-pointer hover:shadow-xl transition-shadow"
-              onClick={() => navigate('/store-panel/low-stock')}
-            >
+            <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-red-500">
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
                   <div className="p-2 bg-red-100 rounded-lg mr-3">
@@ -377,21 +519,18 @@ const StoreManagerDashboard = () => {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-600">Low Stock Items</p>
-                    <p className="text-2xl font-bold text-gray-900">{metrics.lowStockMedicines || 0}</p>
+                    <p className="text-2xl font-bold text-gray-900">{safeMetrics.lowStockMedicines}</p>
                   </div>
                 </div>
               </div>
-              <div className="mt-2 text-sm text-red-600 flex items-center">
-                <span className="w-2 h-2 bg-red-500 rounded-full mr-2"></span>
-                Needs immediate attention
+              <div className={`mt-2 text-sm flex items-center ${safeMetrics.lowStockMedicines > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                <span className={`w-2 h-2 rounded-full mr-2 ${safeMetrics.lowStockMedicines > 0 ? 'bg-red-500' : 'bg-green-500'}`}></span>
+                {safeMetrics.lowStockMedicines > 0 ? 'Needs immediate attention' : 'Stock levels healthy'}
               </div>
             </div>
 
             {/* Doctor Commission Card */}
-            <div
-              className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-green-500 cursor-pointer hover:shadow-xl transition-shadow"
-              onClick={() => navigate('/store-panel/doctors')}
-            >
+            <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-green-500">
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
                   <div className="p-2 bg-green-100 rounded-lg mr-3">
@@ -399,14 +538,23 @@ const StoreManagerDashboard = () => {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-600">Doctor Commissions</p>
-                    <p className="text-2xl font-bold text-gray-900">₹{doctorStats?.totalCommissionEarned?.toFixed(2) || '0.00'}</p>
+                    {doctorStatsLoading ? (
+                      <div className="flex items-center">
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-green-600 mr-2"></div>
+                        <p className="text-lg text-gray-400">Loading...</p>
+                      </div>
+                    ) : (
+                      <p className="text-2xl font-bold text-gray-900">₹{doctorStats?.totalCommissionEarned?.toFixed(2) || '0.00'}</p>
+                    )}
                   </div>
                 </div>
               </div>
-              <div className="mt-2 text-sm text-gray-500 flex items-center justify-between">
-                <span>{doctorStats?.activeDoctors || 0} active doctors</span>
-                <span className="text-orange-600">₹{doctorStats?.pendingCommissions?.toFixed(2) || '0.00'} pending</span>
-              </div>
+              {!doctorStatsLoading && (
+                <div className="mt-2 text-sm text-gray-500 flex items-center justify-between">
+                  <span>{doctorStats?.activeDoctors || 0} active doctors</span>
+                  <span className="text-orange-600">₹{doctorStats?.pendingCommissions?.toFixed(2) || '0.00'} pending</span>
+                </div>
+              )}
             </div>
 
             {/* Comprehensive Expiry Alerts Widget */}
@@ -429,23 +577,28 @@ const StoreManagerDashboard = () => {
                 </button>
               </div>
 
-              {expiryAlertsSummary ? (
+              {expiryAlertsLoading ? (
+                <div className="flex items-center justify-center h-20">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-red-600"></div>
+                  <span className="ml-2 text-gray-500">Loading expiry alerts...</span>
+                </div>
+              ) : (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {/* Expired */}
                   <div className="text-center p-3 bg-red-50 rounded-lg border border-red-200">
                     <div className="text-2xl font-bold text-red-600">
-                      {expiryAlertsSummary.summary?.expired?.count || 0}
+                      {expiryAlertsSummary?.summary?.expired?.count || 0}
                     </div>
                     <div className="text-xs text-red-600 font-medium">Expired</div>
                     <div className="text-xs text-gray-500 mt-1">
-                      ₹{expiryAlertsSummary.summary?.expired?.value?.toFixed(2) || '0.00'}
+                      ₹{expiryAlertsSummary?.summary?.expired?.value?.toFixed(2) || '0.00'}
                     </div>
                   </div>
 
                   {/* Critical (≤7 days) */}
                   <div className="text-center p-3 bg-red-50 rounded-lg border border-red-200">
                     <div className="text-2xl font-bold text-red-600">
-                      {expiryAlertsSummary.summary?.critical?.count || 0}
+                      {expiryAlertsSummary?.summary?.critical?.count || 0}
                     </div>
                     <div className="text-xs text-red-600 font-medium">Critical</div>
                     <div className="text-xs text-gray-500 mt-1">≤7 days</div>
@@ -454,7 +607,7 @@ const StoreManagerDashboard = () => {
                   {/* Warning (8-30 days) */}
                   <div className="text-center p-3 bg-orange-50 rounded-lg border border-orange-200">
                     <div className="text-2xl font-bold text-orange-600">
-                      {expiryAlertsSummary.summary?.warning?.count || 0}
+                      {expiryAlertsSummary?.summary?.warning?.count || 0}
                     </div>
                     <div className="text-xs text-orange-600 font-medium">Warning</div>
                     <div className="text-xs text-gray-500 mt-1">8-30 days</div>
@@ -463,20 +616,16 @@ const StoreManagerDashboard = () => {
                   {/* Upcoming (31-90 days) */}
                   <div className="text-center p-3 bg-blue-50 rounded-lg border border-blue-200">
                     <div className="text-2xl font-bold text-blue-600">
-                      {expiryAlertsSummary.summary?.upcoming?.count || 0}
+                      {expiryAlertsSummary?.summary?.upcoming?.count || 0}
                     </div>
                     <div className="text-xs text-blue-600 font-medium">Upcoming</div>
                     <div className="text-xs text-gray-500 mt-1">31-90 days</div>
                   </div>
                 </div>
-              ) : (
-                <div className="flex items-center justify-center h-20">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-red-600"></div>
-                </div>
               )}
 
               {/* Total Value at Risk */}
-              {expiryAlertsSummary?.summary?.total && (
+              {!expiryAlertsLoading && expiryAlertsSummary?.summary?.total && (
                 <div className="mt-4 pt-4 border-t border-gray-200">
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-medium text-gray-600">Total Value at Risk:</span>
@@ -487,7 +636,14 @@ const StoreManagerDashboard = () => {
                   <div className="flex justify-between items-center mt-1">
                     <span className="text-xs text-gray-500">Total Items:</span>
                     <span className="text-sm font-medium text-gray-700">
-                      {expiryAlertsSummary.summary.total.count || 0} medicines
+                      {(() => {
+                        const count = expiryAlertsSummary?.summary?.total?.count || 0;
+                        console.log('🔍 Rendering total count:', count);
+                        console.log('🔍 Full expiryAlertsSummary:', JSON.stringify(expiryAlertsSummary, null, 2));
+                        console.log('🔍 Summary object:', expiryAlertsSummary?.summary);
+                        console.log('🔍 Total object:', expiryAlertsSummary?.summary?.total);
+                        return count;
+                      })()} medicines
                     </span>
                   </div>
                 </div>

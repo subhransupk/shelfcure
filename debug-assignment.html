@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Assignment APIs</title>
+</head>
+<body>
+    <h1>Debug Assignment APIs</h1>
+    <div id="results"></div>
+
+    <script>
+        async function testAPIs() {
+            const results = document.getElementById('results');
+            
+            try {
+                // Get token from localStorage (assuming user is logged in)
+                const token = localStorage.getItem('token');
+                if (!token) {
+                    results.innerHTML = '<p style="color: red;">No token found. Please login first.</p>';
+                    return;
+                }
+                
+                results.innerHTML += '<p>Testing APIs...</p>';
+                
+                // Test getRacks
+                const racksResponse = await fetch('http://localhost:5000/api/store-manager/racks', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const racksData = await racksResponse.json();
+                results.innerHTML += `<h3>Racks API Response:</h3>`;
+                results.innerHTML += `<p>Success: ${racksData.success}</p>`;
+                results.innerHTML += `<p>Count: ${racksData.count}</p>`;
+                results.innerHTML += `<p>Data length: ${racksData.data?.length || 0}</p>`;
+                results.innerHTML += `<pre>${JSON.stringify(racksData, null, 2)}</pre>`;
+                
+                // Test getUnassignedMedicines
+                const medicinesResponse = await fetch('http://localhost:5000/api/store-manager/medicine-locations/unassigned', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const medicinesData = await medicinesResponse.json();
+                results.innerHTML += `<h3>Unassigned Medicines API Response:</h3>`;
+                results.innerHTML += `<p>Success: ${medicinesData.success}</p>`;
+                results.innerHTML += `<p>Count: ${medicinesData.count}</p>`;
+                results.innerHTML += `<p>Data length: ${medicinesData.data?.length || 0}</p>`;
+                results.innerHTML += `<pre>${JSON.stringify(medicinesData, null, 2)}</pre>`;
+                
+            } catch (error) {
+                results.innerHTML += `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+        
+        // Run test when page loads
+        testAPIs();
+    </script>
+</body>
+</html>

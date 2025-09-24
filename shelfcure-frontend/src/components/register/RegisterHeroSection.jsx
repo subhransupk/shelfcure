@@ -92,9 +92,9 @@ const RegisterHeroSection = () => {
           <div className="relative">
             {/* Main Registration Visual */}
             <div className="relative">
-              <img 
-                src="/images/web-images/hero9.png" 
-                alt="Store Owner Registration" 
+              <img
+                src="/images/web-images/hero5.png"
+                alt="Store Owner Registration"
                 className="w-full h-auto rounded-3xl shadow-2xl"
               />
               
