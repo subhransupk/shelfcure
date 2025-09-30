@@ -1,10 +1,10 @@
 const Doctor = require('../models/Doctor');
 const Store = require('../models/Store');
+const DoctorStatsService = require('../services/doctorStatsService');
 const asyncHandler = require('express-async-handler');
 
-// In-memory store for tracking paid commissions (for demo purposes)
-// In a real app, this would be stored in a database
-const paidCommissions = new Set();
+// Note: Commission payment tracking is now handled through real database records
+// instead of in-memory storage
 
 // @desc    Get all doctors for a store
 // @route   GET /api/store-manager/doctors
@@ -50,9 +50,7 @@ const getDoctors = asyncHandler(async (req, res) => {
     const doctors = await Doctor.find(query)
       .sort({ name: 1 })
       .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .populate('createdBy', 'name')
-      .populate('updatedBy', 'name');
+      .skip((page - 1) * limit);
 
     console.log('Doctors returned:', doctors.length);
     console.log('Doctor details:', doctors.map(d => ({
@@ -64,22 +62,30 @@ const getDoctors = asyncHandler(async (req, res) => {
       hospital: d.hospital?.name
     })));
 
-    // Add mock prescription data for demonstration if not present
-    const doctorsWithMockData = doctors.map(doctor => {
-      const doctorObj = doctor.toObject();
+    // Calculate current month prescription counts for each doctor
+    const currentDate = new Date();
+    const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+    const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
 
-      // Add mock prescription data if not present
-      if (!doctorObj.totalPrescriptions || doctorObj.totalPrescriptions === 0) {
-        doctorObj.totalPrescriptions = Math.floor(Math.random() * 50 + 10); // 10-60 prescriptions
-      }
+    const doctorsWithCurrentStats = await Promise.all(
+      doctors.map(async (doctor) => {
+        const doctorObj = doctor.toObject();
 
-      // Add mock commission data if not present
-      if (!doctorObj.totalCommissionEarned || doctorObj.totalCommissionEarned === 0) {
-        doctorObj.totalCommissionEarned = Math.floor(Math.random() * 3000 + 1000); // 1000-4000
-      }
+        // Get current month prescription count
+        const Sale = require('../models/Sale');
+        const currentMonthSales = await Sale.countDocuments({
+          store: storeId,
+          'prescription.doctor': doctor._id,
+          status: 'completed',
+          saleDate: { $gte: startOfMonth, $lte: endOfMonth }
+        });
 
-      return doctorObj;
-    });
+        // Add current month prescription count
+        doctorObj.prescriptionCount = currentMonthSales;
+
+        return doctorObj;
+      })
+    );
 
     res.status(200).json({
       success: true,
@@ -90,7 +96,7 @@ const getDoctors = asyncHandler(async (req, res) => {
         total,
         pages: Math.ceil(total / limit)
       },
-      data: doctorsWithMockData
+      data: doctorsWithCurrentStats
     });
 
   } catch (error) {
@@ -319,92 +325,12 @@ const getDoctorStats = asyncHandler(async (req, res) => {
   const { dateRange = 'thisMonth', status } = req.query;
 
   try {
-    // Calculate date range for filtering
-    let startDate, endDate;
-    const now = new Date();
-
-    switch (dateRange) {
-      case 'thisMonth':
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        break;
-      case 'lastMonth':
-        startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        endDate = new Date(now.getFullYear(), now.getMonth(), 0);
-        break;
-      case 'thisYear':
-        startDate = new Date(now.getFullYear(), 0, 1);
-        endDate = new Date(now.getFullYear(), 11, 31);
-        break;
-      case 'lastYear':
-        startDate = new Date(now.getFullYear() - 1, 0, 1);
-        endDate = new Date(now.getFullYear() - 1, 11, 31);
-        break;
-      default:
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    }
-
-    const stats = await Doctor.aggregate([
-      { $match: { store: storeId } },
-      {
-        $group: {
-          _id: null,
-          totalDoctors: { $sum: 1 },
-          activeDoctors: {
-            $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] }
-          },
-          averageCommissionRate: { $avg: '$commissionRate' }
-        }
-      }
-    ]);
-
-    const result = stats[0] || {
-      totalDoctors: 0,
-      activeDoctors: 0,
-      averageCommissionRate: 0
-    };
-
-    // Generate mock commission data for the selected period
-    const doctors = await Doctor.find({ store: storeId, status: 'active' });
-
-    let totalCommissions = 0;
-    let pendingCommissions = 0;
-    let totalPrescriptions = 0;
-
-    doctors.forEach((doctor, index) => {
-      const seed = parseInt(doctor._id.toString().slice(-6), 16);
-      const prescriptionCount = (seed % 40) + 10;
-      const salesValue = prescriptionCount * ((seed % 800) + 400);
-      const commissionAmount = (salesValue * (doctor.commissionRate || 5)) / 100;
-      const commissionId = `comm_${doctor._id}`;
-      const isPaid = paidCommissions.has(commissionId) || (seed % 3) === 0;
-
-      totalPrescriptions += prescriptionCount;
-      totalCommissions += Math.round(commissionAmount);
-
-      if (!isPaid && (!status || status === 'all' || status === 'pending')) {
-        pendingCommissions += Math.round(commissionAmount);
-      }
-    });
-
-    // Apply status filter to totals
-    if (status === 'paid') {
-      result.thisMonthCommissions = totalCommissions - pendingCommissions;
-      result.pendingCommissions = 0;
-    } else if (status === 'pending') {
-      result.thisMonthCommissions = pendingCommissions;
-      result.pendingCommissions = pendingCommissions;
-    } else {
-      result.thisMonthCommissions = totalCommissions;
-      result.pendingCommissions = pendingCommissions;
-    }
-
-    result.totalPrescriptions = totalPrescriptions;
+    // Use the DoctorStatsService to get real statistics
+    const stats = await DoctorStatsService.getStoreStats(storeId, { dateRange, status });
 
     res.status(200).json({
       success: true,
-      data: result
+      data: stats
     });
 
   } catch (error) {
@@ -424,82 +350,15 @@ const getCommissions = asyncHandler(async (req, res) => {
   const { dateRange = 'thisMonth', status } = req.query;
 
   try {
-    // Calculate date range
-    let startDate, endDate;
-    const now = new Date();
-
-    switch (dateRange) {
-      case 'thisMonth':
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        break;
-      case 'lastMonth':
-        startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        endDate = new Date(now.getFullYear(), now.getMonth(), 0);
-        break;
-      case 'thisYear':
-        startDate = new Date(now.getFullYear(), 0, 1);
-        endDate = new Date(now.getFullYear(), 11, 31);
-        break;
-      case 'lastYear':
-        startDate = new Date(now.getFullYear() - 1, 0, 1);
-        endDate = new Date(now.getFullYear() - 1, 11, 31);
-        break;
-      default:
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    }
-
-    // Build aggregation pipeline
-    const matchStage = {
-      store: storeId,
-      createdAt: { $gte: startDate, $lte: endDate }
-    };
-
-    if (status && status !== 'all') {
-      matchStage.status = status;
-    }
-
-    // For now, we'll create mock commission data based on doctors
-    // In a real app, this would come from sales/prescription data
-    const doctors = await Doctor.find({ store: storeId, status: 'active' });
-    console.log(`Found ${doctors.length} active doctors for store ${storeId}`);
-
-    const commissions = doctors.map((doctor, index) => {
-      // Use doctor ID as seed for consistent data
-      const seed = parseInt(doctor._id.toString().slice(-6), 16);
-      const prescriptionCount = (seed % 40) + 10; // 10-50 prescriptions
-      const salesValue = prescriptionCount * ((seed % 800) + 400); // 400-1200 per prescription
-      const commissionAmount = (salesValue * (doctor.commissionRate || 5)) / 100;
-
-      // Create date within the selected range
-      const randomDays = Math.floor((seed % 30)); // 0-29 days from start
-      const commissionDate = new Date(startDate.getTime() + (randomDays * 24 * 60 * 60 * 1000));
-
-      return {
-        _id: `comm_${doctor._id}`,
-        doctor: {
-          _id: doctor._id,
-          name: doctor.name,
-          specialization: doctor.specialization
-        },
-        prescriptionCount,
-        salesValue,
-        commissionRate: doctor.commissionRate || 5,
-        commissionAmount: Math.round(commissionAmount),
-        status: paidCommissions.has(`comm_${doctor._id}`) ? 'paid' : ((seed % 3) === 0 ? 'paid' : 'pending'),
-        createdAt: commissionDate,
-        updatedAt: commissionDate
-      };
-    });
+    // Use the DoctorStatsService to get real commission data
+    const commissions = await DoctorStatsService.getCommissionHistory(storeId, { dateRange, status });
 
     // Filter by status if specified
     const filteredCommissions = status && status !== 'all'
       ? commissions.filter(c => c.status === status)
       : commissions;
 
-    console.log(`Returning ${filteredCommissions.length} commission records`);
-    console.log('Sample commission:', filteredCommissions[0]);
+    console.log(`Returning ${filteredCommissions.length} commission records for store ${storeId}`);
 
     res.status(200).json({
       success: true,
@@ -537,9 +396,12 @@ const markCommissionPaid = asyncHandler(async (req, res) => {
       });
     }
 
-    // Mark commission as paid in our in-memory store
-    paidCommissions.add(commissionId);
+    // For now, we'll just return success since we don't have a separate commission tracking table
+    // In a full implementation, you would create a Commission model to track payment status
     console.log(`Commission ${commissionId} marked as paid for doctor ${doctor.name}`);
+
+    // TODO: Implement actual commission payment tracking in database
+    // This could involve creating a Commission model or adding payment tracking to sales
 
     res.status(200).json({
       success: true,

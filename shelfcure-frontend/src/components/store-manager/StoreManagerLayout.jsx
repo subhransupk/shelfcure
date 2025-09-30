@@ -25,7 +25,9 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
-  RotateCcw
+  RotateCcw,
+  Bot,
+
 } from 'lucide-react';
 import { logoutUser, getCurrentUser } from '../../services/authService';
 
@@ -53,6 +55,7 @@ const StoreManagerLayout = ({ children }) => {
     { name: 'Doctors', href: '/store-panel/doctors', icon: Stethoscope },
     { name: 'Staff', href: '/store-panel/staff', icon: UserCheck },
     { name: 'Analytics', href: '/store-panel/analytics', icon: TrendingUp },
+    { name: 'AI Assistant', href: '/store-panel/ai-assistant', icon: Bot },
     { name: 'Notifications', href: '/store-panel/notifications', icon: Bell },
     { name: 'Settings', href: '/store-panel/settings', icon: Settings },
   ];

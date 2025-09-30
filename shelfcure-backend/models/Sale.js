@@ -268,6 +268,34 @@ saleSchema.pre('save', async function(next) {
   next();
 });
 
+// Post-save middleware to update doctor statistics
+saleSchema.post('save', async function() {
+  // Only update doctor stats for completed sales with prescriptions
+  if (this.status === 'completed' && this.prescription && this.prescription.doctor) {
+    try {
+      const DoctorStatsService = require('../services/doctorStatsService');
+      await DoctorStatsService.updateDoctorStats(this.prescription.doctor, this.store);
+      console.log(`✅ Doctor stats updated for doctor ${this.prescription.doctor}`);
+    } catch (error) {
+      console.error('❌ Error updating doctor stats after sale:', error);
+      // Don't fail the sale if stats update fails
+    }
+  }
+});
+
+// Post-update middleware to handle status changes
+saleSchema.post('findOneAndUpdate', async function(doc) {
+  if (doc && doc.status === 'completed' && doc.prescription && doc.prescription.doctor) {
+    try {
+      const DoctorStatsService = require('../services/doctorStatsService');
+      await DoctorStatsService.updateDoctorStats(doc.prescription.doctor, doc.store);
+      console.log(`✅ Doctor stats updated for doctor ${doc.prescription.doctor} after status change`);
+    } catch (error) {
+      console.error('❌ Error updating doctor stats after sale update:', error);
+    }
+  }
+});
+
 // Static method to get sales summary
 saleSchema.statics.getSalesSummary = function(storeId, startDate, endDate) {
   return this.aggregate([

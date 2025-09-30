@@ -64,9 +64,24 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Body parsing middleware - skip for multipart/form-data
+app.use((req, res, next) => {
+  // Skip JSON parsing for multipart form data (file uploads)
+  const contentType = req.get('Content-Type') || '';
+  if (contentType.includes('multipart/form-data')) {
+    return next();
+  }
+  express.json({ limit: '10mb' })(req, res, next);
+});
+
+app.use((req, res, next) => {
+  // Skip URL encoding for multipart form data (file uploads)
+  const contentType = req.get('Content-Type') || '';
+  if (contentType.includes('multipart/form-data')) {
+    return next();
+  }
+  express.urlencoded({ extended: true, limit: '10mb' })(req, res, next);
+});
 
 // Session configuration
 app.use(session({
@@ -426,7 +441,6 @@ app.use('/api/staff', require('./routes/staff'));
 app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/subscriptions', require('./routes/subscriptions'));
 app.use('/api/notifications', require('./routes/notifications'));
-app.use('/api/ocr', require('./routes/ocr'));
 
 // Admin Routes
 app.use('/api/admin', require('./routes/admin'));
@@ -450,6 +464,9 @@ app.use('/api/store-manager/medicine-requests', require('./routes/medicineReques
 app.use('/api/store-manager/expiry-alerts', require('./routes/expiryAlerts'));
 app.use('/api/store-manager/returns', require('./routes/returns'));
 app.use('/api/store-manager/credit', require('./routes/credit'));
+app.use('/api/store-manager/ai-assistant', require('./routes/aiAssistant'));
+app.use('/api/store-manager/ocr', require('./routes/ocr'));
+
 
 // Medicine Location Routes (accessible to store staff for read-only operations)
 app.use('/api/medicine-locations', require('./routes/medicineLocation'));

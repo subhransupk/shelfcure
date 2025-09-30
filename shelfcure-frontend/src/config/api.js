@@ -43,20 +43,36 @@ export const API_ENDPOINTS = {
   // Analytics endpoints
   ADMIN_REVENUE_ANALYTICS: `${API_BASE_URL}/api/analytics/admin/revenue`,
   ADMIN_USER_GROWTH: `${API_BASE_URL}/api/analytics/admin/user-growth`,
-  ADMIN_SUBSCRIPTION_ANALYTICS: `${API_BASE_URL}/api/analytics/admin/subscriptions`
+  ADMIN_SUBSCRIPTION_ANALYTICS: `${API_BASE_URL}/api/analytics/admin/subscriptions`,
+
+  // Store Manager endpoints
+  STORE_MANAGER: {
+    BASE: `${API_BASE_URL}/api/store-manager`,
+    AGENT: `${API_BASE_URL}/api/store-manager/agent`,
+    AI_ASSISTANT: `${API_BASE_URL}/api/store-manager/ai-assistant`
+  }
 };
 
 // Helper function to make authenticated API calls
 export const makeAuthenticatedRequest = async (url, options = {}) => {
   const token = localStorage.getItem('adminToken') || localStorage.getItem('token');
-  
-  const defaultOptions = {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token && { 'Authorization': `Bearer ${token}` })
-    }
+
+  // Check if this is a FormData request (file upload)
+  const isFormData = options.body instanceof FormData;
+
+  const defaultHeaders = {
+    ...(token && { 'Authorization': `Bearer ${token}` })
   };
-  
+
+  // Only add Content-Type for non-FormData requests
+  if (!isFormData) {
+    defaultHeaders['Content-Type'] = 'application/json';
+  }
+
+  const defaultOptions = {
+    headers: defaultHeaders
+  };
+
   const mergedOptions = {
     ...defaultOptions,
     ...options,

@@ -79,6 +79,8 @@ import AddMedicineRequestPage from './pages/AddMedicineRequestPage';
 import MedicineDetailsPage from './pages/MedicineDetailsPage';
 import StoreManagerReturns from './pages/StoreManagerReturns';
 import StoreManagerPurchaseReturns from './pages/StoreManagerPurchaseReturns';
+import StoreManagerAIAssistant from './pages/StoreManagerAIAssistant';
+
 
 // Affiliate Panel Pages
 import AffiliateRegistrationPage from './pages/AffiliateRegistrationPage';
@@ -196,6 +198,8 @@ function App() {
           <Route path="/store-panel/analytics" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerAnalytics /></ProtectedRoute>} />
           <Route path="/store-panel/reports" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerAnalytics /></ProtectedRoute>} />
           <Route path="/store-panel/notifications" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerNotifications /></ProtectedRoute>} />
+          <Route path="/store-panel/ai-assistant" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerAIAssistant /></ProtectedRoute>} />
+
           <Route path="/store-panel/settings" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerSettings /></ProtectedRoute>} />
 
           {/* Staff Routes (for medicine location search) */}

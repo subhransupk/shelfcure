@@ -114,22 +114,15 @@ const StoreManagerDoctors = () => {
     }
   };
 
-  // Calculate top referrer based on total prescriptions
+  // Get top referrer from commission stats (now comes from real data)
   const getTopReferrer = () => {
-    if (!doctors || doctors.length === 0) {
-      return { name: 'No data', prescriptions: 0 };
+    if (commissionStats && commissionStats.topReferrer) {
+      return {
+        name: commissionStats.topReferrer.name || 'No data',
+        prescriptions: commissionStats.topReferrer.prescriptions || 0
+      };
     }
-
-    const topDoctor = doctors.reduce((prev, current) => {
-      const prevPrescriptions = prev.totalPrescriptions || 0;
-      const currentPrescriptions = current.totalPrescriptions || 0;
-      return currentPrescriptions > prevPrescriptions ? current : prev;
-    });
-
-    return {
-      name: topDoctor.name || 'Unknown',
-      prescriptions: topDoctor.totalPrescriptions || 0
-    };
+    return { name: 'No data', prescriptions: 0 };
   };
 
   // Separate useEffect for commission filters
@@ -392,7 +385,8 @@ const StoreManagerDoctors = () => {
         limit: 20,
         ...(searchTerm && { search: searchTerm }),
         ...(specializationFilter && { specialization: specializationFilter }),
-        ...(statusFilter && statusFilter !== 'all' && { status: statusFilter })
+        ...(statusFilter && statusFilter !== 'all' && { status: statusFilter }),
+        _t: Date.now() // Cache busting parameter
       });
 
       console.log('Search parameters:', {
@@ -406,7 +400,10 @@ const StoreManagerDoctors = () => {
       const response = await fetch(`/api/store-manager/doctors?${params}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
         }
       });
 
@@ -487,8 +484,8 @@ const StoreManagerDoctors = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Total Doctors</p>
-              <p className="text-2xl font-bold text-gray-900">{doctors.length}</p>
-              <p className="text-xs text-green-600">+2 this month</p>
+              <p className="text-2xl font-bold text-gray-900">{commissionStats.totalDoctors || doctors.length}</p>
+              <p className="text-xs text-green-600">{commissionStats.activeDoctors || 0} active</p>
             </div>
             <div className="p-3 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full">
               <Stethoscope className="h-6 w-6 text-white" />
