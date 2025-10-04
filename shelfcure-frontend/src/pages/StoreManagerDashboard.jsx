@@ -431,7 +431,7 @@ const StoreManagerDashboard = () => {
                 </div>
               </div>
               <div className="mt-2 text-sm text-gray-500">
-                {safeMetrics.pendingReturns} pending
+                {safeMetrics.todayReturnsCount || 0} returns today • {safeMetrics.pendingReturns} pending
               </div>
             </div>
 

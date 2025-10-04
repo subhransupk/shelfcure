@@ -27,11 +27,11 @@ const creditPaymentValidation = [
     .isIn(['cash', 'card', 'upi', 'bank_transfer', 'check', 'other'])
     .withMessage('Invalid payment method'),
   body('transactionId')
-    .optional()
+    .optional({ checkFalsy: true })
     .isLength({ min: 1, max: 100 })
     .withMessage('Transaction ID must be between 1 and 100 characters'),
   body('notes')
-    .optional()
+    .optional({ checkFalsy: true })
     .isLength({ max: 1000 })
     .withMessage('Notes cannot exceed 1000 characters')
 ];
@@ -47,7 +47,7 @@ const creditAdjustmentValidation = [
     .isIn(['manual_adjustment', 'promotional_credit', 'compensation', 'correction', 'goodwill', 'other'])
     .withMessage('Invalid adjustment reason'),
   body('notes')
-    .optional()
+    .optional({ checkFalsy: true })
     .isLength({ max: 1000 })
     .withMessage('Notes cannot exceed 1000 characters')
 ];
@@ -57,7 +57,7 @@ const creditLimitValidation = [
     .isFloat({ min: 0 })
     .withMessage('Credit limit must be zero or greater'),
   body('notes')
-    .optional()
+    .optional({ checkFalsy: true })
     .isLength({ max: 500 })
     .withMessage('Notes cannot exceed 500 characters')
 ];

@@ -9,6 +9,7 @@ const {
   getDashboardData,
   getStoreAnalytics,
   getInventory,
+  exportInventory,
   getSales,
   createSale,
   getCustomers,
@@ -20,7 +21,9 @@ const {
   deleteMedicine,
   getMedicineDetails,
   getMedicineSalesHistory,
-  getMedicinePurchaseHistory
+  getMedicinePurchaseHistory,
+  recalculateCustomerMetrics,
+  recalculateAllCustomerMetrics
 } = require('../controllers/storeManagerController');
 
 const {
@@ -28,7 +31,14 @@ const {
   getMedicineBatches,
   createBatch,
   updateBatch,
-  deleteBatch
+  deleteBatch,
+  getAvailableBatches,
+  selectBatchesForSale,
+  synchronizeBatchStock,
+  updateExpiredBatches,
+  migrateMedicineBatches,
+  cleanupBatchSuppliers,
+  updateBatchStorageLocations
 } = require('../controllers/batchController');
 
 const {
@@ -37,6 +47,7 @@ const {
   createDoctor,
   updateDoctor,
   deleteDoctor,
+  toggleDoctorStatus,
   getDoctorStats,
   getCommissions,
   markCommissionPaid
@@ -139,6 +150,13 @@ router.get('/inventory',
   getInventory
 );
 
+// Route for exporting inventory
+router.get('/inventory/export',
+  checkFeatureAccess('inventory'),
+  logStoreManagerActivity('export_inventory'),
+  exportInventory
+);
+
 // Route for searching master medicines
 router.get('/master-medicines',
   checkFeatureAccess('inventory'),
@@ -209,11 +227,60 @@ router.get('/inventory/:medicineId/batches',
   getMedicineBatches
 );
 
+// Get available batches for a medicine with FIFO/FEFO sorting
+router.get('/inventory/:medicineId/available-batches',
+  checkFeatureAccess('inventory'),
+  logStoreManagerActivity('view_available_batches'),
+  getAvailableBatches
+);
+
 // Create new batch for a medicine
 router.post('/inventory/:medicineId/batches',
   checkFeatureAccess('inventory'),
   logStoreManagerActivity('create_batch'),
   createBatch
+);
+
+// Select batches for sale using FIFO/FEFO logic
+router.post('/batches/select-for-sale',
+  checkFeatureAccess('inventory'),
+  logStoreManagerActivity('select_batches_for_sale'),
+  selectBatchesForSale
+);
+
+// Synchronize medicine stock with batch totals
+router.post('/batches/synchronize',
+  checkFeatureAccess('inventory'),
+  logStoreManagerActivity('synchronize_batch_stock'),
+  synchronizeBatchStock
+);
+
+// Update expired batch status
+router.post('/batches/update-expired',
+  checkFeatureAccess('inventory'),
+  logStoreManagerActivity('update_expired_batches'),
+  updateExpiredBatches
+);
+
+// Migrate medicine batch data to batch documents
+router.post('/batches/migrate-from-medicines',
+  checkFeatureAccess('inventory'),
+  logStoreManagerActivity('migrate_medicine_batches'),
+  migrateMedicineBatches
+);
+
+// Clean up invalid supplier references in batches
+router.post('/batches/cleanup-suppliers',
+  checkFeatureAccess('inventory'),
+  logStoreManagerActivity('cleanup_batch_suppliers'),
+  cleanupBatchSuppliers
+);
+
+// Update storage locations for existing batches
+router.post('/batches/update-storage-locations',
+  checkFeatureAccess('inventory'),
+  logStoreManagerActivity('update_batch_storage_locations'),
+  updateBatchStorageLocations
 );
 
 // Update and delete batch routes
@@ -346,6 +413,19 @@ router.get('/customers/credit-management',
   getCreditManagement
 );
 
+// Recalculate customer metrics routes
+router.post('/customers/recalculate-all-metrics',
+  checkFeatureAccess('customers'),
+  logStoreManagerActivity('recalculate_all_customer_metrics'),
+  recalculateAllCustomerMetrics
+);
+
+router.post('/customers/:id/recalculate-metrics',
+  checkFeatureAccess('customers'),
+  logStoreManagerActivity('recalculate_customer_metrics'),
+  recalculateCustomerMetrics
+);
+
 // Individual customer routes
 router.route('/customers/:id')
   .get(
@@ -396,6 +476,13 @@ router.put('/doctors/commissions/:id/pay',
   checkFeatureAccess('doctors'),
   logStoreManagerActivity('mark_commission_paid'),
   markCommissionPaid
+);
+
+// Toggle doctor status route
+router.put('/doctors/:id/toggle-status',
+  checkFeatureAccess('doctors'),
+  logStoreManagerActivity('toggle_doctor_status'),
+  toggleDoctorStatus
 );
 
 // Parameterized routes must come after specific routes
@@ -460,7 +547,9 @@ const {
   markAttendance: markStoreAttendance,
   getAttendanceStats,
   bulkMarkAttendance,
-  getStaffWithAttendance
+  getStaffWithAttendance,
+  getAttendanceHistory,
+  setManualTime
 } = require('../controllers/storeManagerAttendanceController');
 
 router.route('/attendance')
@@ -492,6 +581,18 @@ router.get('/attendance/staff-list',
   checkFeatureAccess('staff'),
   logStoreManagerActivity('view_staff_attendance_list'),
   getStaffWithAttendance
+);
+
+router.get('/attendance/history',
+  checkFeatureAccess('staff'),
+  logStoreManagerActivity('view_attendance_history'),
+  getAttendanceHistory
+);
+
+router.post('/attendance/manual-time',
+  checkFeatureAccess('staff'),
+  logStoreManagerActivity('set_manual_time'),
+  setManualTime
 );
 
 // ===================

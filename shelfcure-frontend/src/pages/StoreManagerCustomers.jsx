@@ -23,7 +23,8 @@ import {
   Star,
   Filter,
   X,
-  Trash2
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 import StoreManagerLayout from '../components/store-manager/StoreManagerLayout';
 import { createNumericInputHandler, createPhoneInputHandler, VALIDATION_OPTIONS } from '../utils/inputValidation';
@@ -82,6 +83,9 @@ const StoreManagerCustomers = () => {
     notes: ''
   });
   const [processingPayment, setProcessingPayment] = useState(false);
+
+  // Metrics recalculation state
+  const [recalculatingMetrics, setRecalculatingMetrics] = useState(false);
 
   // Credit Adjustment Form State
   const [creditAdjustmentForm, setCreditAdjustmentForm] = useState({
@@ -572,26 +576,30 @@ const StoreManagerCustomers = () => {
       setProcessingPayment(true);
       const token = localStorage.getItem('token');
 
+      const requestBody = {
+        amount: parseFloat(creditPaymentForm.amount),
+        paymentMethod: creditPaymentForm.paymentMethod,
+        transactionId: creditPaymentForm.transactionId.trim() || undefined,
+        notes: creditPaymentForm.notes.trim() || undefined
+      };
+
       const response = await fetch(`/api/store-manager/credit/customers/${selectedCreditCustomer.id}/credit-payment`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          amount: parseFloat(creditPaymentForm.amount),
-          paymentMethod: creditPaymentForm.paymentMethod,
-          transactionId: creditPaymentForm.transactionId,
-          notes: creditPaymentForm.notes
-        })
+        body: JSON.stringify(requestBody)
       });
 
       if (response.ok) {
+        const responseData = await response.json();
         alert('Credit payment recorded successfully!');
         setShowCreditPaymentModal(false);
         fetchCreditManagement(); // Refresh credit data
       } else {
         const errorData = await response.json();
+        console.error('Credit payment error:', errorData);
         alert(errorData.message || 'Failed to record credit payment');
       }
     } catch (error) {
@@ -624,7 +632,7 @@ const StoreManagerCustomers = () => {
           amount: parseFloat(creditAdjustmentForm.amount),
           adjustmentType: creditAdjustmentForm.adjustmentType,
           reason: creditAdjustmentForm.reason,
-          notes: creditAdjustmentForm.notes
+          notes: creditAdjustmentForm.notes.trim() || undefined
         })
       });
 
@@ -641,6 +649,49 @@ const StoreManagerCustomers = () => {
       alert('Failed to process credit adjustment');
     } finally {
       setProcessingAdjustment(false);
+    }
+  };
+
+  // Handle recalculate all customer metrics
+  const handleRecalculateAllMetrics = async () => {
+    if (!window.confirm('This will recalculate metrics for all customers based on actual sales data. This may take a few minutes. Continue?')) {
+      return;
+    }
+
+    setRecalculatingMetrics(true);
+
+    try {
+      const response = await fetch('/api/store-manager/customers/recalculate-all-metrics', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        alert(`✅ Metrics recalculated for ${data.data.updatedCount} customers`);
+
+        // Refresh customer data
+        fetchCustomers();
+
+        if (activeTab === 'analytics') {
+          fetchCustomerAnalytics();
+        }
+
+        if (activeTab === 'credit') {
+          fetchCreditManagement();
+        }
+      } else {
+        alert(data.message || 'Failed to recalculate metrics');
+      }
+    } catch (error) {
+      console.error('Recalculate metrics error:', error);
+      alert('Failed to recalculate customer metrics');
+    } finally {
+      setRecalculatingMetrics(false);
     }
   };
 
@@ -692,6 +743,19 @@ const StoreManagerCustomers = () => {
                     <Download className="h-4 w-4 mr-2" />
                   )}
                   {exportingData ? 'Exporting...' : 'Export'}
+                </button>
+                <button
+                  onClick={handleRecalculateAllMetrics}
+                  disabled={recalculatingMetrics}
+                  className="inline-flex items-center px-4 py-2 border border-orange-300 rounded-md shadow-sm text-sm font-medium text-orange-700 bg-orange-50 hover:bg-orange-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Recalculate customer metrics from actual sales data"
+                >
+                  {recalculatingMetrics ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-orange-600 mr-2"></div>
+                  ) : (
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                  )}
+                  {recalculatingMetrics ? 'Fixing...' : 'Fix Metrics'}
                 </button>
               </div>
             </div>
@@ -986,14 +1050,24 @@ const StoreManagerCustomers = () => {
                         </div>
                       </div>
 
-                      {customer.creditBalance && customer.creditBalance > 0 && (
-                        <div className="mt-3 p-2 bg-yellow-50 rounded-md">
-                          <div className="flex items-center text-sm text-yellow-800">
+                      {/* Credit Information */}
+                      <div className="mt-3 p-2 rounded-md">
+                        {customer.creditLimit && customer.creditLimit > 0 ? (
+                          // Customer has credit allowed
+                          <div className={`flex items-center text-sm ${
+                            customer.creditBalance > 0 ? 'bg-yellow-50 text-yellow-800' : 'bg-green-50 text-green-800'
+                          }`}>
                             <CreditCard className="h-4 w-4 mr-2" />
-                            <span>Credit Balance: ₹{customer.creditBalance}</span>
+                            <span>Credit Balance: ₹{customer.creditBalance || 0} / ₹{customer.creditLimit}</span>
                           </div>
-                        </div>
-                      )}
+                        ) : (
+                          // Customer does not have credit allowed
+                          <div className="flex items-center text-sm bg-gray-50 text-gray-600">
+                            <CreditCard className="h-4 w-4 mr-2" />
+                            <span>Credit: Not Allowed</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1568,15 +1642,36 @@ const StoreManagerCustomers = () => {
                   <div className="text-center">
                     <p className="text-2xl font-bold text-gray-900">{selectedCustomer.totalPurchases || 0}</p>
                     <p className="text-sm text-gray-500">Total Purchases</p>
+                    <p className="text-xs text-gray-400">All transactions</p>
                   </div>
                   <div className="text-center">
                     <p className="text-2xl font-bold text-gray-900">₹{selectedCustomer.totalSpent || 0}</p>
                     <p className="text-sm text-gray-500">Total Spent</p>
+                    <p className="text-xs text-gray-400">Cash + Credit combined</p>
                   </div>
                   <div className="text-center">
-                    <p className="text-2xl font-bold text-gray-900">₹{selectedCustomer.creditBalance || 0}</p>
-                    <p className="text-sm text-gray-500">Credit Balance</p>
+                    {selectedCustomer.creditLimit && selectedCustomer.creditLimit > 0 ? (
+                      <>
+                        <p className="text-2xl font-bold text-gray-900">₹{selectedCustomer.creditBalance || 0}</p>
+                        <p className="text-sm text-gray-500">Credit Balance</p>
+                        <p className="text-xs text-gray-400">Outstanding amount</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-2xl font-bold text-gray-400">N/A</p>
+                        <p className="text-sm text-gray-500">Credit Balance</p>
+                        <p className="text-xs text-gray-400">Credit Not Allowed</p>
+                      </>
+                    )}
                   </div>
+                </div>
+
+                {/* Metrics explanation */}
+                <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                  <p className="text-xs text-blue-700">
+                    <strong>Note:</strong> Total Purchases and Total Spent include all transactions (cash + credit).
+                    Credit Balance shows only outstanding credit amount. If metrics seem incorrect, use the "Fix Metrics" button above.
+                  </p>
                 </div>
               </div>
 

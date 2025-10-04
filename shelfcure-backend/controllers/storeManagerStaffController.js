@@ -218,19 +218,66 @@ const createStaff = asyncHandler(async (req, res) => {
       };
 
       const prefix = rolePrefix[req.body.role] || 'ST';
+
+      // Find the highest existing employee ID with this prefix for this store
       const existingStaff = await Staff.find({
         store: storeId,
-        employeeId: { $regex: `^${prefix}` }
-      }).sort({ employeeId: -1 }).limit(1);
+        employeeId: { $regex: `^${prefix}\\d+$` }
+      }).sort({ employeeId: -1 });
 
       let nextNumber = 1;
       if (existingStaff.length > 0) {
-        const lastId = existingStaff[0].employeeId;
-        const lastNumber = parseInt(lastId.replace(prefix, '')) || 0;
-        nextNumber = lastNumber + 1;
+        // Extract numbers from all existing IDs and find the maximum
+        const existingNumbers = existingStaff.map(staff => {
+          const match = staff.employeeId.match(new RegExp(`^${prefix}(\\d+)$`));
+          return match ? parseInt(match[1]) : 0;
+        }).filter(num => num > 0);
+
+        if (existingNumbers.length > 0) {
+          nextNumber = Math.max(...existingNumbers) + 1;
+        }
       }
 
+      // Generate the new employee ID
       employeeId = `${prefix}${nextNumber.toString().padStart(3, '0')}`;
+
+      // Double-check for uniqueness within the store (safety check)
+      let attempts = 0;
+      while (attempts < 10) {
+        const existingWithId = await Staff.findOne({
+          store: storeId,
+          employeeId: employeeId.toUpperCase()
+        });
+
+        if (!existingWithId) {
+          break; // ID is unique within this store, we can use it
+        }
+
+        // If ID exists in this store, increment and try again
+        nextNumber++;
+        employeeId = `${prefix}${nextNumber.toString().padStart(3, '0')}`;
+        attempts++;
+      }
+
+      if (attempts >= 10) {
+        return res.status(500).json({
+          success: false,
+          message: 'Unable to generate unique employee ID after multiple attempts'
+        });
+      }
+    } else {
+      // If employeeId is provided, check for uniqueness within the store
+      const existingWithId = await Staff.findOne({
+        store: storeId,
+        employeeId: employeeId.trim().toUpperCase()
+      });
+
+      if (existingWithId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Employee ID already exists in this store'
+        });
+      }
     }
 
     const staffData = {
@@ -255,7 +302,7 @@ const createStaff = asyncHandler(async (req, res) => {
 
   } catch (error) {
     console.error('Create staff error:', error);
-    
+
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({
@@ -267,15 +314,29 @@ const createStaff = asyncHandler(async (req, res) => {
 
     if (error.code === 11000) {
       const field = Object.keys(error.keyValue)[0];
+      let message = `${field} already exists`;
+
+      // Provide more specific error messages
+      if (field === 'employeeId') {
+        message = 'Employee ID already exists. Please use a different Employee ID or leave it empty for auto-generation.';
+      } else if (field === 'email') {
+        message = 'A staff member with this email address already exists in the system.';
+      } else if (field === 'phone') {
+        message = 'A staff member with this phone number already exists in the system.';
+      }
+
       return res.status(400).json({
         success: false,
-        message: `${field} already exists`
+        message: message,
+        field: field,
+        value: error.keyValue[field]
       });
     }
 
     res.status(500).json({
       success: false,
-      message: 'Server error while creating staff member'
+      message: 'Server error while creating staff member',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });

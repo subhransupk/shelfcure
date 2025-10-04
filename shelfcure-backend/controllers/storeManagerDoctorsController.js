@@ -14,6 +14,8 @@ const getDoctors = asyncHandler(async (req, res) => {
   const store = req.store; // Store is available from middleware
   const storeId = store._id;
 
+
+
   try {
     let query = { store: storeId };
 
@@ -52,15 +54,7 @@ const getDoctors = asyncHandler(async (req, res) => {
       .limit(limit * 1)
       .skip((page - 1) * limit);
 
-    console.log('Doctors returned:', doctors.length);
-    console.log('Doctor details:', doctors.map(d => ({
-      name: d.name,
-      status: d.status,
-      specialization: d.specialization,
-      phone: d.phone,
-      email: d.email,
-      hospital: d.hospital?.name
-    })));
+
 
     // Calculate current month prescription counts for each doctor
     const currentDate = new Date();
@@ -317,6 +311,55 @@ const deleteDoctor = asyncHandler(async (req, res) => {
   }
 });
 
+// @desc    Toggle doctor status (activate/deactivate)
+// @route   PUT /api/store-manager/doctors/:id/toggle-status
+// @access  Private/Store Manager
+const toggleDoctorStatus = asyncHandler(async (req, res) => {
+  const store = req.store;
+  const storeId = store._id;
+  const { status } = req.body;
+
+  try {
+    // Validate status
+    if (!status || !['active', 'inactive'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid status. Must be "active" or "inactive"'
+      });
+    }
+
+    const doctor = await Doctor.findOne({ _id: req.params.id, store: storeId });
+
+    if (!doctor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Doctor not found'
+      });
+    }
+
+    // Update doctor status
+    doctor.status = status;
+    doctor.updatedBy = req.user._id;
+    await doctor.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Doctor ${status === 'active' ? 'activated' : 'deactivated'} successfully`,
+      data: {
+        doctorId: doctor._id,
+        status: doctor.status
+      }
+    });
+  } catch (error) {
+    console.error('Toggle doctor status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error toggling doctor status',
+      error: error.message
+    });
+  }
+});
+
 // @desc    Get doctor statistics
 // @route   GET /api/store-manager/doctors/stats
 // @access  Private (Store Manager only)
@@ -423,6 +466,7 @@ module.exports = {
   createDoctor,
   updateDoctor,
   deleteDoctor,
+  toggleDoctorStatus,
   getDoctorStats,
   getCommissions,
   markCommissionPaid

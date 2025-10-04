@@ -16,7 +16,9 @@ import {
   FileText,
   Star,
   Clock,
-  X
+  X,
+  CheckCircle,
+  XCircle
 } from 'lucide-react';
 import StoreManagerLayout from '../components/store-manager/StoreManagerLayout';
 
@@ -27,6 +29,8 @@ const StoreManagerDoctors = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [specializationFilter, setSpecializationFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'active', 'inactive'
+
+
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [selectedDoctor, setSelectedDoctor] = useState(null);
@@ -68,6 +72,13 @@ const StoreManagerDoctors = () => {
   });
 
   useEffect(() => {
+    console.log('useEffect triggered with dependencies:', {
+      currentPage,
+      searchTerm,
+      specializationFilter,
+      statusFilter
+    });
+
     const timeoutId = setTimeout(() => {
       fetchDoctors();
     }, 300); // Debounce search
@@ -282,6 +293,36 @@ const StoreManagerDoctors = () => {
     }
   };
 
+  const handleToggleDoctorStatus = async (doctorId, currentStatus) => {
+    const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
+    const action = newStatus === 'active' ? 'activate' : 'deactivate';
+
+    if (window.confirm(`Are you sure you want to ${action} this doctor?`)) {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/store-manager/doctors/${doctorId}/toggle-status`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ status: newStatus })
+        });
+
+        if (response.ok) {
+          await fetchDoctors(); // Refresh the list
+          setError(''); // Clear any previous errors
+        } else {
+          const data = await response.json();
+          setError(data.message || `Failed to ${action} doctor`);
+        }
+      } catch (error) {
+        console.error(`Error ${action}ing doctor:`, error);
+        setError(`Failed to ${action} doctor. Please try again.`);
+      }
+    }
+  };
+
   // Fetch commissions data
   const fetchCommissions = async () => {
     setLoadingCommissions(true);
@@ -379,25 +420,23 @@ const StoreManagerDoctors = () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      
-      const params = new URLSearchParams({
-        page: currentPage,
-        limit: 20,
-        ...(searchTerm && { search: searchTerm }),
-        ...(specializationFilter && { specialization: specializationFilter }),
-        ...(statusFilter && statusFilter !== 'all' && { status: statusFilter }),
-        _t: Date.now() // Cache busting parameter
-      });
 
-      console.log('Search parameters:', {
-        searchTerm,
-        specializationFilter,
-        statusFilter,
-        currentPage,
-        paramsString: params.toString()
-      });
+      // Build query parameters manually
+      let queryParams = `page=${currentPage}&limit=20&_t=${Date.now()}`;
 
-      const response = await fetch(`/api/store-manager/doctors?${params}`, {
+      if (searchTerm && searchTerm.trim()) {
+        queryParams += `&search=${encodeURIComponent(searchTerm)}`;
+      }
+
+      if (specializationFilter && specializationFilter.trim()) {
+        queryParams += `&specialization=${encodeURIComponent(specializationFilter)}`;
+      }
+
+      if (statusFilter && statusFilter !== 'all') {
+        queryParams += `&status=${encodeURIComponent(statusFilter)}`;
+      }
+
+      const response = await fetch(`/api/store-manager/doctors?${queryParams}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -592,6 +631,11 @@ const StoreManagerDoctors = () => {
               Clear Filters
             </button>
           </div>
+
+          {/* DEBUG BUTTONS - REMOVE AFTER TESTING */}
+          <div className="flex gap-2">
+
+          </div>
         </div>
       </div>
 
@@ -715,11 +759,19 @@ const StoreManagerDoctors = () => {
                           <Edit className="h-4 w-4" />
                         </button>
                         <button
-                          onClick={() => handleDeleteDoctor(doctor._id)}
-                          className="text-red-600 hover:text-red-900"
-                          title="Delete Doctor"
+                          onClick={() => handleToggleDoctorStatus(doctor._id, doctor.status)}
+                          className={`${
+                            doctor.status === 'active'
+                              ? 'text-red-600 hover:text-red-900'
+                              : 'text-green-600 hover:text-green-900'
+                          }`}
+                          title={doctor.status === 'active' ? 'Deactivate Doctor' : 'Activate Doctor'}
                         >
-                          <X className="h-4 w-4" />
+                          {doctor.status === 'active' ? (
+                            <XCircle className="h-4 w-4" />
+                          ) : (
+                            <CheckCircle className="h-4 w-4" />
+                          )}
                         </button>
                       </div>
                     </td>

@@ -2,7 +2,10 @@ const Purchase = require('../models/Purchase');
 const Supplier = require('../models/Supplier');
 const Medicine = require('../models/Medicine');
 const SupplierTransaction = require('../models/SupplierTransaction');
+const Batch = require('../models/Batch');
+const BatchService = require('../services/batchService');
 const { validationResult } = require('express-validator');
+const { logInventoryChange } = require('../services/inventoryLogService');
 
 // Helper function to update inventory when purchase is received/completed
 const updateInventoryForPurchase = async (purchase, userId) => {
@@ -28,44 +31,97 @@ const updateInventoryForPurchase = async (purchase, userId) => {
         console.log(`📊 Current stock - Strip: ${medicine.stripInfo?.stock || 'N/A'}, Individual: ${medicine.individualInfo?.stock || 'N/A'}`);
         console.log(`📥 Adding ${item.quantity} ${item.unitType}(s)`);
 
-        // Update stock based on unit type
-        if (item.unitType === 'strip' && medicine.stripInfo) {
-          const oldQuantity = medicine.stripInfo.stock || 0;
-          medicine.stripInfo.stock = oldQuantity + item.quantity;
+        // Create or update batch if batch information is provided
+        let batchCreated = false;
+        if (item.batchNumber && item.expiryDate) {
+          try {
+            // Check if batch already exists
+            let batch = await Batch.findOne({
+              medicine: medicine._id,
+              batchNumber: item.batchNumber,
+              store: medicine.store,
+              isActive: true
+            });
 
-          // Update legacy stock field for compatibility
-          medicine.stock = medicine.stripInfo.stock;
+            if (batch) {
+              // Update existing batch
+              if (item.unitType === 'strip') {
+                batch.stripQuantity += item.quantity;
+              } else {
+                batch.individualQuantity += item.quantity;
+              }
+              batch.updatedBy = userId;
+              await batch.save();
+              console.log(`✅ Updated existing batch: ${item.batchNumber} for ${medicine.name}`);
+            } else {
+              // Create new batch
+              batch = await Batch.create({
+                medicine: medicine._id,
+                store: medicine.store,
+                batchNumber: item.batchNumber,
+                manufacturingDate: item.manufacturingDate || new Date(),
+                expiryDate: new Date(item.expiryDate),
+                stripQuantity: item.unitType === 'strip' ? item.quantity : 0,
+                individualQuantity: item.unitType === 'individual' ? item.quantity : 0,
+                storageLocation: item.storageLocation || '',
+                supplier: purchase.supplier,
+                notes: `Created from purchase ${purchase.purchaseOrderNumber}`,
+                createdBy: userId
+              });
+              console.log(`✅ Created new batch: ${item.batchNumber} for ${medicine.name}`);
+            }
+            batchCreated = true;
 
-          // Update legacy inventory object if it exists
-          if (medicine.inventory) {
-            medicine.inventory.stripQuantity = medicine.stripInfo.stock;
+            // Synchronize medicine stock with batch totals
+            await BatchService.synchronizeMedicineStock(medicine._id, medicine.store);
+            console.log(`✅ Synchronized medicine stock with batches for ${medicine.name}`);
+
+          } catch (batchError) {
+            console.error(`❌ Error creating/updating batch for ${medicine.name}:`, batchError);
+            // Continue with traditional inventory update as fallback
           }
-
-          console.log(`✅ Updated strip stock: ${medicine.name} from ${oldQuantity} to ${medicine.stripInfo.stock} strips`);
-
-        } else if (item.unitType === 'individual' && medicine.individualInfo) {
-          const oldQuantity = medicine.individualInfo.stock || 0;
-          medicine.individualInfo.stock = oldQuantity + item.quantity;
-
-          // Update legacy inventory object if it exists
-          if (medicine.inventory) {
-            medicine.inventory.individualQuantity = medicine.individualInfo.stock;
-          }
-
-          console.log(`✅ Updated individual stock: ${medicine.name} from ${oldQuantity} to ${medicine.individualInfo.stock} units`);
-
-        } else {
-          console.log(`⚠️ Unit type ${item.unitType} not supported or medicine structure incomplete for ${medicine.name}`);
-          continue;
         }
 
-        // Update last purchase info
-        medicine.lastPurchaseDate = new Date();
-        medicine.lastPurchasePrice = item.unitCost;
+        // Fallback to traditional inventory update if no batch was created
+        if (!batchCreated) {
+          if (item.unitType === 'strip' && medicine.stripInfo) {
+            const oldQuantity = medicine.stripInfo.stock || 0;
+            medicine.stripInfo.stock = oldQuantity + item.quantity;
 
-        console.log(`💾 Saving medicine: ${medicine.name}`);
-        await medicine.save();
-        console.log(`✅ Stock updated successfully for: ${medicine.name}`);
+            // Update legacy stock field for compatibility
+            medicine.stock = medicine.stripInfo.stock;
+
+            // Update legacy inventory object if it exists
+            if (medicine.inventory) {
+              medicine.inventory.stripQuantity = medicine.stripInfo.stock;
+            }
+
+            console.log(`✅ Updated strip stock: ${medicine.name} from ${oldQuantity} to ${medicine.stripInfo.stock} strips`);
+
+          } else if (item.unitType === 'individual' && medicine.individualInfo) {
+            const oldQuantity = medicine.individualInfo.stock || 0;
+            medicine.individualInfo.stock = oldQuantity + item.quantity;
+
+            // Update legacy inventory object if it exists
+            if (medicine.inventory) {
+              medicine.inventory.individualQuantity = medicine.individualInfo.stock;
+            }
+
+            console.log(`✅ Updated individual stock: ${medicine.name} from ${oldQuantity} to ${medicine.individualInfo.stock} units`);
+
+          } else {
+            console.log(`⚠️ Unit type ${item.unitType} not supported or medicine structure incomplete for ${medicine.name}`);
+            continue;
+          }
+
+          // Update last purchase info
+          medicine.lastPurchaseDate = new Date();
+          medicine.lastPurchasePrice = item.unitCost;
+
+          console.log(`💾 Saving medicine: ${medicine.name}`);
+          await medicine.save();
+          console.log(`✅ Stock updated successfully for: ${medicine.name}`);
+        }
 
         // Log inventory change for audit trail
         await logInventoryChange({
@@ -86,7 +142,13 @@ const updateInventoryForPurchase = async (purchase, userId) => {
             purchaseOrderNumber: purchase.purchaseOrderNumber
           },
           performedBy: userId,
-          notes: `Purchase ${purchase.status} - automatic inventory update`
+          notes: `Purchase ${purchase.status} - ${batchCreated ? 'batch-aware' : 'traditional'} inventory update`,
+          batchInfo: item.batchNumber ? [{
+            batchNumber: item.batchNumber,
+            expiryDate: item.expiryDate,
+            manufacturingDate: item.manufacturingDate,
+            quantityUsed: item.quantity
+          }] : null
         });
 
       } catch (updateError) {
@@ -102,39 +164,7 @@ const updateInventoryForPurchase = async (purchase, userId) => {
   }
 };
 
-// Helper function to log inventory changes for audit trail
-const logInventoryChange = async (changeData) => {
-  try {
-    // Create inventory change log entry
-    const InventoryLog = require('../models/InventoryLog');
 
-    const logEntry = {
-      medicine: changeData.medicine,
-      store: changeData.store,
-      changeType: changeData.changeType,
-      unitType: changeData.unitType,
-      quantityChanged: changeData.quantityChanged,
-      previousStock: changeData.previousStock,
-      newStock: changeData.newStock,
-      reference: changeData.reference,
-      performedBy: changeData.performedBy,
-      notes: changeData.notes,
-      timestamp: new Date()
-    };
-
-    // If InventoryLog model exists, save the log
-    if (InventoryLog) {
-      await InventoryLog.create(logEntry);
-      console.log('📋 Inventory change logged successfully');
-    } else {
-      // Fallback: log to console for now
-      console.log('📋 Inventory Change Log:', JSON.stringify(logEntry, null, 2));
-    }
-  } catch (error) {
-    console.error('❌ Inventory logging error:', error);
-    // Don't throw error - logging failure shouldn't break the main process
-  }
-};
 
 // @desc    Get medicines that need reordering
 // @route   GET /api/store-manager/purchases/reorder-suggestions

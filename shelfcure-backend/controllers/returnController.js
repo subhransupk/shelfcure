@@ -708,6 +708,16 @@ const updateReturn = async (req, res) => {
       returnRecord.approvedAt = new Date();
     }
 
+    if (status === 'completed') {
+      returnRecord.completedBy = user._id;
+      returnRecord.completedAt = new Date();
+      console.log('✅ Return marked as completed:', {
+        returnNumber: returnRecord.returnNumber,
+        completedBy: user.name || user.email,
+        completedAt: new Date()
+      });
+    }
+
     // Handle return rejection - reverse inventory changes if inventory was restored
     if (status === 'rejected') {
       console.log('🔍 Return rejection detected:', {
@@ -744,7 +754,8 @@ const updateReturn = async (req, res) => {
       .populate('customer', 'name phone')
       .populate('items.medicine', 'name genericName')
       .populate('processedBy', 'name')
-      .populate('approvedBy', 'name');
+      .populate('approvedBy', 'name')
+      .populate('completedBy', 'name');
 
     res.status(200).json({
       success: true,
@@ -817,14 +828,14 @@ const getReturnAnalytics = async (req, res) => {
 
     // Basic return statistics
     const totalReturns = await Return.countDocuments({
-      storeId: store._id,
+      store: store._id,
       createdAt: { $gte: start, $lte: end }
     });
 
     const totalReturnAmount = await Return.aggregate([
       {
         $match: {
-          storeId: store._id,
+          store: store._id,
           createdAt: { $gte: start, $lte: end }
         }
       },
@@ -838,18 +849,73 @@ const getReturnAnalytics = async (req, res) => {
 
     // Return rate calculation (returns vs sales)
     const totalSales = await Sale.countDocuments({
-      storeId: store._id,
+      store: store._id,
       createdAt: { $gte: start, $lte: end },
       status: 'completed'
     });
 
     const returnRate = totalSales > 0 ? ((totalReturns / totalSales) * 100).toFixed(2) : 0;
 
+    // Get status-based return counts
+    const pendingReturns = await Return.countDocuments({
+      store: store._id,
+      status: { $in: ['pending', 'approved', 'processed'] }
+    });
+
+    const completedReturns = await Return.countDocuments({
+      store: store._id,
+      status: 'completed'
+    });
+
+    const rejectedReturns = await Return.countDocuments({
+      store: store._id,
+      status: { $in: ['rejected', 'cancelled'] }
+    });
+
+    // Get today's returns for better insights
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const todayReturns = await Return.countDocuments({
+      store: store._id,
+      createdAt: { $gte: today, $lt: tomorrow }
+    });
+
+    const todayReturnAmount = await Return.aggregate([
+      {
+        $match: {
+          store: store._id,
+          createdAt: { $gte: today, $lt: tomorrow }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$totalReturnAmount' }
+        }
+      }
+    ]);
+
+    // Debug logging for return analytics
+    console.log('📊 Return Analytics Debug:', {
+      storeId: store._id,
+      period: { start, end },
+      totalReturns,
+      totalReturnAmount: totalReturnAmount[0]?.total || 0,
+      pendingReturns,
+      completedReturns,
+      rejectedReturns,
+      todayReturns,
+      todayReturnAmount: todayReturnAmount[0]?.total || 0
+    });
+
     // Return reasons analysis
     const returnReasons = await Return.aggregate([
       {
         $match: {
-          storeId: store._id,
+          store: store._id,
           createdAt: { $gte: start, $lte: end }
         }
       },
@@ -869,7 +935,7 @@ const getReturnAnalytics = async (req, res) => {
     const topReturnedMedicines = await Return.aggregate([
       {
         $match: {
-          storeId: store._id,
+          store: store._id,
           createdAt: { $gte: start, $lte: end }
         }
       },
@@ -903,7 +969,7 @@ const getReturnAnalytics = async (req, res) => {
     const monthlyTrends = await Return.aggregate([
       {
         $match: {
-          storeId: store._id,
+          store: store._id,
           createdAt: { $gte: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000) } // Last year
         }
       },
@@ -926,7 +992,7 @@ const getReturnAnalytics = async (req, res) => {
     const inventoryImpact = await Return.aggregate([
       {
         $match: {
-          storeId: store._id,
+          store: store._id,
           createdAt: { $gte: start, $lte: end }
         }
       },
@@ -945,7 +1011,7 @@ const getReturnAnalytics = async (req, res) => {
     const refundMethods = await Return.aggregate([
       {
         $match: {
-          storeId: store._id,
+          store: store._id,
           createdAt: { $gte: start, $lte: end }
         }
       },
@@ -969,6 +1035,11 @@ const getReturnAnalytics = async (req, res) => {
           totalReturnAmount: totalReturnAmount[0]?.total || 0,
           returnRate: parseFloat(returnRate),
           totalSales,
+          pendingReturns,
+          completedReturns,
+          rejectedReturns,
+          todayReturns,
+          todayReturnAmount: todayReturnAmount[0]?.total || 0,
           period: {
             start,
             end,

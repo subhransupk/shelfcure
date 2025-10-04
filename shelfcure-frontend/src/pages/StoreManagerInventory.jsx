@@ -75,12 +75,52 @@ const StoreManagerInventory = () => {
   const [showEditBatchModal, setShowEditBatchModal] = useState(false);
   const [showDeleteBatchModal, setShowDeleteBatchModal] = useState(false);
   const [batchToDelete, setBatchToDelete] = useState(null);
+  const [batchSortBy, setBatchSortBy] = useState('expiryDate');
+  const [batchFilter, setBatchFilter] = useState('all');
+  const [batchSearch, setBatchSearch] = useState('');
 
   // Master medicine search state
   const [masterMedicines, setMasterMedicines] = useState([]);
   const [masterMedicineSearch, setMasterMedicineSearch] = useState('');
   const [masterMedicineLoading, setMasterMedicineLoading] = useState(false);
   const [selectedMasterMedicine, setSelectedMasterMedicine] = useState(null);
+
+  // Editable master medicine data (for when master medicine is selected but fields need to be editable)
+  const [editableMasterMedicineData, setEditableMasterMedicineData] = useState({
+    name: '',
+    genericName: '',
+    composition: '',
+    manufacturer: '',
+    category: '',
+    requiresPrescription: false,
+    unitTypes: {
+      hasStrips: true,
+      hasIndividual: true,
+      unitsPerStrip: 10
+    },
+    dosage: {
+      strength: '',
+      form: '',
+      frequency: ''
+    },
+    storageConditions: {
+      temperature: {
+        min: '',
+        max: '',
+        unit: 'celsius'
+      },
+      humidity: {
+        min: '',
+        max: ''
+      },
+      specialConditions: []
+    },
+    sideEffects: '',
+    contraindications: '',
+    interactions: '',
+    barcode: '',
+    tags: ''
+  });
 
   // Custom medicine state
   const [isCustomMode, setIsCustomMode] = useState(false);
@@ -385,6 +425,92 @@ const StoreManagerInventory = () => {
     }
   };
 
+  // Clean up invalid supplier references in batches
+  const cleanupBatchSuppliers = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      const response = await fetch('/api/store-manager/batches/cleanup-suppliers', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`Supplier cleanup completed: ${data.data.summary.cleaned} batches cleaned`);
+      }
+    } catch (error) {
+      console.error('Error cleaning up suppliers:', error);
+    }
+  };
+
+  const updateBatchStorageLocations = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      setBatchLoading(true);
+      const response = await fetch('/api/store-manager/batches/update-storage-locations', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`Storage location update completed: ${data.data.summary.updated} batches updated`);
+        // Refresh the batch list to show updated storage locations
+        await fetchAllBatches();
+      } else {
+        console.error('Failed to update storage locations');
+      }
+    } catch (error) {
+      console.error('Error updating storage locations:', error);
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
+  // Migrate medicine batch data to batch documents
+  const migrateMedicineBatches = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        alert('Please log in to migrate batches');
+        return;
+      }
+
+      // First cleanup any invalid supplier references
+      await cleanupBatchSuppliers();
+
+      const response = await fetch('/api/store-manager/batches/migrate-from-medicines', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        alert(`Migration completed! Created: ${data.data.summary.created}, Skipped: ${data.data.summary.skipped}, Errors: ${data.data.summary.errors}`);
+        fetchAllBatches(); // Refresh batches after migration
+      } else {
+        const errorData = await response.json();
+        alert('Migration failed: ' + (errorData.message || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Error migrating batches:', error);
+      alert('Error migrating batches: ' + error.message);
+    }
+  };
+
   // Fetch all batches for the store
   const fetchAllBatches = async () => {
     try {
@@ -414,6 +540,63 @@ const StoreManagerInventory = () => {
       if (response.ok) {
         const data = await response.json();
         setBatches(data.data || []);
+
+        // If no batches found, automatically try to migrate from medicines
+        if (!data.data || data.data.length === 0) {
+          console.log('No batches found, attempting automatic migration...');
+          try {
+            // First cleanup any invalid supplier references
+            await fetch('/api/store-manager/batches/cleanup-suppliers', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            const migrationResponse = await fetch('/api/store-manager/batches/migrate-from-medicines', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (migrationResponse.ok) {
+              const migrationData = await migrationResponse.json();
+              if (migrationData.data.summary.created > 0) {
+                console.log(`Auto-migration successful: ${migrationData.data.summary.created} batches created`);
+                // Fetch batches again after successful migration
+                const refreshResponse = await fetch('/api/store-manager/batches', {
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                  }
+                });
+                if (refreshResponse.ok) {
+                  const refreshData = await refreshResponse.json();
+                  setBatches(refreshData.data || []);
+                }
+              }
+            }
+          } catch (migrationError) {
+            console.error('Auto-migration failed:', migrationError);
+            // Don't show error to user for auto-migration failure
+          }
+        } else {
+          // Even if batches exist, cleanup any invalid supplier references
+          try {
+            await fetch('/api/store-manager/batches/cleanup-suppliers', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+          } catch (cleanupError) {
+            console.error('Auto-cleanup failed:', cleanupError);
+          }
+        }
 
         // Calculate batch statistics
         const now = new Date();
@@ -630,6 +813,11 @@ const StoreManagerInventory = () => {
   const exportInventory = async () => {
     try {
       const token = localStorage.getItem('token');
+      if (!token) {
+        alert('Please log in to export inventory');
+        return;
+      }
+
       const response = await fetch('/api/store-manager/inventory/export', {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -647,9 +835,16 @@ const StoreManagerInventory = () => {
         a.click();
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
+
+        // Show success message
+        alert('Inventory exported successfully!');
+      } else {
+        const errorData = await response.json();
+        alert('Export failed: ' + (errorData.message || 'Unknown error'));
       }
     } catch (error) {
       console.error('Error exporting inventory:', error);
+      alert('Error exporting inventory: ' + error.message);
     }
   };
 
@@ -697,6 +892,44 @@ const StoreManagerInventory = () => {
     setMasterMedicineSearch('');
     setMasterMedicines([]);
     setIsCustomMode(false); // Clear custom mode when selecting master medicine
+
+    // Initialize editable master medicine data with the selected medicine's data
+    setEditableMasterMedicineData({
+      name: medicine.name || '',
+      genericName: medicine.genericName || '',
+      composition: medicine.composition || '',
+      manufacturer: medicine.manufacturer || '',
+      category: medicine.category || '',
+      requiresPrescription: medicine.requiresPrescription || false,
+      unitTypes: {
+        hasStrips: medicine.unitTypes?.hasStrips ?? true,
+        hasIndividual: medicine.unitTypes?.hasIndividual ?? true,
+        unitsPerStrip: medicine.unitTypes?.unitsPerStrip || 10
+      },
+      dosage: {
+        strength: medicine.dosage?.strength || '',
+        form: medicine.dosage?.form || '',
+        frequency: medicine.dosage?.frequency || ''
+      },
+      storageConditions: {
+        temperature: {
+          min: medicine.storageConditions?.temperature?.min || '',
+          max: medicine.storageConditions?.temperature?.max || '',
+          unit: medicine.storageConditions?.temperature?.unit || 'celsius'
+        },
+        humidity: {
+          min: medicine.storageConditions?.humidity?.min || '',
+          max: medicine.storageConditions?.humidity?.max || ''
+        },
+        specialConditions: medicine.storageConditions?.specialConditions || []
+      },
+      sideEffects: medicine.sideEffects || '',
+      contraindications: medicine.contraindications || '',
+      interactions: medicine.interactions || '',
+      barcode: medicine.barcode || '',
+      tags: medicine.tags || ''
+    });
+
     // Reset supplier fields for non-custom mode
     setSelectedSupplier('');
     setSupplierSearch('');
@@ -869,7 +1102,7 @@ const StoreManagerInventory = () => {
           if (field === 'stripInfo.purchasePrice' && value && parseFloat(value) > 0) {
             const unitsPerStrip = isCustomMode
               ? customMedicineData.unitTypes.unitsPerStrip
-              : selectedMasterMedicine?.unitTypes?.unitsPerStrip || 10;
+              : editableMasterMedicineData?.unitTypes?.unitsPerStrip || 10;
 
             if (unitsPerStrip > 0) {
               newData.individualInfo.purchasePrice = parseFloat((parseFloat(value) / unitsPerStrip).toFixed(2)).toString();
@@ -880,7 +1113,7 @@ const StoreManagerInventory = () => {
           if (field === 'stripInfo.mrp' && value && parseFloat(value) > 0) {
             const unitsPerStrip = isCustomMode
               ? customMedicineData.unitTypes.unitsPerStrip
-              : selectedMasterMedicine?.unitTypes?.unitsPerStrip || 10;
+              : editableMasterMedicineData?.unitTypes?.unitsPerStrip || 10;
 
             if (unitsPerStrip > 0) {
               newData.individualInfo.mrp = parseFloat((parseFloat(value) / unitsPerStrip).toFixed(2)).toString();
@@ -896,6 +1129,53 @@ const StoreManagerInventory = () => {
         [field]: value
       }));
     }
+  };
+
+  // Handler for editable master medicine basic info changes
+  const handleEditableMasterMedicineChange = (field, value) => {
+    if (field.includes('.')) {
+      const parts = field.split('.');
+      if (parts.length === 2) {
+        const [parent, child] = parts;
+        setEditableMasterMedicineData(prev => ({
+          ...prev,
+          [parent]: {
+            ...prev[parent],
+            [child]: value
+          }
+        }));
+      } else if (parts.length === 3) {
+        const [parent, child, grandchild] = parts;
+        setEditableMasterMedicineData(prev => ({
+          ...prev,
+          [parent]: {
+            ...prev[parent],
+            [child]: {
+              ...prev[parent][child],
+              [grandchild]: value
+            }
+          }
+        }));
+      }
+    } else {
+      setEditableMasterMedicineData(prev => ({
+        ...prev,
+        [field]: value
+      }));
+    }
+  };
+
+  // Handler for special condition toggle for editable master medicine
+  const handleEditableMasterMedicineSpecialConditionToggle = (condition) => {
+    setEditableMasterMedicineData(prev => ({
+      ...prev,
+      storageConditions: {
+        ...prev.storageConditions,
+        specialConditions: prev.storageConditions.specialConditions.includes(condition)
+          ? prev.storageConditions.specialConditions.filter(c => c !== condition)
+          : [...prev.storageConditions.specialConditions, condition]
+      }
+    }));
   };
 
   const handleCategorySelection = (category) => {
@@ -1266,7 +1546,7 @@ const StoreManagerInventory = () => {
     const validationErrors = [];
 
     // Check if strips are enabled and validate strip fields
-    if (selectedMasterMedicine.unitTypes?.hasStrips) {
+    if (editableMasterMedicineData.unitTypes?.hasStrips) {
       if (!masterMedicineInventoryData.stripInfo.purchasePrice || masterMedicineInventoryData.stripInfo.purchasePrice <= 0) {
         validationErrors.push('Strip Purchase Price is required');
       }
@@ -1276,7 +1556,7 @@ const StoreManagerInventory = () => {
     }
 
     // Check if individual units are enabled and validate individual fields
-    if (selectedMasterMedicine.unitTypes?.hasIndividual) {
+    if (editableMasterMedicineData.unitTypes?.hasIndividual) {
       if (!masterMedicineInventoryData.individualInfo.purchasePrice || masterMedicineInventoryData.individualInfo.purchasePrice <= 0) {
         validationErrors.push('Individual Unit Purchase Price is required');
       }
@@ -1320,6 +1600,21 @@ const StoreManagerInventory = () => {
 
       const medicineData = {
         ...selectedMasterMedicine,
+        // Override with editable master medicine data (allows store managers to modify master data)
+        name: editableMasterMedicineData.name,
+        genericName: editableMasterMedicineData.genericName,
+        composition: editableMasterMedicineData.composition,
+        manufacturer: editableMasterMedicineData.manufacturer,
+        category: editableMasterMedicineData.category,
+        requiresPrescription: editableMasterMedicineData.requiresPrescription,
+        unitTypes: editableMasterMedicineData.unitTypes,
+        dosage: editableMasterMedicineData.dosage,
+        storageConditions: editableMasterMedicineData.storageConditions,
+        sideEffects: editableMasterMedicineData.sideEffects,
+        contraindications: editableMasterMedicineData.contraindications,
+        interactions: editableMasterMedicineData.interactions,
+        barcode: editableMasterMedicineData.barcode,
+        tags: editableMasterMedicineData.tags,
         supplier: selectedSupplier, // Use the selected supplier from non-custom mode
         // Add inventory-specific data
         ...inventoryDataConverted
@@ -1344,6 +1639,43 @@ const StoreManagerInventory = () => {
       await fetchInventory();
       setSelectedMasterMedicine(null);
       setSelectedSupplier('');
+
+      // Reset editable master medicine data
+      setEditableMasterMedicineData({
+        name: '',
+        genericName: '',
+        composition: '',
+        manufacturer: '',
+        category: '',
+        requiresPrescription: false,
+        unitTypes: {
+          hasStrips: true,
+          hasIndividual: true,
+          unitsPerStrip: 10
+        },
+        dosage: {
+          strength: '',
+          form: '',
+          frequency: ''
+        },
+        storageConditions: {
+          temperature: {
+            min: '',
+            max: '',
+            unit: 'celsius'
+          },
+          humidity: {
+            min: '',
+            max: ''
+          },
+          specialConditions: []
+        },
+        sideEffects: '',
+        contraindications: '',
+        interactions: '',
+        barcode: '',
+        tags: ''
+      });
 
       // Reset master medicine inventory data
       setMasterMedicineInventoryData({
@@ -1444,6 +1776,7 @@ const StoreManagerInventory = () => {
                   <Download className="h-4 w-4 mr-2" />
                   Export
                 </button>
+
               </div>
             </div>
           </div>
@@ -1496,7 +1829,7 @@ const StoreManagerInventory = () => {
 
           {/* Quick Actions Bar */}
           <div className="mb-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <button
                 onClick={() => setActiveTab('barcode')}
                 className="bg-blue-600 text-white p-4 rounded-lg hover:bg-blue-700 flex items-center justify-center space-x-2"
@@ -1510,17 +1843,6 @@ const StoreManagerInventory = () => {
               >
                 <Calendar className="h-5 w-5" />
                 <span>Manage Batches</span>
-              </button>
-              <button className="bg-orange-600 text-white p-4 rounded-lg hover:bg-orange-700 flex items-center justify-center space-x-2">
-                <MapPin className="h-5 w-5" />
-                <span>Storage Locations</span>
-              </button>
-              <button
-                onClick={exportInventory}
-                className="bg-green-600 text-white p-4 rounded-lg hover:bg-green-700 flex items-center justify-center space-x-2"
-              >
-                <Download className="h-5 w-5" />
-                <span>Export Report</span>
               </button>
             </div>
           </div>
@@ -1964,13 +2286,25 @@ const StoreManagerInventory = () => {
               <div className="bg-white shadow rounded-lg p-6 mb-6">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-medium text-gray-900 text-left">Batch Management</h3>
-                  <button
-                    onClick={() => setShowBatchModal(true)}
-                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add New Batch
-                  </button>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={migrateMedicineBatches}
+                      className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                      title="Import batch data from medicines that have batch numbers"
+                    >
+                      <svg className="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                      </svg>
+                      Import from Medicines
+                    </button>
+                    <button
+                      onClick={() => setShowBatchModal(true)}
+                      className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add New Batch
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
@@ -2002,10 +2336,66 @@ const StoreManagerInventory = () => {
                   </div>
                 </div>
 
+                {/* Batch Filters and Sorting */}
+                <div className="mb-4 flex flex-wrap gap-4 items-center">
+                  <div className="flex items-center space-x-2">
+                    <label className="text-sm font-medium text-gray-700">Sort by:</label>
+                    <select
+                      className="border border-gray-300 rounded-md px-3 py-1 text-sm"
+                      value={batchSortBy || 'expiryDate'}
+                      onChange={(e) => setBatchSortBy(e.target.value)}
+                    >
+                      <option value="expiryDate">Expiry Date (FEFO)</option>
+                      <option value="manufacturingDate">Manufacturing Date (FIFO)</option>
+                      <option value="batchNumber">Batch Number</option>
+                      <option value="createdAt">Date Added</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <label className="text-sm font-medium text-gray-700">Filter:</label>
+                    <select
+                      className="border border-gray-300 rounded-md px-3 py-1 text-sm"
+                      value={batchFilter || 'all'}
+                      onChange={(e) => setBatchFilter(e.target.value)}
+                    >
+                      <option value="all">All Batches</option>
+                      <option value="active">Active Only</option>
+                      <option value="expiring">Expiring Soon</option>
+                      <option value="expired">Expired</option>
+                      <option value="low-stock">Low Stock</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <label className="text-sm font-medium text-gray-700">Search:</label>
+                    <input
+                      type="text"
+                      placeholder="Search batches..."
+                      className="border border-gray-300 rounded-md px-3 py-1 text-sm w-48"
+                      value={batchSearch}
+                      onChange={(e) => setBatchSearch(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="text"
+                      placeholder="Search batches..."
+                      className="border border-gray-300 rounded-md px-3 py-1 text-sm"
+                      value={batchSearch || ''}
+                      onChange={(e) => setBatchSearch(e.target.value)}
+                    />
+                  </div>
+                </div>
+
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Priority
+                        </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Medicine
                         </th>
@@ -2032,33 +2422,122 @@ const StoreManagerInventory = () => {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {batchLoading ? (
                         <tr>
-                          <td colSpan="7" className="px-6 py-4 text-center text-sm text-gray-500">
+                          <td colSpan="8" className="px-6 py-4 text-center text-sm text-gray-500">
                             Loading batches...
                           </td>
                         </tr>
                       ) : batches.length === 0 ? (
                         <tr>
-                          <td colSpan="7" className="px-6 py-4 text-center text-sm text-gray-500">
-                            No batches found. Click "Add New Batch" to create your first batch.
+                          <td colSpan="8" className="px-6 py-12 text-center">
+                            <div className="text-gray-500">
+                              <svg className="mx-auto h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                              </svg>
+                              <h3 className="text-sm font-medium text-gray-900 mb-2">No batches found</h3>
+                              <p className="text-sm text-gray-500 mb-4">
+                                If you have medicines with batch numbers, try importing them first.
+                              </p>
+                              <div className="flex justify-center space-x-3">
+                                <button
+                                  onClick={migrateMedicineBatches}
+                                  className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                                >
+                                  Import from Medicines
+                                </button>
+                                <button
+                                  onClick={updateBatchStorageLocations}
+                                  className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                                  title="Update storage locations from rack assignments"
+                                >
+                                  Update Locations
+                                </button>
+                                <button
+                                  onClick={() => setShowBatchModal(true)}
+                                  className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+                                >
+                                  Add New Batch
+                                </button>
+                              </div>
+                            </div>
                           </td>
                         </tr>
                       ) : (
-                        batches.map((batch) => {
-                          const expiryDate = new Date(batch.expiryDate);
+                        (() => {
+                          // Filter batches based on selected filter
                           const now = new Date();
                           const futureDate = new Date();
                           futureDate.setDate(futureDate.getDate() + 30);
 
-                          let expiryStatus = 'fresh';
-                          let expiryColor = 'text-green-600';
+                          let filteredBatches = batches.filter(batch => {
+                            const expiryDate = new Date(batch.expiryDate);
+                            const hasStock = (batch.stripQuantity > 0) || (batch.individualQuantity > 0);
 
-                          if (expiryDate < now) {
-                            expiryStatus = 'expired';
-                            expiryColor = 'text-red-600';
-                          } else if (expiryDate <= futureDate) {
-                            expiryStatus = 'expiring';
-                            expiryColor = 'text-yellow-600';
-                          }
+                            // Apply search filter first
+                            if (batchSearch) {
+                              const searchLower = batchSearch.toLowerCase();
+                              const matchesSearch =
+                                batch.medicine?.name?.toLowerCase().includes(searchLower) ||
+                                batch.medicine?.manufacturer?.toLowerCase().includes(searchLower) ||
+                                batch.batchNumber?.toLowerCase().includes(searchLower);
+                              if (!matchesSearch) return false;
+                            }
+
+                            // Apply status filter
+                            switch (batchFilter) {
+                              case 'expired':
+                                return expiryDate < now;
+                              case 'expiring':
+                                return expiryDate >= now && expiryDate <= futureDate;
+                              case 'active':
+                                return expiryDate > futureDate && hasStock;
+                              case 'low-stock':
+                                return (batch.stripQuantity <= 5 && batch.individualQuantity <= 10) && hasStock;
+                              case 'all':
+                              default:
+                                return true;
+                            }
+                          });
+
+                          // Sort filtered batches
+                          filteredBatches.sort((a, b) => {
+                            if (batchSortBy === 'expiryDate') {
+                              return new Date(a.expiryDate) - new Date(b.expiryDate);
+                            } else if (batchSortBy === 'manufacturingDate') {
+                              return new Date(a.manufacturingDate) - new Date(b.manufacturingDate);
+                            } else if (batchSortBy === 'medicine') {
+                              return (a.medicine?.name || '').localeCompare(b.medicine?.name || '');
+                            }
+                            return 0;
+                          });
+
+                          return filteredBatches.map((batch, index) => {
+                            const expiryDate = new Date(batch.expiryDate);
+
+                            let expiryStatus = 'fresh';
+                            let expiryColor = 'text-green-600';
+                            let priorityBadge = '';
+                            let priorityColor = 'bg-green-100 text-green-800';
+
+                            if (expiryDate < now) {
+                              expiryStatus = 'expired';
+                              expiryColor = 'text-red-600';
+                              priorityBadge = 'EXPIRED';
+                              priorityColor = 'bg-red-100 text-red-800';
+                            } else if (expiryDate <= futureDate) {
+                              expiryStatus = 'expiring';
+                              expiryColor = 'text-yellow-600';
+                              priorityBadge = 'URGENT';
+                              priorityColor = 'bg-yellow-100 text-yellow-800';
+                            } else {
+                              // Determine FIFO/FEFO priority
+                              if (index < 3) {
+                                priorityBadge = batchSortBy === 'expiryDate' ? 'FEFO' : 'FIFO';
+                                priorityColor = 'bg-blue-100 text-blue-800';
+                              } else {
+                                priorityBadge = 'NORMAL';
+                                priorityColor = 'bg-gray-100 text-gray-800';
+                              }
+                            }
 
                           const stockText = [];
                           if (batch.stripQuantity > 0) stockText.push(`${batch.stripQuantity} strips`);
@@ -2066,6 +2545,16 @@ const StoreManagerInventory = () => {
 
                           return (
                             <tr key={batch._id} className="hover:bg-gray-50">
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${priorityColor}`}>
+                                  {priorityBadge}
+                                </span>
+                                {index < 3 && expiryStatus === 'fresh' && (
+                                  <div className="text-xs text-blue-600 mt-1">
+                                    Use first
+                                  </div>
+                                )}
+                              </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                 <div>
                                   <div className="font-medium">{batch.medicine.name}</div>
@@ -2119,7 +2608,8 @@ const StoreManagerInventory = () => {
                               </td>
                             </tr>
                           );
-                        })
+                        });
+                        })()
                       )}
                     </tbody>
                   </table>
@@ -2264,7 +2754,7 @@ const StoreManagerInventory = () => {
                     <div className="flex items-center space-x-2">
                       {selectedMasterMedicine && (
                       <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-                        Selected: {selectedMasterMedicine.name}
+                        Selected: {editableMasterMedicineData.name || selectedMasterMedicine.name}
                       </span>
                       )}
                       {isCustomMode && (
@@ -2298,14 +2788,11 @@ const StoreManagerInventory = () => {
                         </label>
                         <input
                           type="text"
-                          value={isCustomMode ? customMedicineData.name : selectedMasterMedicine.name}
-                          onChange={(e) => isCustomMode && handleCustomMedicineInputChange('name', e.target.value)}
-                          disabled={!isCustomMode}
-                          required={isCustomMode}
-                          placeholder={isCustomMode ? "e.g., Paracetamol 500mg" : ""}
-                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                            isCustomMode ? 'border-gray-300' : 'bg-gray-50 text-gray-600 border-gray-200'
-                          }`}
+                          value={isCustomMode ? customMedicineData.name : editableMasterMedicineData.name}
+                          onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('name', e.target.value) : handleEditableMasterMedicineChange('name', e.target.value)}
+                          required
+                          placeholder="e.g., Paracetamol 500mg"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         />
                       </div>
 
@@ -2316,13 +2803,10 @@ const StoreManagerInventory = () => {
                         </label>
                       <input
                         type="text"
-                          value={isCustomMode ? customMedicineData.genericName : (selectedMasterMedicine.genericName || '')}
-                          onChange={(e) => isCustomMode && handleCustomMedicineInputChange('genericName', e.target.value)}
-                          disabled={!isCustomMode}
-                          placeholder={isCustomMode ? "e.g., Acetaminophen" : ""}
-                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                            isCustomMode ? 'border-gray-300' : 'bg-gray-50 text-gray-600 border-gray-200'
-                          }`}
+                          value={isCustomMode ? customMedicineData.genericName : editableMasterMedicineData.genericName}
+                          onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('genericName', e.target.value) : handleEditableMasterMedicineChange('genericName', e.target.value)}
+                          placeholder="e.g., Acetaminophen"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
 
@@ -2333,14 +2817,11 @@ const StoreManagerInventory = () => {
                         </label>
                       <input
                         type="text"
-                          value={isCustomMode ? customMedicineData.manufacturer : selectedMasterMedicine.manufacturer}
-                          onChange={(e) => isCustomMode && handleCustomMedicineInputChange('manufacturer', e.target.value)}
-                          disabled={!isCustomMode}
-                          required={isCustomMode}
-                          placeholder={isCustomMode ? "e.g., Sun Pharmaceuticals" : ""}
-                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                            isCustomMode ? 'border-gray-300' : 'bg-gray-50 text-gray-600 border-gray-200'
-                          }`}
+                          value={isCustomMode ? customMedicineData.manufacturer : editableMasterMedicineData.manufacturer}
+                          onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('manufacturer', e.target.value) : handleEditableMasterMedicineChange('manufacturer', e.target.value)}
+                          required
+                          placeholder="e.g., Sun Pharmaceuticals"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
 
@@ -2351,20 +2832,75 @@ const StoreManagerInventory = () => {
                         </label>
                         <textarea
                           rows={3}
-                          value={isCustomMode ? customMedicineData.composition : selectedMasterMedicine.composition}
-                          onChange={(e) => isCustomMode && handleCustomMedicineInputChange('composition', e.target.value)}
-                          disabled={!isCustomMode}
-                          required={isCustomMode}
-                          placeholder={isCustomMode ? "e.g., Paracetamol 500mg per tablet" : ""}
-                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                            isCustomMode ? 'border-gray-300' : 'bg-gray-50 text-gray-600 border-gray-200'
-                          }`}
+                          value={isCustomMode ? customMedicineData.composition : editableMasterMedicineData.composition}
+                          onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('composition', e.target.value) : handleEditableMasterMedicineChange('composition', e.target.value)}
+                          required
+                          placeholder="e.g., Paracetamol 500mg per tablet"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         />
                       </div>
                     </div>
                   </div>
 
                   {/* Classification */}
+                  <div className="bg-white rounded-lg border p-6">
+                    <div className="flex items-center gap-2 mb-6">
+                      <Settings className="w-5 h-5 text-blue-600" />
+                      <h3 className="text-lg font-semibold text-gray-900 text-left">Classification</h3>
+                    </div>
+
+                    <div className="space-y-6">
+                      {/* Category */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2 text-left">
+                          Category *
+                        </label>
+                        <select
+                          value={isCustomMode ? customMedicineData.category : editableMasterMedicineData.category}
+                          onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('category', e.target.value) : handleEditableMasterMedicineChange('category', e.target.value)}
+                          required
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        >
+                          <option value="">Select Category</option>
+                          <option value="Tablet">Tablet</option>
+                          <option value="Capsule">Capsule</option>
+                          <option value="Syrup">Syrup</option>
+                          <option value="Injection">Injection</option>
+                          <option value="Drops">Drops</option>
+                          <option value="Cream">Cream</option>
+                          <option value="Ointment">Ointment</option>
+                          <option value="Powder">Powder</option>
+                          <option value="Inhaler">Inhaler</option>
+                          <option value="Spray">Spray</option>
+                          <option value="Gel">Gel</option>
+                          <option value="Lotion">Lotion</option>
+                          <option value="Solution">Solution</option>
+                          <option value="Suspension">Suspension</option>
+                          <option value="Patch">Patch</option>
+                          <option value="Suppository">Suppository</option>
+                          <option value="Other">Other</option>
+                        </select>
+                      </div>
+
+                      {/* Requires Prescription */}
+                      <div>
+                        <div className="flex items-center space-x-3">
+                          <input
+                            type="checkbox"
+                            id="requiresPrescription"
+                            checked={isCustomMode ? customMedicineData.requiresPrescription : (editableMasterMedicineData.requiresPrescription || false)}
+                            onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('requiresPrescription', e.target.checked) : handleEditableMasterMedicineChange('requiresPrescription', e.target.checked)}
+                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          />
+                          <label htmlFor="requiresPrescription" className="text-sm font-medium text-gray-700">
+                            Requires Prescription
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Additional Custom Mode Categories */}
                   {isCustomMode && (
                     <div className="bg-white rounded-lg border p-6">
                       <div className="flex items-center gap-2 mb-6">
@@ -2411,6 +2947,58 @@ const StoreManagerInventory = () => {
                   )}
 
                   {/* Dosage Information */}
+                  <div className="bg-white rounded-lg border p-6">
+                    <div className="flex items-center gap-2 mb-6">
+                      <Pill className="w-5 h-5 text-blue-600" />
+                      <h3 className="text-lg font-semibold text-gray-900 text-left">Dosage Information</h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      {/* Strength */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2 text-left">
+                          Strength
+                        </label>
+                        <input
+                          type="text"
+                          value={isCustomMode ? customMedicineData.dosage.strength : editableMasterMedicineData.dosage.strength}
+                          onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('dosage.strength', e.target.value) : handleEditableMasterMedicineChange('dosage.strength', e.target.value)}
+                          placeholder="e.g., 500mg, 10ml"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+
+                      {/* Form */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2 text-left">
+                          Form
+                        </label>
+                        <input
+                          type="text"
+                          value={isCustomMode ? customMedicineData.dosage.form : editableMasterMedicineData.dosage.form}
+                          onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('dosage.form', e.target.value) : handleEditableMasterMedicineChange('dosage.form', e.target.value)}
+                          placeholder="e.g., Tablet, Capsule, Syrup"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+
+                      {/* Frequency */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2 text-left">
+                          Frequency
+                        </label>
+                        <input
+                          type="text"
+                          value={isCustomMode ? customMedicineData.dosage.frequency : editableMasterMedicineData.dosage.frequency}
+                          onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('dosage.frequency', e.target.value) : handleEditableMasterMedicineChange('dosage.frequency', e.target.value)}
+                          placeholder="e.g., Twice daily, As needed"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Additional Custom Mode Dosage */}
                   {isCustomMode && (
                     <div className="bg-white rounded-lg border p-6">
                       <div className="flex items-center gap-2 mb-6">
@@ -2465,6 +3053,109 @@ const StoreManagerInventory = () => {
                   )}
 
                   {/* Storage Conditions */}
+                  <div className="bg-white rounded-lg border p-6">
+                    <div className="flex items-center gap-2 mb-6">
+                      <Thermometer className="w-5 h-5 text-blue-600" />
+                      <h3 className="text-lg font-semibold text-gray-900 text-left">Storage Conditions</h3>
+                    </div>
+
+                    <div className="space-y-6">
+                      {/* Temperature Range */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-3 text-left">
+                          Temperature Range
+                        </label>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Min Temperature</label>
+                            <input
+                              type="number"
+                              value={isCustomMode ? customMedicineData.storageConditions.temperature.min : editableMasterMedicineData.storageConditions.temperature.min}
+                              onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('storageConditions.temperature.min', e.target.value) : handleEditableMasterMedicineChange('storageConditions.temperature.min', e.target.value)}
+                              placeholder="e.g., 2"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Max Temperature</label>
+                            <input
+                              type="number"
+                              value={isCustomMode ? customMedicineData.storageConditions.temperature.max : editableMasterMedicineData.storageConditions.temperature.max}
+                              onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('storageConditions.temperature.max', e.target.value) : handleEditableMasterMedicineChange('storageConditions.temperature.max', e.target.value)}
+                              placeholder="e.g., 8"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Unit</label>
+                            <select
+                              value={isCustomMode ? customMedicineData.storageConditions.temperature.unit : editableMasterMedicineData.storageConditions.temperature.unit}
+                              onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('storageConditions.temperature.unit', e.target.value) : handleEditableMasterMedicineChange('storageConditions.temperature.unit', e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            >
+                              <option value="celsius">Celsius</option>
+                              <option value="fahrenheit">Fahrenheit</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Humidity Range */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-3 text-left">
+                          Humidity Range (%)
+                        </label>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Min Humidity</label>
+                            <input
+                              type="number"
+                              value={isCustomMode ? customMedicineData.storageConditions.humidity.min : editableMasterMedicineData.storageConditions.humidity.min}
+                              onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('storageConditions.humidity.min', e.target.value) : handleEditableMasterMedicineChange('storageConditions.humidity.min', e.target.value)}
+                              placeholder="e.g., 45"
+                              min="0"
+                              max="100"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Max Humidity</label>
+                            <input
+                              type="number"
+                              value={isCustomMode ? customMedicineData.storageConditions.humidity.max : editableMasterMedicineData.storageConditions.humidity.max}
+                              onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('storageConditions.humidity.max', e.target.value) : handleEditableMasterMedicineChange('storageConditions.humidity.max', e.target.value)}
+                              placeholder="e.g., 65"
+                              min="0"
+                              max="100"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Special Conditions */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-3 text-left">
+                          Special Storage Conditions
+                        </label>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {['Keep in refrigerator', 'Store in cool, dry place', 'Protect from light', 'Keep away from children', 'Do not freeze', 'Store upright', 'Shake well before use'].map((condition) => (
+                            <label key={condition} className="flex items-center space-x-2">
+                              <input
+                                type="checkbox"
+                                checked={isCustomMode ? customMedicineData.storageConditions.specialConditions.includes(condition) : editableMasterMedicineData.storageConditions.specialConditions.includes(condition)}
+                                onChange={() => isCustomMode ? handleSpecialConditionToggle(condition) : handleEditableMasterMedicineSpecialConditionToggle(condition)}
+                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="text-sm text-gray-700">{condition}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Additional Custom Mode Storage */}
                   {isCustomMode && (
                     <div className="bg-white rounded-lg border p-6">
                       <div className="flex items-center gap-2 mb-6">
@@ -2570,6 +3261,55 @@ const StoreManagerInventory = () => {
                   )}
 
                   {/* Medical Information */}
+                  <div className="bg-white rounded-lg border p-6">
+                    <div className="flex items-center gap-2 mb-6">
+                      <AlertTriangle className="w-5 h-5 text-blue-600" />
+                      <h3 className="text-lg font-semibold text-gray-900 text-left">Medical Information</h3>
+                    </div>
+
+                    <div className="space-y-6">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2 text-left">
+                          Side Effects
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={isCustomMode ? customMedicineData.sideEffects : editableMasterMedicineData.sideEffects}
+                          onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('sideEffects', e.target.value) : handleEditableMasterMedicineChange('sideEffects', e.target.value)}
+                          placeholder="List common side effects, separated by commas"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2 text-left">
+                          Contraindications
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={isCustomMode ? customMedicineData.contraindications : editableMasterMedicineData.contraindications}
+                          onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('contraindications', e.target.value) : handleEditableMasterMedicineChange('contraindications', e.target.value)}
+                          placeholder="List contraindications, separated by commas"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2 text-left">
+                          Drug Interactions
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={isCustomMode ? customMedicineData.interactions : editableMasterMedicineData.interactions}
+                          onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('interactions', e.target.value) : handleEditableMasterMedicineChange('interactions', e.target.value)}
+                          placeholder="List known drug interactions, separated by commas"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Additional Custom Mode Medical Info */}
                   {isCustomMode && (
                     <div className="bg-white rounded-lg border p-6">
                       <div className="flex items-center gap-2 mb-6">
@@ -2627,65 +3367,64 @@ const StoreManagerInventory = () => {
                       <h3 className="text-lg font-semibold text-gray-900 text-left">Unit Configuration & Pricing</h3>
                     </div>
                     
-                    {isCustomMode ? (
-                      <div className="space-y-4 mb-6">
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div className="flex items-center">
-                              <input
-                                type="checkbox"
-                                id="hasStrips"
-                                checked={customMedicineData.unitTypes.hasStrips}
-                                onChange={(e) => handleCustomMedicineInputChange('unitTypes.hasStrips', e.target.checked)}
-                                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                              />
-                              <label htmlFor="hasStrips" className="ml-2 text-sm font-medium text-gray-700">
-                                Enable Strip Sales
-                              </label>
-                            </div>
-                            
-                            <div className="flex items-center">
-                              <input
-                                type="checkbox"
-                                id="hasIndividual"
-                                checked={customMedicineData.unitTypes.hasIndividual}
-                                onChange={(e) => handleCustomMedicineInputChange('unitTypes.hasIndividual', e.target.checked)}
-                                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                              />
-                              <label htmlFor="hasIndividual" className="ml-2 text-sm font-medium text-gray-700">
-                                Enable Individual Sales
-                              </label>
-                            </div>
-                            
-                            {customMedicineData.unitTypes.hasStrips && (
-                              <div>
-                                <label className="block text-xs font-medium text-gray-700">Units per Strip</label>
-                                <input
-                                  type="number"
-                                  value={customMedicineData.unitTypes.unitsPerStrip}
-                                  onChange={(e) => handleCustomMedicineInputChange('unitTypes.unitsPerStrip', parseInt(e.target.value) || 10)}
-                                  min="1"
-                                  className="mt-1 block w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
-                                />
-                              </div>
-                            )}
+                    <div className="space-y-4 mb-6">
+                      {!isCustomMode && (
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
+                          <div className="flex items-center">
+                            <Info className="h-4 w-4 text-green-600 mr-2" />
+                            <p className="text-sm text-green-800">
+                              Unit configuration pre-filled from master medicine. You can modify these settings as needed for your store.
+                            </p>
                           </div>
                         </div>
-                      </div>
-                    ) : (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                      <div className="flex items-center">
-                        <Info className="h-5 w-5 text-blue-600 mr-2" />
-                        <p className="text-sm text-blue-800">
-                          This medicine supports dual unit system: <strong>{selectedMasterMedicine.unitTypes?.unitsPerStrip || 10} units per strip</strong>
-                        </p>
+                      )}
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="flex items-center">
+                            <input
+                              type="checkbox"
+                              id="hasStrips"
+                              checked={isCustomMode ? customMedicineData.unitTypes.hasStrips : editableMasterMedicineData.unitTypes.hasStrips}
+                              onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('unitTypes.hasStrips', e.target.checked) : handleEditableMasterMedicineChange('unitTypes.hasStrips', e.target.checked)}
+                              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                            />
+                            <label htmlFor="hasStrips" className="ml-2 text-sm font-medium text-gray-700">
+                              Enable Strip Sales
+                            </label>
+                          </div>
+
+                          <div className="flex items-center">
+                            <input
+                              type="checkbox"
+                              id="hasIndividual"
+                              checked={isCustomMode ? customMedicineData.unitTypes.hasIndividual : editableMasterMedicineData.unitTypes.hasIndividual}
+                              onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('unitTypes.hasIndividual', e.target.checked) : handleEditableMasterMedicineChange('unitTypes.hasIndividual', e.target.checked)}
+                              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                            />
+                            <label htmlFor="hasIndividual" className="ml-2 text-sm font-medium text-gray-700">
+                              Enable Individual Sales
+                            </label>
+                          </div>
+
+                          {((isCustomMode && customMedicineData.unitTypes.hasStrips) || (!isCustomMode && editableMasterMedicineData.unitTypes.hasStrips)) && (
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700">Units per Strip</label>
+                              <input
+                                type="number"
+                                value={isCustomMode ? customMedicineData.unitTypes.unitsPerStrip : editableMasterMedicineData.unitTypes.unitsPerStrip}
+                                onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('unitTypes.unitsPerStrip', parseInt(e.target.value) || 10) : handleEditableMasterMedicineChange('unitTypes.unitsPerStrip', parseInt(e.target.value) || 10)}
+                                min="1"
+                                className="mt-1 block w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                              />
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    )}
 
                     {/* Strip Information */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {((isCustomMode && customMedicineData.unitTypes.hasStrips) || (!isCustomMode && selectedMasterMedicine.unitTypes?.hasStrips)) && (
+                      {((isCustomMode && customMedicineData.unitTypes.hasStrips) || (!isCustomMode && editableMasterMedicineData.unitTypes?.hasStrips)) && (
                       <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                         <h6 className="text-sm font-medium text-green-900 mb-3 text-left">Strip Pricing & Stock</h6>
                         <div className="space-y-3">
@@ -2704,7 +3443,7 @@ const StoreManagerInventory = () => {
                                     VALIDATION_OPTIONS.PRICE
                                   )}
                                 placeholder="0.00"
-                                  required={((isCustomMode && customMedicineData.unitTypes.hasStrips) || (!isCustomMode && selectedMasterMedicine.unitTypes?.hasStrips))}
+                                  required={((isCustomMode && customMedicineData.unitTypes.hasStrips) || (!isCustomMode && editableMasterMedicineData.unitTypes?.hasStrips))}
                                 className="mt-1 block w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-green-500 focus:border-green-500"
                               />
                             </div>
@@ -2722,7 +3461,7 @@ const StoreManagerInventory = () => {
                                     VALIDATION_OPTIONS.PRICE
                                   )}
                                 placeholder="0.00"
-                                  required={((isCustomMode && customMedicineData.unitTypes.hasStrips) || (!isCustomMode && selectedMasterMedicine.unitTypes?.hasStrips))}
+                                  required={((isCustomMode && customMedicineData.unitTypes.hasStrips) || (!isCustomMode && editableMasterMedicineData.unitTypes?.hasStrips))}
                                 className="mt-1 block w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-green-500 focus:border-green-500"
                               />
                             </div>
@@ -2802,7 +3541,7 @@ const StoreManagerInventory = () => {
                       </div>
                       )}
 
-                      {((isCustomMode && customMedicineData.unitTypes.hasIndividual) || (!isCustomMode && selectedMasterMedicine.unitTypes?.hasIndividual)) && (
+                      {((isCustomMode && customMedicineData.unitTypes.hasIndividual) || (!isCustomMode && editableMasterMedicineData.unitTypes?.hasIndividual)) && (
                       <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
                         <h6 className="text-sm font-medium text-purple-900 mb-3 text-left">Individual Unit Pricing & Stock</h6>
                         <div className="space-y-3">
@@ -2821,7 +3560,7 @@ const StoreManagerInventory = () => {
                                     VALIDATION_OPTIONS.PRICE
                                   )}
                                 placeholder="0.00"
-                                  required={((isCustomMode && customMedicineData.unitTypes.hasIndividual) || (!isCustomMode && selectedMasterMedicine.unitTypes?.hasIndividual))}
+                                  required={((isCustomMode && customMedicineData.unitTypes.hasIndividual) || (!isCustomMode && editableMasterMedicineData.unitTypes?.hasIndividual))}
                                 className="mt-1 block w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-purple-500 focus:border-purple-500"
                               />
                             </div>
@@ -2839,7 +3578,7 @@ const StoreManagerInventory = () => {
                                     VALIDATION_OPTIONS.PRICE
                                   )}
                                 placeholder="0.00"
-                                  required={((isCustomMode && customMedicineData.unitTypes.hasIndividual) || (!isCustomMode && selectedMasterMedicine.unitTypes?.hasIndividual))}
+                                  required={((isCustomMode && customMedicineData.unitTypes.hasIndividual) || (!isCustomMode && editableMasterMedicineData.unitTypes?.hasIndividual))}
                                 className="mt-1 block w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-purple-500 focus:border-purple-500"
                               />
                             </div>
@@ -3068,33 +3807,27 @@ const StoreManagerInventory = () => {
                         />
                       </div>
 
-                      {isCustomMode && (
-                        <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 text-left">Barcode</label>
+                        <input
+                          type="text"
+                          value={isCustomMode ? customMedicineData.barcode : editableMasterMedicineData.barcode}
+                          onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('barcode', e.target.value) : handleEditableMasterMedicineChange('barcode', e.target.value)}
+                          placeholder="Enter barcode (optional)"
+                          className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
 
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 text-left">Barcode</label>
-                            <input
-                              type="text"
-                              value={customMedicineData.barcode}
-                              onChange={(e) => handleCustomMedicineInputChange('barcode', e.target.value)}
-                              placeholder="Enter barcode (optional)"
-                              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 text-left">Tags</label>
-                            <input
-                              type="text"
-                              value={customMedicineData.tags}
-                              onChange={(e) => handleCustomMedicineInputChange('tags', e.target.value)}
-                              placeholder="Enter tags separated by commas (e.g., fever, pain relief)"
-                              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                            />
-                          </div>
-                        </>
-                      )}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 text-left">Tags</label>
+                        <input
+                          type="text"
+                          value={isCustomMode ? customMedicineData.tags : editableMasterMedicineData.tags}
+                          onChange={(e) => isCustomMode ? handleCustomMedicineInputChange('tags', e.target.value) : handleEditableMasterMedicineChange('tags', e.target.value)}
+                          placeholder="Enter tags separated by commas (e.g., fever, pain relief)"
+                          className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
                     </div>
 
                     <div className="mt-4">

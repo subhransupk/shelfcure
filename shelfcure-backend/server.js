@@ -491,6 +491,85 @@ app.get('/api/test', (req, res) => {
   });
 });
 
+// Debug endpoint to check rack locations
+app.get('/api/debug/rack-locations', async (req, res) => {
+  try {
+    const RackLocation = require('./models/RackLocation');
+    const Medicine = require('./models/Medicine');
+    const Store = require('./models/Store');
+
+    const stores = await Store.find({ isActive: true }).limit(1);
+    if (stores.length === 0) {
+      return res.json({ message: 'No stores found' });
+    }
+
+    const store = stores[0];
+    const medicines = await Medicine.find({ store: store._id, isActive: true }).limit(5);
+    const rackLocations = await RackLocation.find({ store: store._id, isActive: true })
+      .populate('rack', 'rackNumber name')
+      .populate('medicine', 'name');
+
+    res.json({
+      store: { id: store._id, name: store.name },
+      medicineCount: medicines.length,
+      rackLocationCount: rackLocations.length,
+      sampleMedicines: medicines.map(m => ({ id: m._id, name: m.name })),
+      sampleRackLocations: rackLocations.slice(0, 5).map(rl => ({
+        id: rl._id,
+        medicine: rl.medicine?.name,
+        rack: rl.rack?.rackNumber,
+        location: `${rl.shelf}-${rl.position}`
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Test inventory endpoint without auth
+app.get('/api/debug/inventory-test', async (req, res) => {
+  try {
+    const Medicine = require('./models/Medicine');
+    const Store = require('./models/Store');
+
+    const stores = await Store.find({ isActive: true }).limit(1);
+    if (stores.length === 0) {
+      return res.json({ message: 'No stores found' });
+    }
+
+    const store = stores[0];
+    console.log('🏪 Testing inventory for store:', store.name, store._id);
+
+    // Call the same logic as the real inventory endpoint
+    const storeManagerController = require('./controllers/storeManagerController');
+
+    // Create a mock request object with proper store object
+    const mockReq = {
+      user: { id: 'test-user-id', storeId: store._id },
+      store: store,  // This is what the controller expects
+      query: {}
+    };
+
+    const mockRes = {
+      json: (data) => {
+        console.log('📊 Inventory response:', JSON.stringify(data, null, 2));
+        res.json(data);
+      },
+      status: (code) => ({
+        json: (data) => {
+          console.log('❌ Error response:', code, data);
+          res.status(code).json(data);
+        }
+      })
+    };
+
+    await storeManagerController.getInventory(mockReq, mockRes);
+  } catch (error) {
+    console.error('❌ Debug inventory test error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Database collections viewer endpoint
 app.get('/api/db/collections', async (req, res) => {
   try {

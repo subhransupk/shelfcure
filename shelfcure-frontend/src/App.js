@@ -77,6 +77,7 @@ import StoreManagerLowStock from './pages/StoreManagerLowStock';
 import StaffMedicineSearch from './pages/StaffMedicineSearch';
 import AddMedicineRequestPage from './pages/AddMedicineRequestPage';
 import MedicineDetailsPage from './pages/MedicineDetailsPage';
+import EditStoreMedicinePage from './pages/EditStoreMedicinePage';
 import StoreManagerReturns from './pages/StoreManagerReturns';
 import StoreManagerPurchaseReturns from './pages/StoreManagerPurchaseReturns';
 import StoreManagerAIAssistant from './pages/StoreManagerAIAssistant';
@@ -181,6 +182,7 @@ function App() {
           <Route path="/store-panel/dashboard" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerDashboard /></ProtectedRoute>} />
           <Route path="/store-panel/inventory" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerInventory /></ProtectedRoute>} />
           <Route path="/store-panel/inventory/medicine/:medicineId" element={<ProtectedRoute requiredRole="store_manager"><MedicineDetailsPage /></ProtectedRoute>} />
+          <Route path="/store-panel/inventory/edit/:medicineId" element={<ProtectedRoute requiredRole="store_manager"><EditStoreMedicinePage /></ProtectedRoute>} />
           <Route path="/store-panel/low-stock" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerLowStock /></ProtectedRoute>} />
           <Route path="/store-panel/rack-management" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerRackManagement /></ProtectedRoute>} />
           <Route path="/store-panel/sales" element={<ProtectedRoute requiredRole="store_manager"><StoreManagerSales /></ProtectedRoute>} />

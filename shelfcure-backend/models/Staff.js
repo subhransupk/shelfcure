@@ -23,7 +23,6 @@ const staffSchema = new mongoose.Schema({
   employeeId: {
     type: String,
     required: [true, 'Employee ID is required'],
-    unique: true,
     uppercase: true
   },
 
@@ -154,11 +153,13 @@ const staffSchema = new mongoose.Schema({
 
 // Indexes for better performance
 staffSchema.index({ store: 1 });
-staffSchema.index({ employeeId: 1 });
 staffSchema.index({ email: 1 });
 staffSchema.index({ role: 1 });
 staffSchema.index({ status: 1 });
 staffSchema.index({ store: 1, status: 1 });
+
+// Compound unique index: employeeId must be unique per store
+staffSchema.index({ store: 1, employeeId: 1 }, { unique: true });
 
 // Virtual for full name display
 staffSchema.virtual('displayName').get(function() {
@@ -175,13 +176,7 @@ staffSchema.virtual('experience').get(function() {
   return diffYears;
 });
 
-// Pre-save middleware to generate employee ID if not provided
-staffSchema.pre('save', async function(next) {
-  if (!this.employeeId) {
-    const count = await this.constructor.countDocuments({ store: this.store });
-    this.employeeId = `EMP${String(count + 1).padStart(4, '0')}`;
-  }
-  next();
-});
+// Note: EmployeeId generation is handled in the controller to ensure
+// role-based prefixes and proper uniqueness checking
 
 module.exports = mongoose.model('Staff', staffSchema);

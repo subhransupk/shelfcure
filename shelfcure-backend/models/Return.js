@@ -257,11 +257,19 @@ const returnSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
-  
+
   processedAt: {
     type: Date,
     default: Date.now
   },
+
+  // Completion details
+  completedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+
+  completedAt: Date,
 
   // Refund details
   refundMethod: {

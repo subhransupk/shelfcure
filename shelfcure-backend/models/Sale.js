@@ -42,7 +42,15 @@ const saleSchema = new mongoose.Schema({
       required: true,
       min: 0
     },
-    // Batch information for tracking
+    // Batch information for tracking (can be multiple batches per item)
+    batchInfo: [{
+      batchNumber: String,
+      expiryDate: Date,
+      manufacturingDate: Date,
+      quantityUsed: Number
+    }],
+
+    // Legacy single batch field (kept for backward compatibility)
     batch: {
       batchNumber: String,
       expiryDate: Date,

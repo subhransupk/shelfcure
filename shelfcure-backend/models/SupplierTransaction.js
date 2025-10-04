@@ -58,7 +58,7 @@ const supplierTransactionSchema = new mongoose.Schema({
       required: true
     },
     id: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: mongoose.Schema.Types.Mixed, // Allow both ObjectId and other types (like timestamps)
       required: true
     },
     number: String // Purchase number, payment reference, etc.

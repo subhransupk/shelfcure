@@ -56,6 +56,9 @@ const recordSupplierPayment = async (req, res) => {
     }
 
     // Create supplier payment transaction
+    const mongoose = require('mongoose');
+    const paymentId = new mongoose.Types.ObjectId();
+
     const transaction = await SupplierTransaction.createTransaction({
       store: store._id,
       supplier: supplierId,
@@ -64,7 +67,7 @@ const recordSupplierPayment = async (req, res) => {
       balanceChange: -amount, // Negative because it reduces outstanding balance
       reference: {
         type: 'Payment',
-        id: new Date().getTime(), // Use timestamp as payment reference
+        id: paymentId,
         number: transactionId || `PAY-${Date.now()}`
       },
       paymentDetails: {
@@ -156,6 +159,9 @@ const makeSupplierAdjustment = async (req, res) => {
     }
 
     // Create supplier adjustment transaction
+    const mongoose = require('mongoose');
+    const adjustmentId = new mongoose.Types.ObjectId();
+
     const transaction = await SupplierTransaction.createTransaction({
       store: store._id,
       supplier: supplierId,
@@ -164,7 +170,7 @@ const makeSupplierAdjustment = async (req, res) => {
       balanceChange: balanceChange,
       reference: {
         type: 'Adjustment',
-        id: new Date().getTime(),
+        id: adjustmentId,
         number: `ADJ-${Date.now()}`
       },
       adjustmentDetails: {

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Connection Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-result { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .info { background-color: #d1ecf1; color: #0c5460; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 5px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>ShelfCure API Connection Test</h1>
+    
+    <div>
+        <button onclick="testHealthEndpoint()">Test Health Endpoint</button>
+        <button onclick="testOCRTestEndpoint()">Test OCR Test Endpoint</button>
+        <button onclick="testOCRPurchaseBill()">Test OCR Purchase Bill (No Auth)</button>
+        <button onclick="testWithAuth()">Test OCR with Auth</button>
+        <button onclick="clearResults()">Clear Results</button>
+    </div>
+    
+    <div id="results"></div>
+
+    <script>
+        function addResult(message, type = 'info') {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `test-result ${type}`;
+            div.innerHTML = message;
+            results.appendChild(div);
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        async function testHealthEndpoint() {
+            addResult('🔍 Testing health endpoint...', 'info');
+            try {
+                const response = await fetch('/api/health');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    addResult(`✅ Health endpoint working: ${JSON.stringify(data)}`, 'success');
+                } else {
+                    addResult(`❌ Health endpoint failed: ${response.status} - ${JSON.stringify(data)}`, 'error');
+                }
+            } catch (error) {
+                addResult(`❌ Health endpoint error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testOCRTestEndpoint() {
+            addResult('🔍 Testing OCR test endpoint (no auth)...', 'info');
+            try {
+                const response = await fetch('/api/store-manager/ocr/test');
+                const data = await response.json();
+                
+                addResult(`📊 OCR test response: ${response.status}`, 'info');
+                addResult(`📄 Response data: <pre>${JSON.stringify(data, null, 2)}</pre>`, 'info');
+                
+                if (response.status === 401) {
+                    addResult('✅ OCR route exists (401 = needs auth)', 'success');
+                } else if (response.ok) {
+                    addResult('✅ OCR route working', 'success');
+                } else {
+                    addResult(`❌ OCR route issue: ${response.status}`, 'error');
+                }
+            } catch (error) {
+                addResult(`❌ OCR test endpoint error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testOCRPurchaseBill() {
+            addResult('🔍 Testing OCR purchase bill endpoint (no auth)...', 'info');
+            try {
+                const formData = new FormData();
+                // Create a dummy file
+                const dummyFile = new Blob(['test'], { type: 'text/plain' });
+                formData.append('bill', dummyFile, 'test.txt');
+
+                const response = await fetch('/api/store-manager/ocr/purchase-bill', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                addResult(`📊 OCR purchase bill response: ${response.status}`, 'info');
+                addResult(`📄 Response data: <pre>${JSON.stringify(data, null, 2)}</pre>`, 'info');
+                
+                if (response.status === 401) {
+                    addResult('✅ OCR purchase bill route exists (401 = needs auth)', 'success');
+                } else if (response.status === 400) {
+                    addResult('✅ OCR purchase bill route exists (400 = bad request)', 'success');
+                } else if (response.ok) {
+                    addResult('✅ OCR purchase bill route working', 'success');
+                } else {
+                    addResult(`❌ OCR purchase bill route issue: ${response.status}`, 'error');
+                }
+            } catch (error) {
+                addResult(`❌ OCR purchase bill error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testWithAuth() {
+            addResult('🔍 Testing with authentication...', 'info');
+            
+            const token = localStorage.getItem('token');
+            if (!token) {
+                addResult('❌ No token found in localStorage. Please log in first.', 'error');
+                return;
+            }
+            
+            addResult(`🔐 Token found: ${token.substring(0, 20)}...`, 'info');
+            
+            try {
+                const response = await fetch('/api/store-manager/ocr/test', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                const data = await response.json();
+                
+                addResult(`📊 Authenticated OCR test response: ${response.status}`, 'info');
+                addResult(`📄 Response data: <pre>${JSON.stringify(data, null, 2)}</pre>`, 'info');
+                
+                if (response.ok) {
+                    addResult('✅ Authentication working with OCR routes', 'success');
+                } else if (response.status === 401) {
+                    addResult('❌ Authentication failed - token might be invalid', 'error');
+                } else if (response.status === 403) {
+                    addResult('❌ Authorization failed - user might not be store manager', 'error');
+                } else {
+                    addResult(`❌ Unexpected response: ${response.status}`, 'error');
+                }
+            } catch (error) {
+                addResult(`❌ Authenticated test error: ${error.message}`, 'error');
+            }
+        }
+
+        // Auto-run basic tests on page load
+        window.onload = function() {
+            addResult('🚀 Starting automatic API connection tests...', 'info');
+            setTimeout(testHealthEndpoint, 500);
+            setTimeout(testOCRTestEndpoint, 1000);
+            setTimeout(testOCRPurchaseBill, 1500);
+        };
+    </script>
+</body>
+</html>

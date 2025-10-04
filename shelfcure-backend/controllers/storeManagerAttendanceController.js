@@ -114,10 +114,14 @@ const markAttendance = asyncHandler(async (req, res) => {
       date: attendanceDate,
       month: attendanceDate.getMonth() + 1,
       year: attendanceDate.getFullYear(),
-      status: status,
       notes: notes || '',
       updatedBy: req.user._id
     };
+
+    // Only set status if provided (for check-out only updates)
+    if (status) {
+      attendanceData.status = status;
+    }
 
     // Handle check-in/check-out times
     if (checkIn) {
@@ -159,9 +163,13 @@ const markAttendance = asyncHandler(async (req, res) => {
       console.log(`✅ Created new attendance record for ${staff.name}`);
     }
 
+    const message = status
+      ? `Attendance marked as ${status} for ${staff.name}`
+      : `Check-out time updated for ${staff.name}`;
+
     res.status(200).json({
       success: true,
-      message: `Attendance marked as ${status} for ${staff.name}`,
+      message: message,
       data: attendance
     });
 
@@ -433,10 +441,200 @@ const getStaffWithAttendance = asyncHandler(async (req, res) => {
   }
 });
 
+// @desc    Get historical attendance records with filters
+// @route   GET /api/store-manager/attendance/history
+// @access  Private (Store Manager only)
+const getAttendanceHistory = asyncHandler(async (req, res) => {
+  const { staffId, startDate, endDate, status, page = 1, limit = 50 } = req.query;
+  const store = req.store;
+  const storeId = store._id;
+
+  try {
+    console.log(`📊 Getting attendance history for store: ${store.name}`);
+    console.log('📋 Query parameters:', { staffId, startDate, endDate, status, page, limit });
+
+    let query = { store: storeId };
+
+    // Staff filter
+    if (staffId && staffId !== 'all') {
+      query.staff = staffId;
+    }
+
+    // Date range filter
+    if (startDate && endDate) {
+      query.date = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+    } else if (startDate) {
+      query.date = { $gte: new Date(startDate) };
+    } else if (endDate) {
+      query.date = { $lte: new Date(endDate) };
+    } else {
+      // Default to last 90 days if no date range specified (more inclusive)
+      const ninetyDaysAgo = new Date();
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+      query.date = { $gte: ninetyDaysAgo };
+    }
+
+    // Status filter
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+
+    console.log('📋 Attendance history query:', JSON.stringify(query));
+
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get attendance records with staff details
+    const attendanceRecords = await StaffAttendance.find(query)
+      .populate({
+        path: 'staff',
+        select: 'name email phone employeeId role department'
+      })
+      .sort({ date: -1, 'staff.name': 1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    // Get total count for pagination
+    const totalRecords = await StaffAttendance.countDocuments(query);
+    const totalPages = Math.ceil(totalRecords / parseInt(limit));
+
+    // Get summary statistics
+    const summaryStats = await StaffAttendance.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 },
+          totalHours: { $sum: '$workingHours.actual' }
+        }
+      }
+    ]);
+
+    const summary = {
+      totalRecords,
+      totalPages,
+      currentPage: parseInt(page),
+      statusBreakdown: summaryStats.reduce((acc, stat) => {
+        acc[stat._id] = {
+          count: stat.count,
+          totalHours: stat.totalHours || 0
+        };
+        return acc;
+      }, {})
+    };
+
+    console.log(`✅ Found ${attendanceRecords.length} attendance history records`);
+
+    res.status(200).json({
+      success: true,
+      count: attendanceRecords.length,
+      summary,
+      data: attendanceRecords
+    });
+
+  } catch (error) {
+    console.error('❌ Get attendance history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching attendance history',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Manual time entry for check-in/check-out
+const setManualTime = asyncHandler(async (req, res) => {
+  const { staffId, type, time, date } = req.body;
+  const store = req.store;
+  const storeId = store._id;
+
+  try {
+    console.log(`⏰ Setting manual ${type} time for staff: ${staffId}`);
+
+    // Validate input
+    if (!staffId || !type || !time || !date) {
+      return res.status(400).json({
+        success: false,
+        message: 'Staff ID, type, time, and date are required'
+      });
+    }
+
+    if (!['checkIn', 'checkOut'].includes(type)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Type must be either checkIn or checkOut'
+      });
+    }
+
+    // Find or create attendance record
+    const attendanceDate = new Date(date);
+    let attendance = await StaffAttendance.findOne({
+      staff: staffId,
+      store: storeId,
+      date: {
+        $gte: new Date(attendanceDate.getFullYear(), attendanceDate.getMonth(), attendanceDate.getDate()),
+        $lt: new Date(attendanceDate.getFullYear(), attendanceDate.getMonth(), attendanceDate.getDate() + 1)
+      }
+    });
+
+    if (!attendance) {
+      // Create new attendance record
+      attendance = new StaffAttendance({
+        staff: staffId,
+        store: storeId,
+        date: attendanceDate,
+        status: 'present'
+      });
+    }
+
+    // Set the time
+    const timeDate = new Date(time);
+    if (type === 'checkIn') {
+      attendance.checkIn = {
+        time: timeDate,
+        method: 'manual'
+      };
+      // Update status if not already set
+      if (attendance.status === 'not_marked') {
+        attendance.status = 'present';
+      }
+    } else if (type === 'checkOut') {
+      attendance.checkOut = {
+        time: timeDate,
+        method: 'manual'
+      };
+    }
+
+    await attendance.save();
+
+    console.log(`✅ Manual ${type} time set successfully`);
+
+    res.json({
+      success: true,
+      message: `${type === 'checkIn' ? 'Check-in' : 'Check-out'} time set successfully`,
+      data: attendance
+    });
+
+  } catch (error) {
+    console.error(`❌ Error setting manual ${type} time:`, error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to set time',
+      error: error.message
+    });
+  }
+});
+
 module.exports = {
   getAttendance,
   markAttendance,
   getAttendanceStats,
   bulkMarkAttendance,
-  getStaffWithAttendance
+  getStaffWithAttendance,
+  getAttendanceHistory,
+  setManualTime
 };

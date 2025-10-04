@@ -4,9 +4,13 @@ const User = require('../models/User');
 const Medicine = require('../models/Medicine');
 const MasterMedicine = require('../models/MasterMedicine');
 const Sale = require('../models/Sale');
+const Return = require('../models/Return');
 const Customer = require('../models/Customer');
 const Purchase = require('../models/Purchase');
 const CreditTransaction = require('../models/CreditTransaction');
+const BatchService = require('../services/batchService');
+const { logInventoryChange } = require('../services/inventoryLogService');
+const { generateInvoicePDF } = require('../services/invoiceService');
 
 // ===================
 // DASHBOARD CONTROLLERS
@@ -181,26 +185,49 @@ const getDashboardData = async (req, res) => {
 
     const stockValue = stockValueResult[0]?.totalStockValue || 0;
 
-    // Get today's returns
-    const todayReturns = await Sale.aggregate([
+    // Get today's returns - FIXED: Query Return collection instead of Sale collection
+    const todayReturns = await Return.aggregate([
       {
         $match: {
           store: store._id,
-          createdAt: { $gte: startOfDay },
-          status: 'returned'
+          createdAt: { $gte: startOfDay }
         }
       },
       {
         $group: {
           _id: null,
-          totalReturns: { $sum: '$totalAmount' },
+          totalReturns: { $sum: '$totalReturnAmount' },
           count: { $sum: 1 }
         }
       }
     ]);
 
+    // Get pending returns count (returns that are not completed/rejected/cancelled)
+    const pendingReturnsCount = await Return.countDocuments({
+      store: store._id,
+      status: { $in: ['pending', 'approved', 'processed'] }
+    });
+
+    // Get completed returns today for better tracking
+    const completedReturnsToday = await Return.countDocuments({
+      store: store._id,
+      createdAt: { $gte: startOfDay },
+      status: 'completed'
+    });
+
     const todayReturnsAmount = todayReturns[0]?.totalReturns || 0;
-    const pendingReturns = todayReturns[0]?.count || 0;
+    const todayReturnsCount = todayReturns[0]?.count || 0;
+    const pendingReturns = pendingReturnsCount;
+
+    // Debug logging for Today's Returns
+    console.log('📊 Today\'s Returns Debug:', {
+      startOfDay: startOfDay.toISOString(),
+      todayReturnsAmount,
+      todayReturnsCount,
+      completedReturnsToday,
+      pendingReturns,
+      storeId: store._id
+    });
 
     // Get credit customers and pending credit
     const creditStats = await Sale.aggregate([
@@ -316,6 +343,8 @@ const getDashboardData = async (req, res) => {
 
           // Returns & Waste Metrics
           todayReturns: todayReturnsAmount,
+          todayReturnsCount,
+          completedReturnsToday,
           pendingReturns,
           wasteImpact,
           preventableWaste,
@@ -721,6 +750,55 @@ const getInventory = async (req, res) => {
       total = await Medicine.countDocuments(query);
     }
 
+    // Fetch rack locations for all medicines
+    const medicineIds = medicines.map(med => med._id);
+    console.log('🔍 Fetching rack locations for medicines:', medicineIds.length, 'medicines');
+    console.log('🏪 Store ID:', store._id);
+
+    const rackLocations = await require('../models/RackLocation').find({
+      medicine: { $in: medicineIds },
+      store: store._id,
+      isActive: true
+    }).populate('rack', 'rackNumber name category location')
+      .sort({ priority: 1, assignedDate: 1 });
+
+    console.log('📍 Found rack locations:', rackLocations.length);
+
+    // Group rack locations by medicine ID
+    const locationsByMedicine = {};
+    rackLocations.forEach(location => {
+      const medicineId = location.medicine.toString();
+      if (!locationsByMedicine[medicineId]) {
+        locationsByMedicine[medicineId] = [];
+      }
+      locationsByMedicine[medicineId].push({
+        rack: location.rack,
+        shelf: location.shelf,
+        position: location.position,
+        stripQuantity: location.stripQuantity,
+        individualQuantity: location.individualQuantity,
+        priority: location.priority,
+        assignedDate: location.assignedDate,
+        notes: location.notes
+      });
+    });
+
+    // Add rack locations to medicines
+    const medicinesWithLocations = medicines.map(medicine => {
+      const medicineObj = medicine.toObject();
+      const medicineLocations = locationsByMedicine[medicine._id.toString()] || [];
+      medicineObj.rackLocations = medicineLocations;
+
+      if (medicineLocations.length > 0) {
+        console.log(`📦 Medicine "${medicine.name}" has ${medicineLocations.length} locations:`,
+          medicineLocations.map(loc => `${loc.rack?.rackNumber}-${loc.shelf}-${loc.position}`));
+      }
+
+      return medicineObj;
+    });
+
+    console.log('📊 Total medicines with locations:', medicinesWithLocations.filter(m => m.rackLocations.length > 0).length);
+
     res.status(200).json({
       success: true,
       count: medicines.length,
@@ -730,13 +808,109 @@ const getInventory = async (req, res) => {
         total,
         pages: Math.ceil(total / limit)
       },
-      data: medicines
+      data: medicinesWithLocations
     });
   } catch (error) {
     console.error('Inventory fetch error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error while fetching inventory'
+    });
+  }
+};
+
+// @desc    Export store inventory as CSV
+// @route   GET /api/store-manager/inventory/export
+// @access  Private (Store Manager only)
+const exportInventory = async (req, res) => {
+  try {
+    const store = req.store;
+
+    // Get all medicines for the store
+    const medicines = await Medicine.find({ store: store._id })
+      .populate('category', 'name')
+      .populate('manufacturer', 'name')
+      .sort({ name: 1 });
+
+    // Prepare CSV headers
+    const csvHeaders = [
+      'Medicine Name',
+      'Generic Name',
+      'Category',
+      'Manufacturer',
+      'Strip Stock',
+      'Individual Stock',
+      'Strip Price',
+      'Individual Price',
+      'Strip Min Stock',
+      'Individual Min Stock',
+      'Units Per Strip',
+      'Status',
+      'Batch Numbers',
+      'Expiry Dates'
+    ];
+
+    // Prepare CSV rows
+    const csvRows = medicines.map(medicine => {
+      // Get stock information (support both new and legacy formats)
+      const stripStock = medicine.stripInfo?.stock || medicine.inventory?.stripQuantity || 0;
+      const individualStock = medicine.individualInfo?.stock || medicine.inventory?.individualQuantity || 0;
+      const stripPrice = medicine.stripInfo?.sellingPrice || medicine.pricing?.stripSellingPrice || 0;
+      const individualPrice = medicine.individualInfo?.sellingPrice || medicine.pricing?.individualSellingPrice || 0;
+      const stripMinStock = medicine.stripInfo?.minimumStock || medicine.inventory?.stripMinimumStock || 0;
+      const individualMinStock = medicine.individualInfo?.minimumStock || medicine.inventory?.individualMinimumStock || 0;
+      const unitsPerStrip = medicine.unitTypes?.unitsPerStrip || 10;
+
+      // Get batch information
+      const batchNumbers = medicine.batches?.map(batch => batch.batchNumber).join('; ') || '';
+      const expiryDates = medicine.batches?.map(batch =>
+        new Date(batch.expiryDate).toLocaleDateString()
+      ).join('; ') || '';
+
+      // Determine status
+      let status = 'In Stock';
+      if (stripStock === 0 && individualStock === 0) {
+        status = 'Out of Stock';
+      } else if (stripStock <= stripMinStock || individualStock <= individualMinStock) {
+        status = 'Low Stock';
+      }
+
+      return [
+        medicine.name || '',
+        medicine.genericName || '',
+        medicine.category?.name || '',
+        medicine.manufacturer?.name || '',
+        stripStock,
+        individualStock,
+        stripPrice.toFixed(2),
+        individualPrice.toFixed(2),
+        stripMinStock,
+        individualMinStock,
+        unitsPerStrip,
+        status,
+        batchNumbers,
+        expiryDates
+      ];
+    });
+
+    // Create CSV content
+    const csvContent = [
+      csvHeaders.join(','),
+      ...csvRows.map(row => row.map(field => `"${field}"`).join(','))
+    ].join('\n');
+
+    // Set response headers for CSV download
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="inventory-${store.name}-${new Date().toISOString().split('T')[0]}.csv"`);
+
+    // Send CSV content
+    res.send(csvContent);
+
+  } catch (error) {
+    console.error('Export inventory error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while exporting inventory'
     });
   }
 };
@@ -1146,47 +1320,126 @@ const createSale = async (req, res) => {
       selectedTax: appliedTaxType
     });
 
-    // Update inventory with auto-conversion logic
+    // Update inventory with batch-aware logic
+    const batchDeductions = [];
+
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       const medicine = await Medicine.findById(item.medicine);
       const unitsPerStrip = medicine.unitTypes?.unitsPerStrip || 10;
 
-      if (item.unitType === 'strip') {
-        // Simple strip deduction
-        medicine.stripInfo.stock -= item.quantity;
-        medicine.inventory.stripQuantity -= item.quantity;
-      } else {
-        // Individual units - handle auto-conversion
-        const currentIndividualStock = medicine.individualInfo?.stock || medicine.inventory?.individualQuantity || 0;
-        const currentStripStock = medicine.stripInfo?.stock || medicine.inventory?.stripQuantity || 0;
+      try {
+        // Select batches using FEFO strategy
+        const batchSelection = await BatchService.selectBatchesForSale(
+          item.medicine,
+          item.quantity,
+          item.unitType,
+          'FEFO', // First Expiry First Out
+          store._id
+        );
 
-        if (currentIndividualStock >= item.quantity) {
-          // Sufficient individual stock - deduct directly
+        if (!batchSelection.canFulfill) {
+          // Fallback to traditional inventory if batches can't fulfill
+          console.warn(`Batch system cannot fulfill ${item.quantity} ${item.unitType} of medicine ${medicine.name}. Using traditional inventory.`);
+
+          if (item.unitType === 'strip') {
+            // Simple strip deduction
+            medicine.stripInfo.stock -= item.quantity;
+            medicine.inventory.stripQuantity -= item.quantity;
+          } else {
+            // Individual units - handle auto-conversion
+            const currentIndividualStock = medicine.individualInfo?.stock || medicine.inventory?.individualQuantity || 0;
+            const currentStripStock = medicine.stripInfo?.stock || medicine.inventory?.stripQuantity || 0;
+
+            if (currentIndividualStock >= item.quantity) {
+              // Sufficient individual stock - deduct directly
+              medicine.individualInfo.stock -= item.quantity;
+              medicine.inventory.individualQuantity -= item.quantity;
+            } else {
+              // Need to convert strips to individual units
+              const remainingNeeded = item.quantity - currentIndividualStock;
+              const stripsToConvert = Math.ceil(remainingNeeded / unitsPerStrip);
+              const individualUnitsFromStrips = stripsToConvert * unitsPerStrip;
+
+              // Deduct all current individual stock
+              medicine.individualInfo.stock = 0;
+              medicine.inventory.individualQuantity = 0;
+
+              // Convert strips to individual units
+              medicine.stripInfo.stock -= stripsToConvert;
+              medicine.inventory.stripQuantity -= stripsToConvert;
+
+              // Add converted individual units, then deduct what's needed
+              const newIndividualStock = individualUnitsFromStrips - remainingNeeded;
+              medicine.individualInfo.stock = newIndividualStock;
+              medicine.inventory.individualQuantity = newIndividualStock;
+            }
+          }
+
+          await medicine.save();
+        } else {
+          // Deduct from selected batches
+          const deductionResult = await BatchService.deductFromBatches(
+            batchSelection.selectedBatches,
+            item.unitType,
+            req.user.id
+          );
+
+          // Store batch information for the sale item
+          processedItems[i].batchInfo = batchSelection.selectedBatches.map(batch => ({
+            batchNumber: batch.batchNumber,
+            expiryDate: batch.expiryDate,
+            manufacturingDate: batch.manufacturingDate,
+            quantityUsed: batch.quantitySelected
+          }));
+
+          // Update medicine stock to match batch totals
+          await BatchService.synchronizeMedicineStock(item.medicine, store._id);
+
+          batchDeductions.push({
+            medicineId: item.medicine,
+            medicineName: medicine.name,
+            unitType: item.unitType,
+            quantity: item.quantity,
+            batchesUsed: deductionResult
+          });
+        }
+
+        // Log inventory change for audit trail
+        await logInventoryChange({
+          medicine: item.medicine,
+          store: store._id,
+          changeType: 'sale',
+          unitType: item.unitType,
+          quantityChanged: -item.quantity, // Negative because it's a deduction
+          previousStock: item.unitType === 'strip' ?
+            (medicine.stripInfo?.stock || 0) + item.quantity :
+            (medicine.individualInfo?.stock || 0) + item.quantity,
+          newStock: item.unitType === 'strip' ?
+            (medicine.stripInfo?.stock || 0) :
+            (medicine.individualInfo?.stock || 0),
+          reference: {
+            type: 'Sale',
+            id: sale._id,
+            invoiceNumber: sale.invoiceNumber
+          },
+          performedBy: req.user.id,
+          notes: `Sale completed - ${batchDeductions.length > 0 ? 'batch-aware' : 'traditional'} inventory deduction`,
+          batchInfo: processedItems[i].batchInfo || null
+        });
+
+      } catch (error) {
+        console.error(`Error processing inventory for medicine ${medicine.name}:`, error);
+        // Fallback to traditional inventory update
+        if (item.unitType === 'strip') {
+          medicine.stripInfo.stock -= item.quantity;
+          medicine.inventory.stripQuantity -= item.quantity;
+        } else {
           medicine.individualInfo.stock -= item.quantity;
           medicine.inventory.individualQuantity -= item.quantity;
-        } else {
-          // Need to convert strips to individual units
-          const remainingNeeded = item.quantity - currentIndividualStock;
-          const stripsToConvert = Math.ceil(remainingNeeded / unitsPerStrip);
-          const individualUnitsFromStrips = stripsToConvert * unitsPerStrip;
-
-          // Deduct all current individual stock
-          medicine.individualInfo.stock = 0;
-          medicine.inventory.individualQuantity = 0;
-
-          // Convert strips to individual units
-          medicine.stripInfo.stock -= stripsToConvert;
-          medicine.inventory.stripQuantity -= stripsToConvert;
-
-          // Add converted individual units, then deduct what's needed
-          const newIndividualStock = individualUnitsFromStrips - remainingNeeded;
-          medicine.individualInfo.stock = newIndividualStock;
-          medicine.inventory.individualQuantity = newIndividualStock;
         }
+        await medicine.save();
       }
-
-      await medicine.save();
     }
 
     // Handle credit transaction if payment method is credit
@@ -2669,10 +2922,283 @@ const getMedicinePurchaseHistory = async (req, res) => {
   }
 };
 
+// @desc    Recalculate customer metrics from actual sales data
+// @route   POST /api/store-manager/customers/:id/recalculate-metrics
+// @access  Private (Store Manager only)
+const recalculateCustomerMetrics = async (req, res) => {
+  const store = req.store;
+  const customerId = req.params.id;
+
+  try {
+    // Find the customer
+    const customer = await Customer.findOne({
+      _id: customerId,
+      store: store._id
+    });
+
+    if (!customer) {
+      return res.status(404).json({
+        success: false,
+        message: 'Customer not found'
+      });
+    }
+
+    // Get all sales for this customer from the Sales collection
+    const salesStats = await Sale.aggregate([
+      {
+        $match: {
+          store: store._id,
+          customer: new mongoose.Types.ObjectId(customerId),
+          status: { $ne: 'cancelled' } // Exclude cancelled sales
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalPurchases: { $sum: 1 },
+          totalSpent: { $sum: '$totalAmount' },
+          lastPurchaseDate: { $max: '$createdAt' }
+        }
+      }
+    ]);
+
+    // Get credit balance from credit transactions
+    const creditStats = await Sale.aggregate([
+      {
+        $match: {
+          store: store._id,
+          customer: new mongoose.Types.ObjectId(customerId),
+          paymentMethod: 'credit',
+          status: { $ne: 'cancelled' }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalCreditSales: { $sum: '$totalAmount' }
+        }
+      }
+    ]);
+
+    // Get credit payments from credit transactions
+    const CreditTransaction = require('../models/CreditTransaction');
+    const creditPayments = await CreditTransaction.aggregate([
+      {
+        $match: {
+          store: store._id,
+          customer: new mongoose.Types.ObjectId(customerId),
+          transactionType: 'credit_payment'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalPayments: { $sum: '$amount' }
+        }
+      }
+    ]);
+
+    // Calculate correct values
+    const totalPurchases = salesStats[0]?.totalPurchases || 0;
+    const totalSpent = salesStats[0]?.totalSpent || 0;
+    const lastPurchaseDate = salesStats[0]?.lastPurchaseDate || null;
+    const totalCreditSales = creditStats[0]?.totalCreditSales || 0;
+    const totalCreditPayments = creditPayments[0]?.totalPayments || 0;
+    const creditBalance = Math.max(0, totalCreditSales - totalCreditPayments);
+
+    // Update customer with correct values
+    customer.totalPurchases = totalPurchases;
+    customer.totalSpent = totalSpent;
+    customer.lastPurchaseDate = lastPurchaseDate;
+    customer.creditBalance = creditBalance;
+
+    // Recalculate average order value
+    if (totalPurchases > 0) {
+      customer.averageOrderValue = totalSpent / totalPurchases;
+    } else {
+      customer.averageOrderValue = 0;
+    }
+
+    // Update credit status based on balance and limit
+    if (customer.creditLimit === 0) {
+      customer.creditStatus = customer.creditBalance > 0 ? 'warning' : 'good';
+    } else {
+      const utilization = customer.creditBalance / customer.creditLimit;
+      if (customer.creditBalance > customer.creditLimit) {
+        customer.creditStatus = 'blocked';
+      } else if (utilization >= 0.9) {
+        customer.creditStatus = 'warning';
+      } else {
+        customer.creditStatus = 'good';
+      }
+    }
+
+    await customer.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Customer metrics recalculated successfully',
+      data: {
+        customerId: customer._id,
+        name: customer.name,
+        totalPurchases: customer.totalPurchases,
+        totalSpent: customer.totalSpent,
+        creditBalance: customer.creditBalance,
+        averageOrderValue: customer.averageOrderValue,
+        creditStatus: customer.creditStatus
+      }
+    });
+
+  } catch (error) {
+    console.error('Recalculate customer metrics error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while recalculating customer metrics'
+    });
+  }
+};
+
+// @desc    Recalculate all customer metrics for the store
+// @route   POST /api/store-manager/customers/recalculate-all-metrics
+// @access  Private (Store Manager only)
+const recalculateAllCustomerMetrics = async (req, res) => {
+  const store = req.store;
+
+  try {
+    // Get all customers for this store
+    const customers = await Customer.find({ store: store._id });
+
+    let updatedCount = 0;
+    let errors = [];
+
+    for (const customer of customers) {
+      try {
+        // Get all sales for this customer
+        const salesStats = await Sale.aggregate([
+          {
+            $match: {
+              store: store._id,
+              customer: customer._id,
+              status: { $ne: 'cancelled' }
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              totalPurchases: { $sum: 1 },
+              totalSpent: { $sum: '$totalAmount' },
+              lastPurchaseDate: { $max: '$createdAt' }
+            }
+          }
+        ]);
+
+        // Get credit balance from credit transactions
+        const creditStats = await Sale.aggregate([
+          {
+            $match: {
+              store: store._id,
+              customer: customer._id,
+              paymentMethod: 'credit',
+              status: { $ne: 'cancelled' }
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              totalCreditSales: { $sum: '$totalAmount' }
+            }
+          }
+        ]);
+
+        // Get credit payments
+        const CreditTransaction = require('../models/CreditTransaction');
+        const creditPayments = await CreditTransaction.aggregate([
+          {
+            $match: {
+              store: store._id,
+              customer: customer._id,
+              transactionType: 'credit_payment'
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              totalPayments: { $sum: '$amount' }
+            }
+          }
+        ]);
+
+        // Calculate correct values
+        const totalPurchases = salesStats[0]?.totalPurchases || 0;
+        const totalSpent = salesStats[0]?.totalSpent || 0;
+        const lastPurchaseDate = salesStats[0]?.lastPurchaseDate || null;
+        const totalCreditSales = creditStats[0]?.totalCreditSales || 0;
+        const totalCreditPayments = creditPayments[0]?.totalPayments || 0;
+        const creditBalance = Math.max(0, totalCreditSales - totalCreditPayments);
+
+        // Update customer
+        customer.totalPurchases = totalPurchases;
+        customer.totalSpent = totalSpent;
+        customer.lastPurchaseDate = lastPurchaseDate;
+        customer.creditBalance = creditBalance;
+
+        if (totalPurchases > 0) {
+          customer.averageOrderValue = totalSpent / totalPurchases;
+        } else {
+          customer.averageOrderValue = 0;
+        }
+
+        // Update credit status
+        if (customer.creditLimit === 0) {
+          customer.creditStatus = customer.creditBalance > 0 ? 'warning' : 'good';
+        } else {
+          const utilization = customer.creditBalance / customer.creditLimit;
+          if (customer.creditBalance > customer.creditLimit) {
+            customer.creditStatus = 'blocked';
+          } else if (utilization >= 0.9) {
+            customer.creditStatus = 'warning';
+          } else {
+            customer.creditStatus = 'good';
+          }
+        }
+
+        await customer.save();
+        updatedCount++;
+
+      } catch (customerError) {
+        errors.push({
+          customerId: customer._id,
+          name: customer.name,
+          error: customerError.message
+        });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Customer metrics recalculated for ${updatedCount} customers`,
+      data: {
+        totalCustomers: customers.length,
+        updatedCount,
+        errorCount: errors.length,
+        errors: errors.slice(0, 10) // Return first 10 errors only
+      }
+    });
+
+  } catch (error) {
+    console.error('Recalculate all customer metrics error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while recalculating customer metrics'
+    });
+  }
+};
+
 module.exports = {
   getDashboardData,
   getStoreAnalytics,
   getInventory,
+  exportInventory,
   getSales,
   createSale,
   getCustomers,
@@ -2688,5 +3214,7 @@ module.exports = {
   deleteMedicine,
   getMedicineDetails,
   getMedicineSalesHistory,
-  getMedicinePurchaseHistory
+  getMedicinePurchaseHistory,
+  recalculateCustomerMetrics,
+  recalculateAllCustomerMetrics
 };

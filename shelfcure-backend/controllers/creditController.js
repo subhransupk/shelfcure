@@ -103,6 +103,9 @@ const recordCreditPayment = async (req, res) => {
     }
 
     // Create credit payment transaction
+    const mongoose = require('mongoose');
+    const paymentId = new mongoose.Types.ObjectId();
+
     const transaction = await CreditTransaction.createTransaction({
       store: store._id,
       customer: customerId,
@@ -111,7 +114,7 @@ const recordCreditPayment = async (req, res) => {
       balanceChange: -amount, // Negative because it reduces credit balance
       reference: {
         type: 'Payment',
-        id: new Date().getTime(), // Use timestamp as payment reference
+        id: paymentId,
         number: transactionId || `PAY-${Date.now()}`
       },
       paymentDetails: {
@@ -201,6 +204,9 @@ const makeCreditAdjustment = async (req, res) => {
     }
 
     // Create credit adjustment transaction
+    const mongoose = require('mongoose');
+    const adjustmentId = new mongoose.Types.ObjectId();
+
     const transaction = await CreditTransaction.createTransaction({
       store: store._id,
       customer: customerId,
@@ -209,7 +215,7 @@ const makeCreditAdjustment = async (req, res) => {
       balanceChange: balanceChange,
       reference: {
         type: 'Adjustment',
-        id: new Date().getTime(),
+        id: adjustmentId,
         number: `ADJ-${Date.now()}`
       },
       adjustmentDetails: {

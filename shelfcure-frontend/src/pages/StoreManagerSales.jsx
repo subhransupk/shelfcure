@@ -18,11 +18,13 @@ import {
   Calendar,
   ChevronLeft,
   ChevronRight,
-  RotateCcw
+  RotateCcw,
+  Printer
 } from 'lucide-react';
 import StoreManagerLayout from '../components/store-manager/StoreManagerLayout';
 import AddMedicineModal from '../components/store-manager/AddMedicineModal';
 import { createPhoneInputHandler } from '../utils/inputValidation';
+import { getMedicineLocations, formatLocationString } from '../services/rackService';
 import API_BASE_URL from '../config/api';
 
 const StoreManagerSales = () => {
@@ -1048,6 +1050,233 @@ Get well soon! 🌟`;
       totalTaxAmount,
       taxBreakdown,
       total
+    };
+  };
+
+  // Print Pick List functionality
+  const printPickList = async () => {
+    if (cart.length === 0) {
+      alert('Cart is empty. Add items to cart before printing pick list.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      // Fetch location data for all medicines in cart
+      const cartWithLocations = await Promise.all(
+        cart.map(async (item) => {
+          try {
+            const response = await getMedicineLocations(item.medicine._id);
+            const locations = response.data?.locations || [];
+
+            // Get primary location (locations are already filtered to be active)
+            const primaryLocation = locations.find(loc =>
+              loc.priority === 'primary'
+            ) || locations[0] || null; // Use first location if no primary found
+
+            return {
+              ...item,
+              locations: locations,
+              primaryLocation: primaryLocation
+            };
+          } catch (error) {
+            console.error(`❌ Error fetching locations for ${item.medicine.name}:`, error);
+            return {
+              ...item,
+              locations: [],
+              primaryLocation: null
+            };
+          }
+        })
+      );
+
+      // Generate and print the pick list
+      generatePickListPrint(cartWithLocations);
+
+    } catch (error) {
+      console.error('Error generating pick list:', error);
+      alert('Failed to generate pick list. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const generatePickListPrint = (cartWithLocations) => {
+    const printWindow = window.open('', '_blank');
+    const currentDate = new Date().toLocaleString();
+    const storeName = localStorage.getItem('storeName') || 'Store';
+
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Pick List - ${storeName}</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            color: #333;
+          }
+          .header {
+            text-align: center;
+            border-bottom: 2px solid #22c55e;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+          }
+          .header h1 {
+            color: #22c55e;
+            margin: 0;
+            font-size: 24px;
+          }
+          .header p {
+            margin: 5px 0;
+            color: #666;
+          }
+          .pick-item {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            background: #f9f9f9;
+          }
+          .medicine-name {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 8px;
+          }
+          .medicine-details {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 10px;
+          }
+          .location-info {
+            background: #e8f5e8;
+            border: 1px solid #22c55e;
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 8px;
+          }
+          .location-label {
+            font-weight: bold;
+            color: #22c55e;
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+          }
+          .location-text {
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+          }
+          .quantity-info {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 6px;
+            padding: 8px;
+            font-weight: bold;
+            color: #856404;
+          }
+          .no-location {
+            background: #f8d7da;
+            border: 1px solid #dc3545;
+            border-radius: 6px;
+            padding: 10px;
+            color: #721c24;
+            font-weight: bold;
+          }
+          .footer {
+            margin-top: 30px;
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+            border-top: 1px solid #ddd;
+            padding-top: 15px;
+          }
+          .checkbox {
+            float: right;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #22c55e;
+            margin-top: 5px;
+          }
+          @media print {
+            body { margin: 0; }
+            .pick-item { break-inside: avoid; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>📋 PICK LIST</h1>
+          <p><strong>${storeName}</strong></p>
+          <p>Generated: ${currentDate}</p>
+          <p>Total Items: ${cartWithLocations.length}</p>
+        </div>
+
+        ${cartWithLocations.map((item, index) => {
+          // Determine the best location to show
+          const locationToShow = item.primaryLocation || (item.locations && item.locations[0]) || null;
+
+          return `
+          <div class="pick-item">
+            <div class="checkbox"></div>
+            <div class="medicine-name">${index + 1}. ${item.medicine.name}</div>
+            <div class="medicine-details">
+              ${item.medicine.genericName ? `Generic: ${item.medicine.genericName}<br>` : ''}
+              ${item.medicine.manufacturer ? `Manufacturer: ${item.medicine.manufacturer}<br>` : ''}
+              ${item.medicine.batchNumber ? `Batch: ${item.medicine.batchNumber}<br>` : ''}
+            </div>
+
+            ${locationToShow ? `
+              <div class="location-info">
+                <div class="location-label">📍 Storage Location:</div>
+                <div class="location-text">${locationToShow.locationString || formatLocationString(
+                  locationToShow.rack?.rackNumber || 'Unknown',
+                  locationToShow.shelf || 'Unknown',
+                  locationToShow.position || 'Unknown'
+                )}</div>
+                ${locationToShow.notes ? `<div style="font-size: 12px; color: #666; margin-top: 5px;">Note: ${locationToShow.notes}</div>` : ''}
+                ${locationToShow.priority ? `<div style="font-size: 10px; color: #999;">Priority: ${locationToShow.priority}</div>` : ''}
+              </div>
+            ` : `
+              <div class="no-location">
+                ⚠️ No storage location assigned
+              </div>
+            `}
+
+            <div class="quantity-info">
+              Quantity to Pick: ${item.quantity} ${item.unitType}${item.quantity > 1 ? 's' : ''}
+            </div>
+
+            ${item.locations && item.locations.length > 1 ? `
+              <div style="margin-top: 10px; font-size: 12px; color: #666;">
+                <strong>Alternative Locations:</strong><br>
+                ${item.locations.filter(loc => loc !== locationToShow).slice(0, 3).map(loc =>
+                  loc.locationString || formatLocationString(loc.rack?.rackNumber || 'Unknown', loc.shelf || 'Unknown', loc.position || 'Unknown')
+                ).join(', ')}
+                ${item.locations.length > 4 ? ` (+${item.locations.length - 4} more)` : ''}
+              </div>
+            ` : ''}
+          </div>`;
+        }).join('')}
+
+        <div class="footer">
+          <p>Pick List generated by ShelfCure Store Management System</p>
+          <p>Please check off each item as you collect it</p>
+        </div>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+
+    // Wait for content to load then print
+    printWindow.onload = () => {
+      printWindow.print();
+      printWindow.close();
     };
   };
 
@@ -2209,6 +2438,24 @@ Get well soon! 🌟`;
                       <span>₹{totals.total.toFixed(2)}</span>
                     </div>
                   </div>
+
+                  {/* Print Pick List Button */}
+                  {cart.length > 0 && (
+                    <button
+                      onClick={printPickList}
+                      disabled={loading}
+                      className="w-full mt-4 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                    >
+                      {loading ? (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      ) : (
+                        <>
+                          <Printer className="h-4 w-4" />
+                          <span>Print Pick List</span>
+                        </>
+                      )}
+                    </button>
+                  )}
 
                   {/* Checkout Button */}
                   <button

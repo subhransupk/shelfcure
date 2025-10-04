@@ -17,14 +17,39 @@ import {
   Clock,
   X
 } from 'lucide-react';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  BarElement
+} from 'chart.js';
+import { Line, Bar } from 'react-chartjs-2';
 import StoreManagerLayout from '../components/store-manager/StoreManagerLayout';
 import CreateReturnForm from '../components/returns/CreateReturnForm';
+
+// Register Chart.js components
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend
+);
 
 const StoreManagerReturns = () => {
   const location = useLocation();
   const [activeTab, setActiveTab] = useState('list');
   const [returns, setReturns] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [filters, setFilters] = useState({
@@ -45,6 +70,9 @@ const StoreManagerReturns = () => {
     totalReturnAmount: 0,
     pendingReturns: 0,
     completedReturns: 0,
+    rejectedReturns: 0,
+    todayReturns: 0,
+    todayReturnAmount: 0,
     returnRate: 0,
     returnReasons: [],
     topReturnedMedicines: [],
@@ -99,7 +127,9 @@ const StoreManagerReturns = () => {
 
   // Fetch analytics data
   const fetchAnalytics = async () => {
+    setAnalyticsLoading(true);
     try {
+      console.log('🔄 Fetching return analytics...');
       const response = await fetch('/api/store-manager/returns/analytics', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -108,23 +138,34 @@ const StoreManagerReturns = () => {
 
       if (response.ok) {
         const data = await response.json();
+        console.log('📊 Analytics response:', data);
         if (data.success && data.data) {
           setAnalytics({
-            totalReturns: data.data.summary.totalReturns,
-            totalReturnAmount: data.data.summary.totalReturnAmount,
-            returnRate: data.data.summary.returnRate,
-            pendingReturns: returns.filter(ret => ret.status === 'pending').length,
-            completedReturns: returns.filter(ret => ret.status === 'completed').length,
+            totalReturns: data.data.summary.totalReturns || 0,
+            totalReturnAmount: data.data.summary.totalReturnAmount || 0,
+            returnRate: data.data.summary.returnRate || 0,
+            pendingReturns: data.data.summary.pendingReturns || 0,
+            completedReturns: data.data.summary.completedReturns || 0,
+            rejectedReturns: data.data.summary.rejectedReturns || 0,
+            todayReturns: data.data.summary.todayReturns || 0,
+            todayReturnAmount: data.data.summary.todayReturnAmount || 0,
             returnReasons: data.data.returnReasons || [],
             topReturnedMedicines: data.data.topReturnedMedicines || [],
             monthlyTrends: data.data.monthlyTrends || [],
             inventoryImpact: data.data.inventoryImpact || [],
             refundMethods: data.data.refundMethods || []
           });
+          console.log('✅ Analytics updated successfully');
         }
+      } else {
+        console.error('❌ Failed to fetch analytics:', response.status);
+        setError('Failed to fetch analytics data');
       }
     } catch (err) {
-      console.error('Failed to fetch analytics:', err);
+      console.error('❌ Analytics fetch error:', err);
+      setError('Error loading analytics data');
+    } finally {
+      setAnalyticsLoading(false);
     }
   };
 
@@ -132,6 +173,13 @@ const StoreManagerReturns = () => {
     fetchReturns();
     fetchAnalytics();
   }, [filters, searchTerm]);
+
+  // Fetch analytics when switching to analytics tab
+  useEffect(() => {
+    if (activeTab === 'analytics') {
+      fetchAnalytics();
+    }
+  }, [activeTab]);
 
   // Handle navigation state (pre-selected sale)
   useEffect(() => {
@@ -331,6 +379,10 @@ const StoreManagerReturns = () => {
         return <CheckCircle className="h-4 w-4 text-green-500" />;
       case 'pending':
         return <Clock className="h-4 w-4 text-yellow-500" />;
+      case 'approved':
+        return <CheckCircle className="h-4 w-4 text-blue-500" />;
+      case 'processed':
+        return <RefreshCw className="h-4 w-4 text-purple-500" />;
       case 'rejected':
         return <X className="h-4 w-4 text-red-500" />;
       default:
@@ -346,6 +398,8 @@ const StoreManagerReturns = () => {
         return 'bg-yellow-100 text-yellow-800';
       case 'approved':
         return 'bg-blue-100 text-blue-800';
+      case 'processed':
+        return 'bg-purple-100 text-purple-800';
       case 'rejected':
         return 'bg-red-100 text-red-800';
       case 'cancelled':
@@ -373,7 +427,7 @@ const StoreManagerReturns = () => {
   };
 
   const renderAnalyticsCards = () => (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center">
           <div className="flex-shrink-0">
@@ -382,6 +436,7 @@ const StoreManagerReturns = () => {
           <div className="ml-4">
             <p className="text-sm font-medium text-gray-500">Total Returns</p>
             <p className="text-2xl font-semibold text-gray-900">{analytics.totalReturns}</p>
+            <p className="text-xs text-gray-400 mt-1">All time</p>
           </div>
         </div>
       </div>
@@ -394,6 +449,7 @@ const StoreManagerReturns = () => {
           <div className="ml-4">
             <p className="text-sm font-medium text-gray-500">Return Amount</p>
             <p className="text-2xl font-semibold text-gray-900">{formatCurrency(analytics.totalReturnAmount)}</p>
+            <p className="text-xs text-gray-400 mt-1">Total refunded</p>
           </div>
         </div>
       </div>
@@ -406,6 +462,7 @@ const StoreManagerReturns = () => {
           <div className="ml-4">
             <p className="text-sm font-medium text-gray-500">Pending Returns</p>
             <p className="text-2xl font-semibold text-gray-900">{analytics.pendingReturns}</p>
+            <p className="text-xs text-gray-400 mt-1">Awaiting action</p>
           </div>
         </div>
       </div>
@@ -418,6 +475,20 @@ const StoreManagerReturns = () => {
           <div className="ml-4">
             <p className="text-sm font-medium text-gray-500">Completed Returns</p>
             <p className="text-2xl font-semibold text-gray-900">{analytics.completedReturns}</p>
+            <p className="text-xs text-gray-400 mt-1">Successfully processed</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center">
+          <div className="flex-shrink-0">
+            <X className="h-8 w-8 text-red-600" />
+          </div>
+          <div className="ml-4">
+            <p className="text-sm font-medium text-gray-500">Rejected Returns</p>
+            <p className="text-2xl font-semibold text-gray-900">{analytics.rejectedReturns}</p>
+            <p className="text-xs text-gray-400 mt-1">Declined/Cancelled</p>
           </div>
         </div>
       </div>
@@ -791,6 +862,20 @@ const StoreManagerReturns = () => {
                                   <RefreshCw className="h-4 w-4" />
                                 </button>
                               )}
+                              {returnRecord.status === 'processed' && (
+                                <button
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    console.log('✅ Complete button clicked for return:', returnRecord._id);
+                                    handleStatusChange(returnRecord._id, 'completed');
+                                  }}
+                                  className="text-green-600 hover:text-green-900 p-1 rounded hover:bg-green-50"
+                                  title="Complete Return"
+                                >
+                                  <CheckCircle className="h-4 w-4" />
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -885,8 +970,15 @@ const StoreManagerReturns = () => {
           <div className="space-y-6">
             {renderAnalyticsCards()}
 
-            {/* Analytics Charts and Tables */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {analyticsLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <RefreshCw className="h-8 w-8 text-blue-600 animate-spin mr-3" />
+                <span className="text-lg text-gray-600">Loading analytics data...</span>
+              </div>
+            ) : (
+              <>
+                {/* Analytics Charts and Tables */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Return Reasons */}
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-medium text-gray-900 mb-4">Return Reasons</h3>
@@ -1020,6 +1112,106 @@ const StoreManagerReturns = () => {
                 </div>
               </div>
             </div>
+
+            {/* Monthly Trends Chart */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+                <TrendingUp className="h-5 w-5 mr-2 text-blue-600" />
+                Monthly Return Trends
+              </h3>
+              {analytics.monthlyTrends && analytics.monthlyTrends.length > 0 ? (
+                <div className="h-80">
+                  <Line
+                    data={{
+                      labels: analytics.monthlyTrends.map(trend => {
+                        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                        return `${monthNames[trend._id.month - 1]} ${trend._id.year}`;
+                      }),
+                      datasets: [
+                        {
+                          label: 'Return Count',
+                          data: analytics.monthlyTrends.map(trend => trend.count),
+                          borderColor: 'rgb(59, 130, 246)',
+                          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                          tension: 0.4,
+                          yAxisID: 'y'
+                        },
+                        {
+                          label: 'Return Amount (₹)',
+                          data: analytics.monthlyTrends.map(trend => trend.totalAmount),
+                          borderColor: 'rgb(16, 185, 129)',
+                          backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                          tension: 0.4,
+                          yAxisID: 'y1'
+                        }
+                      ]
+                    }}
+                    options={{
+                      responsive: true,
+                      maintainAspectRatio: false,
+                      interaction: {
+                        mode: 'index',
+                        intersect: false,
+                      },
+                      plugins: {
+                        legend: {
+                          position: 'top',
+                        },
+                        tooltip: {
+                          callbacks: {
+                            label: function(context) {
+                              if (context.datasetIndex === 1) {
+                                return `${context.dataset.label}: ₹${context.parsed.y.toLocaleString()}`;
+                              }
+                              return `${context.dataset.label}: ${context.parsed.y}`;
+                            }
+                          }
+                        }
+                      },
+                      scales: {
+                        x: {
+                          display: true,
+                          title: {
+                            display: true,
+                            text: 'Month'
+                          }
+                        },
+                        y: {
+                          type: 'linear',
+                          display: true,
+                          position: 'left',
+                          title: {
+                            display: true,
+                            text: 'Return Count'
+                          }
+                        },
+                        y1: {
+                          type: 'linear',
+                          display: true,
+                          position: 'right',
+                          title: {
+                            display: true,
+                            text: 'Return Amount (₹)'
+                          },
+                          grid: {
+                            drawOnChartArea: false,
+                          },
+                        }
+                      }
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <TrendingUp className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500">No monthly trends data available</p>
+                  <p className="text-sm text-gray-400 mt-1">Create some returns to see trends over time</p>
+                </div>
+              )}
+            </div>
+              </>
+            )}
           </div>
         )}
 
