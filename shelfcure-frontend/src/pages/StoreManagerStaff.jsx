@@ -25,12 +25,12 @@ import {
 } from 'lucide-react';
 import StoreManagerLayout from '../components/store-manager/StoreManagerLayout';
 import StoreManagerAttendanceHistory from './StoreManagerAttendanceHistory';
+import useAutoMessage from '../hooks/useAutoMessage';
 
 const StoreManagerStaff = () => {
   const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const { error, success, setError, setSuccess, clearError, clearSuccess } = useAutoMessage(4000);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -184,7 +184,6 @@ const StoreManagerStaff = () => {
       setTotalPages(data.pagination?.pages || 1);
     } catch (error) {
       console.error('Staff fetch error:', error);
-      setSuccess(''); // Clear any success messages
       setError('Failed to load staff');
     } finally {
       setLoading(false);
@@ -621,19 +620,12 @@ const StoreManagerStaff = () => {
         setShowTimeModal(false);
         setTimeModalData({ staffId: null, type: null, currentTime: '' });
         fetchStaffWithAttendance(); // Refresh the attendance data
-        setError(''); // Clear any previous errors
         setSuccess(`${type === 'checkIn' ? 'Check-in' : 'Check-out'} time set successfully`);
-
-        // Clear success message after 3 seconds
-        setTimeout(() => {
-          setSuccess('');
-        }, 3000);
       } else {
         throw new Error('Failed to set time');
       }
     } catch (error) {
       console.error('Manual time entry error:', error);
-      setSuccess(''); // Clear any success messages
       setError('Failed to set time. Please try again.');
     }
   };
@@ -692,8 +684,7 @@ const StoreManagerStaff = () => {
         setShowDeleteModal(false);
         setStaffToDelete(null);
         fetchStaff(); // Refresh the staff list
-        setError(''); // Clear any previous errors
-        // Show success message (you can add a success state if needed)
+        setSuccess('Staff member deleted successfully');
       } else {
         const data = await response.json();
         setError(data.message || 'Failed to delete staff member');
@@ -738,11 +729,7 @@ const StoreManagerStaff = () => {
           fetchStaffStats()
         ]);
 
-        // Clear any previous errors
-        setError('');
-
-        // Optional: Show success message (you can add a success state if needed)
-        console.log(`Successfully marked ${member.name} as ${status}`);
+        setSuccess(`Successfully marked ${member.name} as ${status}`);
       } else {
         const errorData = await response.json();
         setError(errorData.message || `Failed to mark ${member.name} as ${status}`);
@@ -804,7 +791,7 @@ const StoreManagerStaff = () => {
           certifications: []
         });
         fetchStaff(); // Refresh the staff list
-        setError(''); // Clear any previous errors
+        setSuccess('Staff member updated successfully');
       } else {
         if (data.errors) {
           setFormErrors(data.errors);
@@ -1814,7 +1801,7 @@ const StoreManagerStaff = () => {
           certifications: []
         });
         setFormErrors({});
-        setError(''); // Clear any previous errors
+        setSuccess('Staff member added successfully');
         setActiveTab('list');
         fetchStaff(); // Refresh staff list
       } else {
@@ -2130,14 +2117,32 @@ const StoreManagerStaff = () => {
           {/* Error Message */}
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-6">
-              <div className="text-red-800">{error}</div>
+              <div className="flex items-center justify-between">
+                <div className="text-red-800">{error}</div>
+                <button
+                  onClick={clearError}
+                  className="text-red-600 hover:text-red-800 ml-4"
+                  aria-label="Dismiss error"
+                >
+                  <XCircle className="h-5 w-5" />
+                </button>
+              </div>
             </div>
           )}
 
           {/* Success Message */}
           {success && (
             <div className="bg-green-50 border border-green-200 rounded-md p-4 mb-6">
-              <div className="text-green-800">{success}</div>
+              <div className="flex items-center justify-between">
+                <div className="text-green-800">{success}</div>
+                <button
+                  onClick={clearSuccess}
+                  className="text-green-600 hover:text-green-800 ml-4"
+                  aria-label="Dismiss success message"
+                >
+                  <XCircle className="h-5 w-5" />
+                </button>
+              </div>
             </div>
           )}
 

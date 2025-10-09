@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Package,
   Plus,
@@ -24,13 +25,17 @@ import {
   Users,
   RefreshCw,
   DollarSign,
-  Clock
+  Clock,
+  History
 } from 'lucide-react';
 import StoreManagerLayout from '../components/store-manager/StoreManagerLayout';
 import AddMedicineRequestForm from '../components/store-manager/AddMedicineRequestForm';
 import { createNumericInputHandler, createPhoneInputHandler, VALIDATION_OPTIONS } from '../utils/inputValidation';
 
 const StoreManagerPurchases = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+
   // Helper function to safely format dates
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
@@ -69,6 +74,8 @@ const StoreManagerPurchases = () => {
   // Medicine Requests State
   const [medicineRequests, setMedicineRequests] = useState([]);
   const [requestsLoading, setRequestsLoading] = useState(false);
+  const [selectedRequests, setSelectedRequests] = useState([]);
+  const [bulkConverting, setBulkConverting] = useState(false);
 
   // Supplier Selection State for WhatsApp
   const [supplierSearch, setSupplierSearch] = useState('');
@@ -90,6 +97,13 @@ const StoreManagerPurchases = () => {
   // Purchase Action Modals
   const [viewModal, setViewModal] = useState({ show: false, purchase: null });
   const [paymentModal, setPaymentModal] = useState({ show: false, purchase: null });
+  const [paymentHistoryModal, setPaymentHistoryModal] = useState({
+    show: false,
+    purchase: null,
+    paymentHistory: [],
+    paymentSummary: null,
+    loading: false
+  });
   const [deliveryModal, setDeliveryModal] = useState({ show: false, deliveries: [] });
   const [statusModal, setStatusModal] = useState({ show: false, purchase: null });
   const [selectedPurchase, setSelectedPurchase] = useState(null);
@@ -195,6 +209,84 @@ const StoreManagerPurchases = () => {
     handleReorderDataFromSales();
   }, []);
 
+  // Handle preselected medicine from navigation state (from low stock page)
+  useEffect(() => {
+    if (location.state?.preselectedMedicine && location.state?.action === 'reorder') {
+      const preselectedMedicine = location.state.preselectedMedicine;
+      console.log('🎯 Handling preselected medicine from reorder:', preselectedMedicine);
+
+      // Switch to the new purchase tab
+      setActiveTab('new');
+
+      // Calculate suggested quantity based on stock levels
+      let suggestedQuantity = 5; // Default fallback
+
+      if (preselectedMedicine.unitTypes?.hasStrips && preselectedMedicine.stripInfo) {
+        const stripStock = preselectedMedicine.stripInfo.stock || 0;
+        const stripReorderLevel = preselectedMedicine.stripInfo.reorderLevel || 10;
+        const stripMinStock = preselectedMedicine.stripInfo.minStock || 5;
+
+        // Calculate suggested quantity: enough to reach 2x reorder level
+        suggestedQuantity = Math.max(
+          (stripReorderLevel * 2) - stripStock,
+          stripMinStock,
+          5 // Minimum of 5
+        );
+      } else if (preselectedMedicine.unitTypes?.hasIndividual && preselectedMedicine.individualInfo) {
+        const individualStock = preselectedMedicine.individualInfo.stock || 0;
+        const individualReorderLevel = preselectedMedicine.individualInfo.reorderLevel || 100;
+        const individualMinStock = preselectedMedicine.individualInfo.minStock || 50;
+
+        // Calculate suggested quantity: enough to reach 2x reorder level
+        suggestedQuantity = Math.max(
+          (individualReorderLevel * 2) - individualStock,
+          individualMinStock,
+          50 // Minimum of 50 for individual units
+        );
+      }
+
+      // Pre-populate the purchase form with the selected medicine
+      setNewPurchase(prev => ({
+        ...prev,
+        supplier: preselectedMedicine.supplier || '',
+        purchaseOrderNumber: `PO-${Date.now()}`,
+        items: [{
+          medicine: preselectedMedicine._id,
+          medicineName: preselectedMedicine.name,
+          manufacturer: preselectedMedicine.manufacturer,
+          genericName: preselectedMedicine.genericName,
+          unitType: preselectedMedicine.unitTypes?.hasStrips ? 'strip' : 'individual',
+          quantity: suggestedQuantity,
+          unitPrice: preselectedMedicine.unitTypes?.hasStrips
+            ? (preselectedMedicine.stripInfo?.purchasePrice || 0)
+            : (preselectedMedicine.individualInfo?.purchasePrice || 0),
+          totalCost: suggestedQuantity * (preselectedMedicine.unitTypes?.hasStrips
+            ? (preselectedMedicine.stripInfo?.purchasePrice || 0)
+            : (preselectedMedicine.individualInfo?.purchasePrice || 0)),
+          discount: 0,
+          discountAmount: 0,
+          isFromReorder: true,
+          reorderSource: 'low_stock_reorder'
+        }]
+      }));
+
+      // Initialize medicine search state for the preselected item
+      setMedicineSearchStates({
+        0: {
+          search: preselectedMedicine.name,
+          results: [preselectedMedicine],
+          showDropdown: false,
+          selectedMedicine: preselectedMedicine
+        }
+      });
+
+      // Clear the navigation state to prevent re-processing
+      navigate(location.pathname, { replace: true, state: {} });
+
+      console.log(`✅ Pre-populated purchase form with ${preselectedMedicine.name}, quantity: ${suggestedQuantity}`);
+    }
+  }, [location.state, navigate, location.pathname]);
+
   // Handle reorder data transferred from sales page
   const handleReorderDataFromSales = () => {
     try {
@@ -225,7 +317,7 @@ const StoreManagerPurchases = () => {
             currentStock: 0, // Customer requested items are out of stock
             minStockLevel: 1,
             maxStockLevel: 10,
-            suggestedQuantity: 5, // Default suggested quantity
+            suggestedQuantity: medicine.requestedQuantity || 5, // Use requested quantity from medicine request
             priority: medicine.priority || 'high', // Use original priority or default to high
             reason: 'Customer Request',
             supplier: null, // Will need to be selected
@@ -448,6 +540,8 @@ const StoreManagerPurchases = () => {
       if (response.ok) {
         const data = await response.json();
         setMedicineRequests(data.data || []);
+        // Clear selected requests when refreshing the list
+        setSelectedRequests([]);
       } else {
         console.error('Failed to fetch medicine requests');
       }
@@ -455,6 +549,114 @@ const StoreManagerPurchases = () => {
       console.error('Error fetching medicine requests:', error);
     } finally {
       setRequestsLoading(false);
+    }
+  };
+
+  // Handle individual request selection
+  const handleRequestSelection = (requestId, isSelected) => {
+    if (isSelected) {
+      setSelectedRequests(prev => [...prev, requestId]);
+    } else {
+      setSelectedRequests(prev => prev.filter(id => id !== requestId));
+    }
+  };
+
+  // Handle select all / deselect all
+  const handleSelectAll = (isSelected) => {
+    if (isSelected) {
+      const pendingRequestIds = medicineRequests
+        .filter(request => request.status === 'pending')
+        .map(request => request._id);
+      setSelectedRequests(pendingRequestIds);
+    } else {
+      setSelectedRequests([]);
+    }
+  };
+
+  // Bulk convert selected requests to purchase orders
+  const handleBulkConvertToPurchase = async () => {
+    if (selectedRequests.length === 0) {
+      alert('Please select at least one medicine request to convert.');
+      return;
+    }
+
+    try {
+      setBulkConverting(true);
+      const token = localStorage.getItem('token');
+      const selectedRequestsData = medicineRequests.filter(request =>
+        selectedRequests.includes(request._id)
+      );
+
+      console.log('🔄 Bulk converting medicine requests:', selectedRequestsData);
+
+      // Update all selected requests to 'ordered' status
+      const updatePromises = selectedRequestsData.map(request =>
+        fetch(`/api/store-manager/medicine-requests/${request._id}`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            medicineName: request.medicineName,
+            manufacturer: request.manufacturer,
+            composition: request.composition,
+            strength: request.strength,
+            packSize: request.packSize,
+            requestedQuantity: request.requestedQuantity,
+            unitType: request.unitType,
+            priority: request.priority,
+            category: request.category,
+            notes: request.notes || '',
+            supplierInfo: request.supplierInfo || {},
+            status: 'ordered'
+          })
+        })
+      );
+
+      const updateResults = await Promise.all(updatePromises);
+
+      // Check if all updates were successful
+      const failedUpdates = updateResults.filter(response => !response.ok);
+      if (failedUpdates.length > 0) {
+        throw new Error(`Failed to update ${failedUpdates.length} medicine request(s)`);
+      }
+
+      // Convert to reorder data
+      const requestData = {
+        medicines: selectedRequestsData.map(request => ({
+          _id: `request_${request._id}`,
+          name: request.medicineName,
+          manufacturer: request.manufacturer,
+          genericName: request.composition,
+          category: request.category,
+          isInInventory: false,
+          isCustomerRequested: true,
+          requestedQuantity: request.requestedQuantity,
+          unitType: request.unitType,
+          supplierInfo: request.supplierInfo,
+          notes: request.notes,
+          priority: request.priority
+        })),
+        source: 'medicine_request_bulk'
+      };
+
+      localStorage.setItem('reorderData', JSON.stringify(requestData));
+
+      // Refresh medicine requests list
+      await fetchMedicineRequests();
+
+      // Switch to reorder tab
+      setActiveTab('reorder');
+
+      // Show success message
+      alert(`✅ Successfully converted ${selectedRequests.length} medicine request(s) to purchase orders and moved to Reorder Items!`);
+
+    } catch (error) {
+      console.error('Error bulk converting medicine requests:', error);
+      alert(`Failed to convert medicine requests: ${error.message}`);
+    } finally {
+      setBulkConverting(false);
     }
   };
 
@@ -689,6 +891,9 @@ const StoreManagerPurchases = () => {
       const token = localStorage.getItem('token');
 
       // Validate required fields
+      if (!newPurchase.supplier || !newPurchase.supplier.trim()) {
+        throw new Error('Supplier is required');
+      }
       if (!newPurchase.purchaseOrderNumber.trim()) {
         throw new Error('Purchase order number is required');
       }
@@ -712,7 +917,7 @@ const StoreManagerPurchases = () => {
       }
 
       const purchaseData = {
-        ...(newPurchase.supplier && { supplier: newPurchase.supplier }), // Only include supplier if selected
+        supplier: newPurchase.supplier, // Supplier is now required
         purchaseOrderNumber: newPurchase.purchaseOrderNumber.trim(),
         invoiceNumber: newPurchase.invoiceNumber?.trim() || '',
         paymentMethod: newPurchase.paymentMethod || 'cash',
@@ -903,8 +1108,9 @@ const StoreManagerPurchases = () => {
 
   const handlePaySupplier = (purchase) => {
     console.log('Paying supplier for purchase:', purchase._id);
+    const outstandingAmount = purchase.balanceAmount || purchase.creditAmount || 0;
     setPaymentForm({
-      amount: purchase.creditAmount || '',
+      amount: outstandingAmount.toString(),
       paymentMethod: 'cash',
       transactionId: '',
       checkNumber: '',
@@ -913,13 +1119,70 @@ const StoreManagerPurchases = () => {
     setPaymentModal({ show: true, purchase });
   };
 
+  // Handle viewing payment history
+  const handleViewPaymentHistory = async (purchase) => {
+    setPaymentHistoryModal({
+      show: true,
+      purchase,
+      paymentHistory: [],
+      paymentSummary: null,
+      loading: true
+    });
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/store-manager/purchases/${purchase._id}/payment-history`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch payment history');
+      }
+
+      const data = await response.json();
+      setPaymentHistoryModal(prev => ({
+        ...prev,
+        paymentHistory: data.data.paymentHistory || [],
+        paymentSummary: data.data.paymentSummary || null,
+        loading: false
+      }));
+
+    } catch (error) {
+      console.error('Error fetching payment history:', error);
+      setError('Failed to load payment history');
+      setPaymentHistoryModal(prev => ({
+        ...prev,
+        loading: false
+      }));
+    }
+  };
+
   const handlePaymentSubmit = async (e) => {
     e.preventDefault();
+
+    // Validate payment amount
+    const paymentAmount = parseFloat(paymentForm.amount);
+    const outstandingAmount = paymentModal.purchase.balanceAmount || paymentModal.purchase.creditAmount || 0;
+
+    if (paymentAmount <= 0) {
+      setError('Payment amount must be greater than 0');
+      return;
+    }
+
+    if (paymentAmount > outstandingAmount) {
+      setError(`Payment amount (₹${paymentAmount.toLocaleString()}) cannot exceed outstanding balance (₹${outstandingAmount.toLocaleString()})`);
+      return;
+    }
+
     try {
       setLoading(true);
+      setError(''); // Clear any previous errors
       const token = localStorage.getItem('token');
 
-      const response = await fetch(`/api/store-manager/suppliers/${paymentModal.purchase.supplier._id}/payment`, {
+      const response = await fetch(`/api/store-manager/purchases/${paymentModal.purchase._id}/payment`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -939,6 +1202,8 @@ const StoreManagerPurchases = () => {
         throw new Error(errorData.message || 'Failed to record payment');
       }
 
+      const responseData = await response.json();
+
       // Close modal and refresh list
       setPaymentModal({ show: false, purchase: null });
       setPaymentForm({
@@ -950,8 +1215,10 @@ const StoreManagerPurchases = () => {
       });
       fetchPurchases();
 
-      // Show success message
-      console.log('Payment recorded successfully');
+      // Show success message with details
+      const { paymentAmount, newBalance, paymentStatus } = responseData.data;
+      alert(`✅ Payment recorded successfully!\n\nPayment: ₹${paymentAmount.toLocaleString()}\nRemaining Balance: ₹${newBalance.toLocaleString()}\nStatus: ${paymentStatus.charAt(0).toUpperCase() + paymentStatus.slice(1)}`);
+      console.log('Payment recorded successfully:', responseData);
     } catch (error) {
       console.error('Record payment error:', error);
       setError(error.message || 'Failed to record payment');
@@ -1379,6 +1646,26 @@ const StoreManagerPurchases = () => {
                       <div className="text-sm text-gray-900 text-left capitalize">
                         {purchase.paymentMethod || 'Cash'}
                       </div>
+                      {/* Payment Status Information */}
+                      {purchase.paymentStatus && purchase.paymentStatus !== 'pending' && (
+                        <div className="text-xs text-left mt-1">
+                          {purchase.paymentStatus === 'paid' && (
+                            <span className="text-green-600 font-medium">
+                              ✓ Fully Paid (₹{(purchase.paidAmount || 0).toLocaleString()})
+                            </span>
+                          )}
+                          {purchase.paymentStatus === 'partial' && (
+                            <span className="text-yellow-600 font-medium">
+                              ⚠ Partial: ₹{(purchase.paidAmount || 0).toLocaleString()} of ₹{(purchase.totalAmount || 0).toLocaleString()}
+                            </span>
+                          )}
+                          {purchase.paymentStatus === 'overdue' && (
+                            <span className="text-red-600 font-medium">
+                              ⚠ Overdue: ₹{((purchase.balanceAmount || purchase.creditAmount) || 0).toLocaleString()} due
+                            </span>
+                          )}
+                        </div>
+                      )}
                       {purchase.paymentMethod === 'credit' && purchase.creditAmount > 0 && (
                         <div className="text-xs text-red-600 text-left">
                           Credit: ₹{purchase.creditAmount?.toLocaleString() || 0}
@@ -1435,7 +1722,8 @@ const StoreManagerPurchases = () => {
                         >
                           <Receipt className="h-4 w-4" />
                         </button>
-                        {purchase.paymentMethod === 'credit' && purchase.creditAmount > 0 && (
+                        {(purchase.paymentStatus === 'pending' || purchase.paymentStatus === 'partial' || purchase.paymentStatus === 'overdue') &&
+                         (purchase.balanceAmount > 0 || purchase.creditAmount > 0) && (
                           <button
                             onClick={() => handlePaySupplier(purchase)}
                             disabled={loading}
@@ -1443,6 +1731,19 @@ const StoreManagerPurchases = () => {
                             title="Pay Supplier"
                           >
                             <DollarSign className="h-4 w-4" />
+                          </button>
+                        )}
+                        {/* Payment History Button - Show for purchases with any payment activity */}
+                        {(purchase.paymentStatus === 'partial' || purchase.paymentStatus === 'paid' ||
+                          (purchase.paymentHistory && purchase.paymentHistory.length > 0) ||
+                          (purchase.paidAmount && purchase.paidAmount > 0)) && (
+                          <button
+                            onClick={() => handleViewPaymentHistory(purchase)}
+                            disabled={loading}
+                            className="text-blue-600 hover:text-blue-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="View Payment History"
+                          >
+                            <History className="h-4 w-4" />
                           </button>
                         )}
                       </div>
@@ -1767,7 +2068,7 @@ const StoreManagerPurchases = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2 text-left">
-              Supplier
+              Supplier *
             </label>
             <div className="relative supplier-search-container">
               <input
@@ -1780,7 +2081,8 @@ const StoreManagerPurchases = () => {
                   }
                 }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
-                placeholder="Search suppliers... (can be assigned later)"
+                placeholder="Search and select a supplier..."
+                required
               />
 
               {selectedPurchaseSupplier && (
@@ -1817,8 +2119,8 @@ const StoreManagerPurchases = () => {
               )}
             </div>
             {!selectedPurchaseSupplier && (
-              <p className="mt-1 text-sm text-blue-600">
-                💡 Optional: You can create this purchase order without a supplier and assign one later from the purchase details page.
+              <p className="mt-1 text-sm text-red-600">
+                Please select a supplier to continue
               </p>
             )}
           </div>
@@ -2168,10 +2470,10 @@ const StoreManagerPurchases = () => {
           <button
             type="button"
             onClick={handleCreatePurchase}
-            disabled={!newPurchase.purchaseOrderNumber || newPurchase.items.length === 0}
+            disabled={!newPurchase.supplier || !newPurchase.purchaseOrderNumber || newPurchase.items.length === 0}
             className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {!selectedPurchaseSupplier ? 'Create Purchase Order (No Supplier)' : 'Create Purchase Order'}
+            Create Purchase Order
           </button>
         </div>
       </form>
@@ -2374,6 +2676,16 @@ const StoreManagerPurchases = () => {
         'Reorder - Supplier to be assigned'
     });
 
+    // Set supplier selection states if supplier is available
+    if (supplierGroup.supplier) {
+      setSelectedPurchaseSupplier(supplierGroup.supplier);
+      setPurchaseSupplierSearch(supplierGroup.supplier.name);
+    } else {
+      // Reset supplier selection states if no supplier
+      setSelectedPurchaseSupplier(null);
+      setPurchaseSupplierSearch('');
+    }
+
     // Switch to new purchase tab
     setActiveTab('new');
     setSelectedReorderItems([]);
@@ -2522,8 +2834,9 @@ const StoreManagerPurchases = () => {
   // Export reorder list as CSV (including customer requests)
   const exportReorderList = () => {
     try {
-      // Generate CSV content from current reorderSuggestions state
-      let csvContent = 'Medicine Name,Manufacturer,Unit Type,Current Stock,Reorder Level,Suggested Qty,Unit Cost,Total Cost,Supplier,Type\n';
+      // Generate CSV content from current reorderSuggestions state with UTF-8 BOM
+      let csvContent = '\uFEFF'; // UTF-8 BOM for proper encoding
+      csvContent += 'Medicine Name,Manufacturer,Unit Type,Current Stock,Reorder Level,Suggested Qty,Unit Cost,Total Cost,Supplier,Type\n';
 
       reorderSuggestions.forEach(suggestion => {
         // Handle customer requested items
@@ -2545,7 +2858,7 @@ const StoreManagerPurchases = () => {
           const manufacturer = suggestion.manufacturer.replace(/,/g, ';');
           const supplier = suggestion.supplier?.name ? suggestion.supplier.name.replace(/,/g, ';') : 'No Supplier';
 
-          csvContent += `"${medicineName}","${manufacturer}",Strip,${suggestion.stripSuggestion.currentStock},${suggestion.stripSuggestion.reorderLevel},${effectiveQuantity},₹${suggestion.stripSuggestion.unitCost},₹${totalCost.toFixed(2)},"${supplier}",Regular\n`;
+          csvContent += `"${medicineName}","${manufacturer}",Strip,${suggestion.stripSuggestion.currentStock},${suggestion.stripSuggestion.reorderLevel},${effectiveQuantity},"₹${suggestion.stripSuggestion.unitCost}","₹${totalCost.toFixed(2)}","${supplier}",Regular\n`;
         }
         if (suggestion.individualSuggestion) {
           const effectiveQuantity = getEffectiveQuantity(suggestion.medicine, 'individual', suggestion.individualSuggestion.suggestedQuantity);
@@ -2554,12 +2867,12 @@ const StoreManagerPurchases = () => {
           const manufacturer = suggestion.manufacturer.replace(/,/g, ';');
           const supplier = suggestion.supplier?.name ? suggestion.supplier.name.replace(/,/g, ';') : 'No Supplier';
 
-          csvContent += `"${medicineName}","${manufacturer}",Individual,${suggestion.individualSuggestion.currentStock},${suggestion.individualSuggestion.reorderLevel},${effectiveQuantity},₹${suggestion.individualSuggestion.unitCost},₹${totalCost.toFixed(2)},"${supplier}",Regular\n`;
+          csvContent += `"${medicineName}","${manufacturer}",Individual,${suggestion.individualSuggestion.currentStock},${suggestion.individualSuggestion.reorderLevel},${effectiveQuantity},"₹${suggestion.individualSuggestion.unitCost}","₹${totalCost.toFixed(2)}","${supplier}",Regular\n`;
         }
       });
 
-      // Create and download the CSV file
-      const blob = new Blob([csvContent], { type: 'text/csv' });
+      // Create and download the CSV file with proper UTF-8 encoding
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -3143,58 +3456,128 @@ const StoreManagerPurchases = () => {
     </div>
   );
 
-  const renderMedicineRequestsTab = () => (
-    <div>
-      <div className="sm:flex sm:items-center sm:justify-between mb-6">
-        <div className="sm:flex-auto">
-          <h1 className="text-2xl font-semibold text-gray-900 text-left">Medicine Requests</h1>
-          <p className="mt-2 text-sm text-gray-700 text-left">
-            New medicine requests from store managers that need to be ordered
-          </p>
-        </div>
-        <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
-          <button
-            onClick={() => setAddRequestModal({ show: true })}
-            className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Add New Request
-          </button>
-        </div>
-      </div>
+  const renderMedicineRequestsTab = () => {
+    const pendingRequests = medicineRequests.filter(request => request.status === 'pending');
+    const selectedCount = selectedRequests.length;
+    const allPendingSelected = pendingRequests.length > 0 && selectedCount === pendingRequests.length;
+    const someSelected = selectedCount > 0 && selectedCount < pendingRequests.length;
 
-      {requestsLoading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
-        </div>
-      ) : medicineRequests.length === 0 ? (
-        <div className="text-center py-12">
-          <Package className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-2 text-sm font-medium text-gray-900">No medicine requests</h3>
-          <p className="mt-1 text-sm text-gray-500">
-            Get started by adding a new medicine request.
-          </p>
-          <div className="mt-6">
+    return (
+      <div>
+        <div className="sm:flex sm:items-center sm:justify-between mb-6">
+          <div className="sm:flex-auto">
+            <h1 className="text-2xl font-semibold text-gray-900 text-left">Medicine Requests</h1>
+            <p className="mt-2 text-sm text-gray-700 text-left">
+              New medicine requests from store managers that need to be ordered
+            </p>
+            {selectedCount > 0 && (
+              <p className="mt-1 text-sm text-green-600 font-medium">
+                {selectedCount} request{selectedCount > 1 ? 's' : ''} selected
+              </p>
+            )}
+          </div>
+          <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none flex space-x-3">
+            {selectedCount > 0 && (
+              <button
+                onClick={handleBulkConvertToPurchase}
+                disabled={bulkConverting}
+                className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
+                  bulkConverting
+                    ? 'bg-green-400 cursor-not-allowed'
+                    : 'bg-green-600 hover:bg-green-700'
+                }`}
+              >
+                {bulkConverting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Converting {selectedCount}...
+                  </>
+                ) : (
+                  <>
+                    <Package className="h-4 w-4 mr-2" />
+                    Convert {selectedCount} to Purchase
+                  </>
+                )}
+              </button>
+            )}
             <button
               onClick={() => setAddRequestModal({ show: true })}
-              className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700"
             >
               <Plus className="h-4 w-4 mr-2" />
               Add New Request
             </button>
           </div>
         </div>
-      ) : (
-        <div className="bg-white shadow overflow-hidden sm:rounded-md">
-          <ul className="divide-y divide-gray-200">
-            {medicineRequests.map((request) => (
-              <li key={request._id} className="px-6 py-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-lg font-medium text-gray-900 text-left">
-                        {request.medicineName}
-                      </h3>
+
+        {requestsLoading ? (
+          <div className="flex items-center justify-center h-64">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
+          </div>
+        ) : medicineRequests.length === 0 ? (
+          <div className="text-center py-12">
+            <Package className="mx-auto h-12 w-12 text-gray-400" />
+            <h3 className="mt-2 text-sm font-medium text-gray-900">No medicine requests</h3>
+            <p className="mt-1 text-sm text-gray-500">
+              Get started by adding a new medicine request.
+            </p>
+            <div className="mt-6">
+              <button
+                onClick={() => setAddRequestModal({ show: true })}
+                className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add New Request
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-white shadow overflow-hidden sm:rounded-md">
+            {/* Select All Header */}
+            {pendingRequests.length > 0 && (
+              <div className="px-6 py-3 bg-gray-50 border-b border-gray-200">
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={allPendingSelected}
+                    ref={checkbox => {
+                      if (checkbox) checkbox.indeterminate = someSelected;
+                    }}
+                    onChange={(e) => handleSelectAll(e.target.checked)}
+                    className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                  />
+                  <label className="ml-3 text-sm font-medium text-gray-700">
+                    {allPendingSelected ? 'Deselect All' : someSelected ? 'Select All' : 'Select All'}
+                    {pendingRequests.length > 0 && (
+                      <span className="text-gray-500 ml-1">
+                        ({pendingRequests.length} pending request{pendingRequests.length > 1 ? 's' : ''})
+                      </span>
+                    )}
+                  </label>
+                </div>
+              </div>
+            )}
+
+            <ul className="divide-y divide-gray-200">
+              {medicineRequests.map((request) => (
+                <li key={request._id} className="px-6 py-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center flex-1">
+                      {/* Checkbox for pending requests */}
+                      {request.status === 'pending' && (
+                        <input
+                          type="checkbox"
+                          checked={selectedRequests.includes(request._id)}
+                          onChange={(e) => handleRequestSelection(request._id, e.target.checked)}
+                          className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded mr-4"
+                        />
+                      )}
+
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-lg font-medium text-gray-900 text-left">
+                            {request.medicineName}
+                          </h3>
                       <div className="flex items-center space-x-2">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                           request.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
@@ -3346,15 +3729,17 @@ const StoreManagerPurchases = () => {
                       <Trash2 className="h-3 w-3 mr-1" />
                       Delete
                     </button>
+                    </div>
                   </div>
                 </div>
               </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   if (loading && purchases.length === 0) {
     return (
@@ -4068,19 +4453,31 @@ const StoreManagerPurchases = () => {
                   <div className="bg-gray-50 p-3 rounded-lg">
                     <p className="text-sm text-gray-600">Supplier: <span className="font-medium">{paymentModal.purchase.supplier?.name}</span></p>
                     <p className="text-sm text-gray-600">Purchase Order: <span className="font-medium">{paymentModal.purchase.purchaseOrderNumber}</span></p>
-                    <p className="text-sm text-gray-600">Outstanding Amount: <span className="font-medium text-red-600">₹{paymentModal.purchase.creditAmount?.toLocaleString()}</span></p>
+                    <p className="text-sm text-gray-600">Outstanding Amount: <span className="font-medium text-red-600">₹{(paymentModal.purchase.balanceAmount || paymentModal.purchase.creditAmount || 0).toLocaleString()}</span></p>
                   </div>
 
                   <form onSubmit={handlePaymentSubmit} className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Payment Amount *
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-sm font-medium text-gray-700">
+                          Payment Amount *
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setPaymentForm({
+                            ...paymentForm,
+                            amount: (paymentModal.purchase.balanceAmount || paymentModal.purchase.creditAmount || 0).toString()
+                          })}
+                          className="text-xs text-green-600 hover:text-green-800 underline"
+                        >
+                          Pay Full Amount
+                        </button>
+                      </div>
                       <input
                         type="number"
                         step="0.01"
                         min="0.01"
-                        max={paymentModal.purchase.creditAmount}
+                        max={paymentModal.purchase.balanceAmount || paymentModal.purchase.creditAmount}
                         value={paymentForm.amount}
                         onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
@@ -4381,6 +4778,175 @@ const StoreManagerPurchases = () => {
                 }}
                 onError={(errorMessage) => setError(errorMessage)}
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment History Modal */}
+      {paymentHistoryModal.show && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">Payment History</h3>
+                <button
+                  onClick={() => setPaymentHistoryModal({ show: false, purchase: null, paymentHistory: [], paymentSummary: null, loading: false })}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {paymentHistoryModal.purchase && (
+                <div className="space-y-6">
+                  {/* Purchase Summary */}
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <p className="text-sm text-gray-600">Purchase Order</p>
+                        <p className="font-medium">{paymentHistoryModal.purchase.purchaseOrderNumber}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-gray-600">Supplier</p>
+                        <p className="font-medium">{paymentHistoryModal.purchase.supplier?.name || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-gray-600">Total Amount</p>
+                        <p className="font-medium">₹{(paymentHistoryModal.purchase.totalAmount || 0).toLocaleString()}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Payment Summary */}
+                  {paymentHistoryModal.paymentSummary && (
+                    <div className="bg-blue-50 p-4 rounded-lg">
+                      <h4 className="text-md font-medium text-gray-900 mb-3">Payment Summary</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div>
+                          <p className="text-sm text-gray-600">Total Amount</p>
+                          <p className="font-medium text-lg">₹{paymentHistoryModal.paymentSummary.totalAmount.toLocaleString()}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-600">Paid Amount</p>
+                          <p className="font-medium text-lg text-green-600">₹{paymentHistoryModal.paymentSummary.paidAmount.toLocaleString()}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-600">Balance Amount</p>
+                          <p className={`font-medium text-lg ${paymentHistoryModal.paymentSummary.balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                            ₹{paymentHistoryModal.paymentSummary.balanceAmount.toLocaleString()}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-600">Status</p>
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            paymentHistoryModal.paymentSummary.paymentStatus === 'paid'
+                              ? 'bg-green-100 text-green-800'
+                              : paymentHistoryModal.paymentSummary.paymentStatus === 'partial'
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : paymentHistoryModal.paymentSummary.paymentStatus === 'overdue'
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-gray-100 text-gray-800'
+                          }`}>
+                            {paymentHistoryModal.paymentSummary.paymentStatus.charAt(0).toUpperCase() + paymentHistoryModal.paymentSummary.paymentStatus.slice(1)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Payment Status Indicators */}
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {paymentHistoryModal.paymentSummary.isFullyPaid && (
+                          <div className="flex items-center text-green-600 text-sm">
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                            Fully Paid on {new Date(paymentHistoryModal.paymentSummary.paymentDate).toLocaleDateString()}
+                          </div>
+                        )}
+                        {paymentHistoryModal.paymentSummary.isOverdue && (
+                          <div className="flex items-center text-red-600 text-sm">
+                            <AlertTriangle className="h-4 w-4 mr-1" />
+                            Overdue (Due: {new Date(paymentHistoryModal.paymentSummary.dueDate).toLocaleDateString()})
+                          </div>
+                        )}
+                        {paymentHistoryModal.paymentSummary.paymentStatus === 'partial' && (
+                          <div className="flex items-center text-yellow-600 text-sm">
+                            <Clock className="h-4 w-4 mr-1" />
+                            Partially Paid ({paymentHistoryModal.paymentSummary.totalPayments} payment{paymentHistoryModal.paymentSummary.totalPayments !== 1 ? 's' : ''})
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Payment History */}
+                  <div>
+                    <h4 className="text-md font-medium text-gray-900 mb-3">Payment Timeline</h4>
+                    {paymentHistoryModal.loading ? (
+                      <div className="flex justify-center py-8">
+                        <Loader className="h-6 w-6 animate-spin text-green-600" />
+                      </div>
+                    ) : paymentHistoryModal.paymentHistory.length > 0 ? (
+                      <div className="space-y-4">
+                        {paymentHistoryModal.paymentHistory.map((payment, index) => (
+                          <div key={index} className="border border-gray-200 rounded-lg p-4">
+                            <div className="flex justify-between items-start">
+                              <div className="flex-1">
+                                <div className="flex items-center space-x-4 mb-2">
+                                  <div className="flex items-center">
+                                    <DollarSign className="h-4 w-4 text-green-600 mr-1" />
+                                    <span className="font-medium text-lg">₹{payment.amount.toLocaleString()}</span>
+                                  </div>
+                                  <span className="text-sm text-gray-500">
+                                    {new Date(payment.paymentDate).toLocaleDateString()} at {new Date(payment.paymentDate).toLocaleTimeString()}
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                  <div>
+                                    <span className="text-gray-600">Payment Method:</span>
+                                    <span className="ml-2 capitalize font-medium">{payment.paymentMethod.replace('_', ' ')}</span>
+                                  </div>
+                                  {payment.transactionId && (
+                                    <div>
+                                      <span className="text-gray-600">Transaction ID:</span>
+                                      <span className="ml-2 font-mono text-xs">{payment.transactionId}</span>
+                                    </div>
+                                  )}
+                                  {payment.checkNumber && (
+                                    <div>
+                                      <span className="text-gray-600">Check Number:</span>
+                                      <span className="ml-2 font-mono text-xs">{payment.checkNumber}</span>
+                                    </div>
+                                  )}
+                                  <div>
+                                    <span className="text-gray-600">Processed by:</span>
+                                    <span className="ml-2">{payment.processedBy?.name || 'N/A'}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-600">Running Balance:</span>
+                                    <span className="ml-2 font-medium">₹{payment.runningBalance.toLocaleString()}</span>
+                                  </div>
+                                </div>
+
+                                {payment.notes && (
+                                  <div className="mt-2 text-sm">
+                                    <span className="text-gray-600">Notes:</span>
+                                    <span className="ml-2 italic">{payment.notes}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        <History className="h-12 w-12 mx-auto mb-2 text-gray-300" />
+                        <p>No payment history available</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

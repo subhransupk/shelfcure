@@ -326,23 +326,16 @@ medicineSchema.virtual('totalValue').get(function() {
 });
 
 medicineSchema.virtual('isLowStock').get(function() {
-  // Corrected logic: Low stock calculation based on enabled unit types
-  const hasStrips = this.unitTypes?.hasStrips;
-  const hasIndividual = this.unitTypes?.hasIndividual;
+  // Use standardized low stock calculation logic
+  const LowStockService = require('../services/lowStockService');
+  return LowStockService.isLowStock(this);
+});
 
-  if (hasStrips && hasIndividual) {
-    // Both enabled: Low stock based on STRIP STOCK ONLY
-    // Individual stock is just cut medicines, not used for low stock calculation
-    return (this.stripInfo.stock <= this.stripInfo.minStock);
-  } else if (hasStrips) {
-    // Only strips enabled
-    return (this.stripInfo.stock <= this.stripInfo.minStock);
-  } else if (hasIndividual) {
-    // Only individual enabled: Use individual stock for low stock calculation
-    return (this.individualInfo.stock <= this.individualInfo.minStock);
-  }
-
-  return false;
+// Virtual to check if medicine supports cutting (strip to individual conversion)
+medicineSchema.virtual('supportsCutting').get(function() {
+  // Cut Medicine functionality should only be available for medicines that have BOTH strips AND individual units
+  // If a medicine only has individual units (hasStrips: false), it's a single-piece medicine (bottles, injections) - no cutting allowed
+  return this.unitTypes?.hasStrips === true && this.unitTypes?.hasIndividual === true;
 });
 
 medicineSchema.virtual('daysToExpiry').get(function() {
@@ -409,15 +402,9 @@ medicineSchema.pre('save', function(next) {
 });
 
 // Static method to find medicines with low stock
-medicineSchema.statics.findLowStock = function(storeId) {
-  return this.find({
-    store: storeId,
-    isActive: true,
-    $or: [
-      { 'stripInfo.stock': { $lte: this.stripInfo?.minStock || 0 } },
-      { 'individualInfo.stock': { $lte: this.individualInfo?.minStock || 0 } }
-    ]
-  });
+medicineSchema.statics.findLowStock = function(storeId, options = {}) {
+  const LowStockService = require('../services/lowStockService');
+  return LowStockService.findLowStockMedicines(storeId, options);
 };
 
 // Static method to find expiring medicines
@@ -460,12 +447,69 @@ medicineSchema.statics.findWithoutRackLocation = function(storeId) {
   });
 };
 
-// Static method to search medicines with rack location info
-medicineSchema.statics.searchWithLocations = function(storeId, query) {
-  const searchRegex = new RegExp(query, 'i');
-  return this.find({
+// Static method to check if medicine has available non-expired batches
+medicineSchema.statics.hasAvailableBatches = async function(medicineId, storeId) {
+  const Batch = require('./Batch');
+
+  const availableBatches = await Batch.countDocuments({
+    medicine: medicineId,
     store: storeId,
     isActive: true,
+    isExpired: false,
+    $or: [
+      { stripQuantity: { $gt: 0 } },
+      { individualQuantity: { $gt: 0 } }
+    ]
+  });
+
+  return availableBatches > 0;
+};
+
+// Static method to get medicines with available stock (batch-aware)
+medicineSchema.statics.findAvailableForSale = async function(storeId, searchQuery = {}) {
+  const Batch = require('./Batch');
+
+  // First, find medicines that match the search criteria
+  const baseQuery = {
+    store: storeId,
+    isActive: true,
+    ...searchQuery
+  };
+
+  const medicines = await this.find(baseQuery);
+
+  // Filter medicines that have available non-expired batches OR no batch system (legacy)
+  const availableMedicines = [];
+
+  for (const medicine of medicines) {
+    // Check if medicine uses batch system
+    const batchCount = await Batch.countDocuments({
+      medicine: medicine._id,
+      store: storeId
+    });
+
+    if (batchCount > 0) {
+      // Medicine uses batch system - check for available non-expired batches
+      const hasAvailableBatches = await this.hasAvailableBatches(medicine._id, storeId);
+      if (hasAvailableBatches) {
+        availableMedicines.push(medicine);
+      }
+    } else {
+      // Legacy medicine without batch system - use medicine-level expiry check
+      const isNotExpired = !medicine.expiryDate || new Date(medicine.expiryDate) >= new Date();
+      if (isNotExpired) {
+        availableMedicines.push(medicine);
+      }
+    }
+  }
+
+  return availableMedicines;
+};
+
+// Static method to search medicines with rack location info (batch-aware)
+medicineSchema.statics.searchWithLocations = async function(storeId, query) {
+  const searchRegex = new RegExp(query, 'i');
+  const searchQuery = {
     $or: [
       { name: searchRegex },
       { genericName: searchRegex },
@@ -473,7 +517,37 @@ medicineSchema.statics.searchWithLocations = function(storeId, query) {
       { composition: searchRegex },
       { barcode: searchRegex }
     ]
-  }).populate('rackLocations.rack', 'rackNumber name category');
+  };
+
+  const availableMedicines = await this.findAvailableForSale(storeId, searchQuery);
+
+  // Populate rack locations for the available medicines
+  return await this.populate(availableMedicines, {
+    path: 'rackLocations.rack',
+    select: 'rackNumber name category'
+  });
 };
+
+// Static method to check if a medicine category supports strip cutting
+medicineSchema.statics.categorySupportsStripCutting = function(category) {
+  // Categories that can be cut from strips into individual units
+  const stripCuttableCategories = [
+    'Tablet',
+    'Capsule',
+    'Patch'
+  ];
+
+  return stripCuttableCategories.includes(category);
+};
+
+// Instance method to check if this medicine supports strip cutting
+medicineSchema.methods.supportsStripCutting = function() {
+  return this.constructor.categorySupportsStripCutting(this.category);
+};
+
+// Virtual to determine if individual units should be allowed
+medicineSchema.virtual('shouldAllowIndividualUnits').get(function() {
+  return this.supportsStripCutting();
+});
 
 module.exports = mongoose.model('Medicine', medicineSchema);

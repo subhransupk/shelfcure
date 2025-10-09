@@ -458,6 +458,7 @@ const getPurchases = async (req, res) => {
     const purchases = await Purchase.find(queryObj)
       .populate('supplier', 'name contactPerson phone email')
       .populate('createdBy', 'name email')
+      .populate('paymentHistory.processedBy', 'name email')
       .sort(sort)
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -496,6 +497,7 @@ const getPurchase = async (req, res) => {
       .populate('supplier', 'name contactPerson phone email address')
       .populate('createdBy', 'name email')
       .populate('receivedBy', 'name email')
+      .populate('paymentHistory.processedBy', 'name email')
       .populate('items.medicine', 'name genericName manufacturer');
 
     if (!purchase) {
@@ -1274,24 +1276,25 @@ const generateReorderReport = async (req, res) => {
 
     // Handle different formats
     if (format === 'csv') {
-      // Generate CSV format
-      let csvContent = 'Medicine Name,Generic Name,Manufacturer,Category,Supplier,Unit Type,Current Stock,Reorder Level,Suggested Quantity,Unit Cost,Total Cost\n';
+      // Generate CSV format with UTF-8 BOM for proper encoding
+      let csvContent = '\uFEFF'; // UTF-8 BOM
+      csvContent += 'Medicine Name,Generic Name,Manufacturer,Category,Supplier,Unit Type,Current Stock,Reorder Level,Suggested Quantity,Unit Cost,Total Cost\n';
 
       reportData.items.forEach(item => {
         const supplierName = item.supplier?.name || 'No Supplier';
 
         if (item.stripSuggestion) {
           const totalCost = item.stripSuggestion.suggestedQuantity * item.stripSuggestion.unitCost;
-          csvContent += `"${item.medicineName}","${item.genericName}","${item.manufacturer}","${item.category}","${supplierName}","Strip",${item.stripSuggestion.currentStock},${item.stripSuggestion.reorderLevel},${item.stripSuggestion.suggestedQuantity},${item.stripSuggestion.unitCost},${totalCost.toFixed(2)}\n`;
+          csvContent += `"${item.medicineName}","${item.genericName}","${item.manufacturer}","${item.category}","${supplierName}","Strip",${item.stripSuggestion.currentStock},${item.stripSuggestion.reorderLevel},${item.stripSuggestion.suggestedQuantity},"₹${item.stripSuggestion.unitCost}","₹${totalCost.toFixed(2)}"\n`;
         }
 
         if (item.individualSuggestion) {
           const totalCost = item.individualSuggestion.suggestedQuantity * item.individualSuggestion.unitCost;
-          csvContent += `"${item.medicineName}","${item.genericName}","${item.manufacturer}","${item.category}","${supplierName}","Individual",${item.individualSuggestion.currentStock},${item.individualSuggestion.reorderLevel},${item.individualSuggestion.suggestedQuantity},${item.individualSuggestion.unitCost},${totalCost.toFixed(2)}\n`;
+          csvContent += `"${item.medicineName}","${item.genericName}","${item.manufacturer}","${item.category}","${supplierName}","Individual",${item.individualSuggestion.currentStock},${item.individualSuggestion.reorderLevel},${item.individualSuggestion.suggestedQuantity},"₹${item.individualSuggestion.unitCost}","₹${totalCost.toFixed(2)}"\n`;
         }
       });
 
-      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="reorder-report-${Date.now()}.csv"`);
       return res.send(csvContent);
     }
@@ -1390,6 +1393,226 @@ const getDeliveryTracking = async (req, res) => {
   }
 };
 
+// @desc    Record payment for purchase
+// @route   POST /api/store-manager/purchases/:id/payment
+// @access  Private (Store Manager only)
+const recordPurchasePayment = async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const store = req.store;
+    const { id: purchaseId } = req.params;
+    const {
+      amount,
+      paymentMethod,
+      transactionId,
+      checkNumber,
+      notes
+    } = req.body;
+
+    // Find the purchase
+    const purchase = await Purchase.findOne({
+      _id: purchaseId,
+      store: store._id
+    }).populate('supplier', 'name');
+
+    if (!purchase) {
+      return res.status(404).json({
+        success: false,
+        message: 'Purchase not found'
+      });
+    }
+
+    // Validate payment amount
+    const currentBalance = purchase.balanceAmount || 0;
+    if (amount > currentBalance) {
+      return res.status(400).json({
+        success: false,
+        message: `Payment amount (₹${amount}) cannot exceed outstanding balance (₹${currentBalance})`
+      });
+    }
+
+    // Update purchase payment information
+    const previousPaidAmount = purchase.paidAmount || 0;
+    purchase.paidAmount = previousPaidAmount + amount;
+    purchase.balanceAmount = purchase.totalAmount - purchase.paidAmount;
+
+    // Update payment status based on balance
+    if (purchase.balanceAmount <= 0) {
+      purchase.paymentStatus = 'paid';
+    } else if (purchase.paidAmount > 0) {
+      purchase.paymentStatus = 'partial';
+    }
+
+    // Set payment date if this is the first payment or full payment
+    if (previousPaidAmount === 0 || purchase.paymentStatus === 'paid') {
+      purchase.paymentDate = new Date();
+    }
+
+    // Add payment to payment history
+    const paymentHistoryEntry = {
+      amount: amount,
+      paymentMethod: paymentMethod,
+      transactionId: transactionId || '',
+      checkNumber: checkNumber || '',
+      notes: notes || '',
+      paymentDate: new Date(),
+      processedBy: req.user._id,
+      runningBalance: purchase.balanceAmount
+    };
+
+    // Initialize payment history if it doesn't exist
+    if (!purchase.paymentHistory) {
+      purchase.paymentHistory = [];
+    }
+
+    purchase.paymentHistory.push(paymentHistoryEntry);
+
+    // Add payment record to purchase notes (for backward compatibility)
+    const paymentNote = `Payment recorded: ₹${amount} via ${paymentMethod}${transactionId ? ` (${transactionId})` : ''}${checkNumber ? ` (Check: ${checkNumber})` : ''} on ${new Date().toLocaleDateString()}`;
+    purchase.notes = purchase.notes ? `${purchase.notes}\n${paymentNote}` : paymentNote;
+
+    if (notes) {
+      purchase.notes += `\nPayment Notes: ${notes}`;
+    }
+
+    await purchase.save();
+
+    // If supplier exists, create supplier transaction record
+    if (purchase.supplier) {
+      const SupplierTransaction = require('../models/SupplierTransaction');
+      const mongoose = require('mongoose');
+      const paymentId = new mongoose.Types.ObjectId();
+
+      try {
+        await SupplierTransaction.createTransaction({
+          store: store._id,
+          supplier: purchase.supplier._id,
+          transactionType: 'supplier_payment',
+          amount: amount,
+          balanceChange: -amount,
+          reference: {
+            type: 'Purchase Payment',
+            id: purchase._id,
+            number: purchase.purchaseOrderNumber
+          },
+          paymentDetails: {
+            method: paymentMethod,
+            transactionId: transactionId,
+            checkNumber: checkNumber,
+            notes: notes
+          },
+          description: `Payment for purchase ${purchase.purchaseOrderNumber}`,
+          notes: notes || '',
+          processedBy: req.user._id
+        });
+
+        // Update supplier's last payment date
+        const Supplier = require('../models/Supplier');
+        await Supplier.findByIdAndUpdate(purchase.supplier._id, {
+          lastPaymentDate: new Date()
+        });
+      } catch (supplierError) {
+        console.error('Error creating supplier transaction:', supplierError);
+        // Don't fail the payment if supplier transaction fails
+      }
+    }
+
+    // Fetch updated purchase with supplier info and payment history
+    const updatedPurchase = await Purchase.findById(purchaseId)
+      .populate('supplier', 'name contactPerson phone')
+      .populate('createdBy', 'name')
+      .populate('paymentHistory.processedBy', 'name');
+
+    res.status(200).json({
+      success: true,
+      message: 'Payment recorded successfully',
+      data: {
+        purchase: updatedPurchase,
+        paymentAmount: amount,
+        newBalance: updatedPurchase.balanceAmount,
+        paymentStatus: updatedPurchase.paymentStatus,
+        paymentHistory: updatedPurchase.paymentHistory,
+        totalPaid: updatedPurchase.paidAmount,
+        totalAmount: updatedPurchase.totalAmount
+      }
+    });
+
+  } catch (error) {
+    console.error('Record purchase payment error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while recording payment'
+    });
+  }
+};
+
+// @desc    Get payment history for purchase
+// @route   GET /api/store-manager/purchases/:id/payment-history
+// @access  Private (Store Manager only)
+const getPurchasePaymentHistory = async (req, res) => {
+  try {
+    const store = req.store;
+    const { id: purchaseId } = req.params;
+
+    // Find the purchase
+    const purchase = await Purchase.findOne({
+      _id: purchaseId,
+      store: store._id
+    })
+      .populate('supplier', 'name contactPerson phone')
+      .populate('paymentHistory.processedBy', 'name email')
+      .select('purchaseOrderNumber totalAmount paidAmount balanceAmount paymentStatus paymentHistory paymentDate dueDate supplier');
+
+    if (!purchase) {
+      return res.status(404).json({
+        success: false,
+        message: 'Purchase not found'
+      });
+    }
+
+    // Calculate payment summary
+    const paymentSummary = {
+      totalAmount: purchase.totalAmount,
+      paidAmount: purchase.paidAmount || 0,
+      balanceAmount: purchase.balanceAmount || 0,
+      paymentStatus: purchase.paymentStatus,
+      paymentDate: purchase.paymentDate,
+      dueDate: purchase.dueDate,
+      totalPayments: purchase.paymentHistory ? purchase.paymentHistory.length : 0,
+      isFullyPaid: purchase.paymentStatus === 'paid',
+      isOverdue: purchase.dueDate && new Date() > purchase.dueDate && purchase.balanceAmount > 0
+    };
+
+    res.status(200).json({
+      success: true,
+      data: {
+        purchase: {
+          _id: purchase._id,
+          purchaseOrderNumber: purchase.purchaseOrderNumber,
+          supplier: purchase.supplier
+        },
+        paymentSummary,
+        paymentHistory: purchase.paymentHistory || []
+      }
+    });
+
+  } catch (error) {
+    console.error('Get purchase payment history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching payment history'
+    });
+  }
+};
+
 module.exports = {
   getReorderSuggestions,
   generateReorderReport,
@@ -1399,5 +1622,7 @@ module.exports = {
   updatePurchase,
   deletePurchase,
   getPurchaseAnalytics,
-  getDeliveryTracking
+  getDeliveryTracking,
+  recordPurchasePayment,
+  getPurchasePaymentHistory
 };

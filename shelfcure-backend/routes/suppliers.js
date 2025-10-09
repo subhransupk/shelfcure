@@ -10,7 +10,8 @@ const {
   deleteSupplier,
   getSupplierPurchases,
   getSuppliersAnalytics,
-  searchSuppliers
+  searchSuppliers,
+  refreshSupplierStats
 } = require('../controllers/supplierController');
 
 const { protect, authorize } = require('../middleware/auth');
@@ -72,9 +73,18 @@ router.get('/search',
 // @route   GET /api/store-manager/suppliers/analytics
 // @desc    Get suppliers analytics
 // @access  Private
-router.get('/analytics', 
+router.get('/analytics',
   checkFeatureAccess('analytics'),
   getSuppliersAnalytics
+);
+
+// @route   POST /api/store-manager/suppliers/refresh-stats
+// @desc    Refresh supplier statistics
+// @access  Private
+router.post('/refresh-stats',
+  checkFeatureAccess('inventory'),
+  logStoreManagerActivity('refresh_supplier_stats'),
+  refreshSupplierStats
 );
 
 // @route   GET /api/store-manager/suppliers

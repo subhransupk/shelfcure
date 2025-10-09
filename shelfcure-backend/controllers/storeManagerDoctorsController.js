@@ -1,6 +1,8 @@
 const Doctor = require('../models/Doctor');
 const Store = require('../models/Store');
+const Commission = require('../models/Commission');
 const DoctorStatsService = require('../services/doctorStatsService');
+const CommissionPaymentService = require('../services/commissionPaymentService');
 const asyncHandler = require('express-async-handler');
 
 // Note: Commission payment tracking is now handled through real database records
@@ -424,31 +426,90 @@ const getCommissions = asyncHandler(async (req, res) => {
 const markCommissionPaid = asyncHandler(async (req, res) => {
   const storeId = req.store._id;
   const commissionId = req.params.id;
+  const userId = req.user._id;
 
   try {
-    // Extract doctor ID from commission ID (format: comm_doctorId)
-    const doctorId = commissionId.replace('comm_', '');
+    let commission;
 
-    // Verify the doctor belongs to this store
-    const doctor = await Doctor.findOne({ _id: doctorId, store: storeId });
+    // Check if this is an existing commission record or a calculated one
+    if (commissionId.startsWith('comm_')) {
+      // This is a calculated commission, need to create a new record
+      const doctorId = commissionId.replace('comm_', '');
 
-    if (!doctor) {
-      return res.status(404).json({
-        success: false,
-        message: 'Commission record not found'
+      // Verify the doctor belongs to this store
+      const doctor = await Doctor.findOne({ _id: doctorId, store: storeId });
+
+      if (!doctor) {
+        return res.status(404).json({
+          success: false,
+          message: 'Doctor not found or does not belong to this store'
+        });
+      }
+
+      // Get current commission data from the service
+      const commissionHistory = await DoctorStatsService.getCommissionHistory(storeId, { status: 'all' });
+      const currentCommission = commissionHistory.find(c => c._id === commissionId);
+
+      if (!currentCommission) {
+        return res.status(404).json({
+          success: false,
+          message: 'Commission record not found'
+        });
+      }
+
+      // Create a new commission record
+      const currentDate = new Date();
+      commission = new Commission({
+        store: storeId,
+        doctor: doctorId,
+        period: {
+          month: currentDate.getMonth() + 1,
+          year: currentDate.getFullYear()
+        },
+        prescriptionCount: currentCommission.prescriptionCount,
+        salesValue: currentCommission.salesValue,
+        commissionRate: currentCommission.commissionRate,
+        commissionAmount: currentCommission.commissionAmount,
+        status: 'paid',
+        paymentDate: new Date(),
+        paidBy: userId
       });
+
+      await commission.save();
+
+      // Populate the doctor information for the response
+      await commission.populate('doctor');
+
+    } else {
+      // This is an existing commission record
+      commission = await Commission.findById(commissionId).populate('doctor');
+
+      if (!commission || commission.store.toString() !== storeId.toString()) {
+        return res.status(404).json({
+          success: false,
+          message: 'Commission record not found'
+        });
+      }
+
+      // Update the commission status
+      commission.status = 'paid';
+      commission.paymentDate = new Date();
+      commission.paidBy = userId;
+      commission.lastUpdated = new Date();
+
+      await commission.save();
     }
 
-    // For now, we'll just return success since we don't have a separate commission tracking table
-    // In a full implementation, you would create a Commission model to track payment status
-    console.log(`Commission ${commissionId} marked as paid for doctor ${doctor.name}`);
-
-    // TODO: Implement actual commission payment tracking in database
-    // This could involve creating a Commission model or adding payment tracking to sales
+    console.log(`Commission ${commissionId} marked as paid for doctor ${commission.doctor?.name || 'Unknown'}`);
 
     res.status(200).json({
       success: true,
-      message: 'Commission marked as paid successfully'
+      message: 'Commission marked as paid successfully',
+      data: {
+        commissionId: commission._id,
+        status: commission.status,
+        paymentDate: commission.paymentDate
+      }
     });
 
   } catch (error) {
@@ -456,6 +517,90 @@ const markCommissionPaid = asyncHandler(async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Server error while marking commission as paid'
+    });
+  }
+});
+
+// @desc    Get commission payment history for a specific doctor
+// @route   GET /api/store-manager/doctors/:id/commission-history
+// @access  Private (Store Manager only)
+const getDoctorCommissionHistory = asyncHandler(async (req, res) => {
+  const storeId = req.store._id;
+  const doctorId = req.params.id;
+  const { page = 1, limit = 20 } = req.query;
+
+  try {
+    // Get commission summary
+    const summary = await CommissionPaymentService.getDoctorCommissionSummary(doctorId, storeId);
+
+    // Get payment history
+    const paymentHistory = await CommissionPaymentService.getDoctorPaymentHistory(doctorId, storeId, {
+      page: parseInt(page),
+      limit: parseInt(limit)
+    });
+
+    console.log(`Retrieved commission history for doctor ${doctorId} in store ${storeId}`);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        summary: summary.summary,
+        doctor: summary.doctor,
+        commissions: summary.commissions,
+        paymentHistory: paymentHistory.paymentHistory,
+        pagination: paymentHistory.pagination
+      }
+    });
+
+  } catch (error) {
+    console.error('Get doctor commission history error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Server error while fetching commission history'
+    });
+  }
+});
+
+// @desc    Record commission payment for a doctor
+// @route   POST /api/store-manager/doctors/commissions/:id/record-payment
+// @access  Private (Store Manager only)
+const recordCommissionPayment = asyncHandler(async (req, res) => {
+  const storeId = req.store._id;
+  const commissionId = req.params.id;
+  const userId = req.user._id;
+  const { amount, paymentMethod, paymentReference, notes } = req.body;
+
+  try {
+    // Validate required fields
+    if (!amount || !paymentMethod) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment amount and method are required'
+      });
+    }
+
+    // Record the payment
+    const result = await CommissionPaymentService.recordCommissionPayment(commissionId, {
+      amount: parseFloat(amount),
+      paymentMethod,
+      paymentReference,
+      notes,
+      processedBy: userId
+    }, storeId);
+
+    console.log(`Commission payment recorded: ₹${amount} for commission ${commissionId}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Commission payment recorded successfully',
+      data: result
+    });
+
+  } catch (error) {
+    console.error('Record commission payment error:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Server error while recording payment'
     });
   }
 });
@@ -469,5 +614,7 @@ module.exports = {
   toggleDoctorStatus,
   getDoctorStats,
   getCommissions,
-  markCommissionPaid
+  markCommissionPaid,
+  getDoctorCommissionHistory,
+  recordCommissionPayment
 };

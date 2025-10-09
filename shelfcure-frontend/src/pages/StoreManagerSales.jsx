@@ -68,6 +68,13 @@ const StoreManagerSales = () => {
   const [dateFilterTo, setDateFilterTo] = useState('');
   const [isDateFilterApplied, setIsDateFilterApplied] = useState(false);
 
+  // Additional filter state for Sales History
+  const [filterDoctorName, setFilterDoctorName] = useState('');
+  const [filterCustomerName, setFilterCustomerName] = useState('');
+  const [filterPhoneNumber, setFilterPhoneNumber] = useState('');
+  const [filterCreditStatus, setFilterCreditStatus] = useState('');
+  const [isAdvancedFilterApplied, setIsAdvancedFilterApplied] = useState(false);
+
   // Pagination state for Sales History
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -119,11 +126,15 @@ const StoreManagerSales = () => {
       fetchDoctors();
     } else {
       // When switching to history tab, fetch sales with current date filters
-      if (isDateFilterApplied && dateFilterFrom) {
-        fetchSalesHistory(dateFilterFrom, dateFilterTo, currentPage);
-      } else {
-        fetchSalesHistory(null, null, currentPage);
-      }
+      const fromDate = isDateFilterApplied ? dateFilterFrom : null;
+      const toDate = isDateFilterApplied ? dateFilterTo : null;
+      const filters = isAdvancedFilterApplied ? {
+        doctorName: filterDoctorName,
+        customerName: filterCustomerName,
+        phoneNumber: filterPhoneNumber,
+        creditStatus: filterCreditStatus
+      } : {};
+      fetchSalesHistory(fromDate, toDate, currentPage, filters);
     }
   }, [activeTab]);
 
@@ -289,7 +300,8 @@ const StoreManagerSales = () => {
   const fetchCustomers = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/store-manager/customers', {
+      // Only fetch active customers for sales page (blocked customers should not be selectable)
+      const response = await fetch('/api/store-manager/customers?status=active', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -308,7 +320,8 @@ const StoreManagerSales = () => {
   const fetchDoctors = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/store-manager/doctors', {
+      // Only fetch active doctors for sales page
+      const response = await fetch('/api/store-manager/doctors?status=active', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -696,11 +709,11 @@ Get well soon! 🌟`;
     }
   };
 
-  const fetchSalesHistory = async (fromDate = null, toDate = null, page = currentPage) => {
+  const fetchSalesHistory = async (fromDate = null, toDate = null, page = currentPage, filters = {}) => {
     try {
       setSalesLoading(true);
       const token = localStorage.getItem('token');
-      console.log('Fetching sales history...', { fromDate, toDate, page });
+      console.log('Fetching sales history...', { fromDate, toDate, page, filters });
 
       // Build query parameters
       const params = new URLSearchParams();
@@ -721,7 +734,23 @@ Get well soon! 🌟`;
         params.append('endDate', endDate.toISOString());
       }
 
-      const response = await fetch(`/api/store-manager/sales?${params.toString()}`, {
+      // Add new filter parameters
+      if (filters.doctorName && filters.doctorName.trim()) {
+        params.append('doctorName', filters.doctorName.trim());
+      }
+      if (filters.customerName && filters.customerName.trim()) {
+        params.append('customerName', filters.customerName.trim());
+      }
+      if (filters.phoneNumber && filters.phoneNumber.trim()) {
+        params.append('phoneNumber', filters.phoneNumber.trim());
+      }
+      if (filters.creditStatus && filters.creditStatus !== '') {
+        params.append('creditStatus', filters.creditStatus);
+      }
+
+      const finalUrl = `/api/store-manager/sales?${params.toString()}`;
+
+      const response = await fetch(finalUrl, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -791,12 +820,26 @@ Get well soon! 🌟`;
 
       setIsDateFilterApplied(true);
       setCurrentPage(1); // Reset to first page when applying filters
-      fetchSalesHistory(dateFilterFrom, dateFilterTo, 1);
+
+      const filters = isAdvancedFilterApplied ? {
+        doctorName: filterDoctorName,
+        customerName: filterCustomerName,
+        phoneNumber: filterPhoneNumber,
+        creditStatus: filterCreditStatus
+      } : {};
+      fetchSalesHistory(dateFilterFrom, dateFilterTo, 1, filters);
     } else if (dateFilterFrom && !dateFilterTo) {
       // Single date filter
       setIsDateFilterApplied(true);
       setCurrentPage(1); // Reset to first page when applying filters
-      fetchSalesHistory(dateFilterFrom, dateFilterFrom, 1);
+
+      const filters = isAdvancedFilterApplied ? {
+        doctorName: filterDoctorName,
+        customerName: filterCustomerName,
+        phoneNumber: filterPhoneNumber,
+        creditStatus: filterCreditStatus
+      } : {};
+      fetchSalesHistory(dateFilterFrom, dateFilterFrom, 1, filters);
     } else {
       alert('Please select at least a From date');
     }
@@ -807,18 +850,96 @@ Get well soon! 🌟`;
     setDateFilterTo('');
     setIsDateFilterApplied(false);
     setCurrentPage(1); // Reset to first page when clearing filters
-    fetchSalesHistory(null, null, 1); // Fetch all sales from page 1
+
+    // If advanced filters are applied, keep them
+    if (isAdvancedFilterApplied) {
+      const filters = {
+        doctorName: filterDoctorName,
+        customerName: filterCustomerName,
+        phoneNumber: filterPhoneNumber,
+        creditStatus: filterCreditStatus
+      };
+      fetchSalesHistory(null, null, 1, filters);
+    } else {
+      fetchSalesHistory(null, null, 1);
+    }
+  };
+
+  // Advanced filter functions
+  const handleApplyAdvancedFilters = () => {
+    const hasFilters = filterDoctorName.trim() || filterCustomerName.trim() ||
+                      filterPhoneNumber.trim() || filterCreditStatus;
+
+    if (!hasFilters) {
+      alert('Please enter at least one filter criteria');
+      return;
+    }
+
+    const filters = {
+      doctorName: filterDoctorName,
+      customerName: filterCustomerName,
+      phoneNumber: filterPhoneNumber,
+      creditStatus: filterCreditStatus
+    };
+
+    setIsAdvancedFilterApplied(true);
+    setCurrentPage(1); // Reset to first page when applying filters
+
+    // Apply both date and advanced filters
+    const fromDate = isDateFilterApplied ? dateFilterFrom : null;
+    const toDate = isDateFilterApplied ? dateFilterTo : null;
+    fetchSalesHistory(fromDate, toDate, 1, filters);
+  };
+
+  const handleClearAdvancedFilters = () => {
+    setFilterDoctorName('');
+    setFilterCustomerName('');
+    setFilterPhoneNumber('');
+    setFilterCreditStatus('');
+    setIsAdvancedFilterApplied(false);
+    setCurrentPage(1); // Reset to first page when clearing filters
+
+    // If date filters are applied, keep them
+    if (isDateFilterApplied) {
+      fetchSalesHistory(dateFilterFrom, dateFilterTo, 1);
+    } else {
+      fetchSalesHistory(null, null, 1);
+    }
+  };
+
+  const handleClearAllFilters = () => {
+    // Clear date filters
+    setDateFilterFrom('');
+    setDateFilterTo('');
+    setIsDateFilterApplied(false);
+
+    // Clear advanced filters
+    setFilterDoctorName('');
+    setFilterCustomerName('');
+    setFilterPhoneNumber('');
+    setFilterCreditStatus('');
+    setIsAdvancedFilterApplied(false);
+
+    setCurrentPage(1);
+    fetchSalesHistory(null, null, 1);
   };
 
   // Pagination functions
   const handlePageChange = (newPage) => {
     if (newPage >= 1 && newPage <= totalPages && newPage !== currentPage) {
       setCurrentPage(newPage);
-      if (isDateFilterApplied && dateFilterFrom) {
-        fetchSalesHistory(dateFilterFrom, dateFilterTo, newPage);
-      } else {
-        fetchSalesHistory(null, null, newPage);
-      }
+
+      // Prepare filters
+      const fromDate = isDateFilterApplied ? dateFilterFrom : null;
+      const toDate = isDateFilterApplied ? dateFilterTo : null;
+      const filters = isAdvancedFilterApplied ? {
+        doctorName: filterDoctorName,
+        customerName: filterCustomerName,
+        phoneNumber: filterPhoneNumber,
+        creditStatus: filterCreditStatus
+      } : {};
+
+      fetchSalesHistory(fromDate, toDate, newPage, filters);
     }
   };
 
@@ -890,6 +1011,13 @@ Get well soon! 🌟`;
     // Don't add to cart if quantity is 0
     if (selectedQty <= 0) {
       alert('Please select a quantity greater than 0');
+      return;
+    }
+
+    // Check if medicine is expired (for legacy medicines without batch system)
+    // Note: Batch-aware medicines are already filtered by the backend
+    if (medicine.expiryDate && new Date(medicine.expiryDate) < new Date()) {
+      alert(`Cannot add expired medicine "${medicine.name}" to cart. This medicine expired on ${new Date(medicine.expiryDate).toLocaleDateString()}.`);
       return;
     }
 
@@ -1425,11 +1553,15 @@ Get well soon! 🌟`;
         fetchMedicines();
 
         // Refresh sales history to show the new sale
-        if (isDateFilterApplied && dateFilterFrom) {
-          fetchSalesHistory(dateFilterFrom, dateFilterTo, currentPage);
-        } else {
-          fetchSalesHistory(null, null, currentPage);
-        }
+        const fromDate = isDateFilterApplied ? dateFilterFrom : null;
+        const toDate = isDateFilterApplied ? dateFilterTo : null;
+        const filters = isAdvancedFilterApplied ? {
+          doctorName: filterDoctorName,
+          customerName: filterCustomerName,
+          phoneNumber: filterPhoneNumber,
+          creditStatus: filterCreditStatus
+        } : {};
+        fetchSalesHistory(fromDate, toDate, currentPage, filters);
       } else {
         const errorData = await response.json();
         alert(errorData.message || 'Failed to process sale');
@@ -1449,13 +1581,14 @@ Get well soon! 🌟`;
 
     const searchLower = searchTerm.toLowerCase().trim();
 
-    // Filter inventory medicines (in stock)
-    const inventoryResults = medicines.filter(medicine =>
-      medicine.name?.toLowerCase().includes(searchLower) ||
-      medicine.genericName?.toLowerCase().includes(searchLower) ||
-      medicine.manufacturer?.toLowerCase().includes(searchLower) ||
-      medicine.category?.toLowerCase().includes(searchLower)
-    ).map(medicine => ({ ...medicine, isInInventory: true }));
+    // Filter inventory medicines (backend already handles batch-aware expiry filtering)
+    const inventoryResults = medicines.filter(medicine => {
+      // Check if medicine matches search criteria
+      return medicine.name?.toLowerCase().includes(searchLower) ||
+        medicine.genericName?.toLowerCase().includes(searchLower) ||
+        medicine.manufacturer?.toLowerCase().includes(searchLower) ||
+        medicine.category?.toLowerCase().includes(searchLower);
+    }).map(medicine => ({ ...medicine, isInInventory: true }));
 
     // Filter master medicines that are NOT in inventory (out of stock/not added)
     const masterResults = masterMedicines.filter(masterMedicine => {
@@ -2503,61 +2636,269 @@ Get well soon! 🌟`;
                 <h3 className="text-lg font-medium text-gray-900 text-left">Sales History</h3>
               </div>
 
-              {/* Date Filter Controls */}
+              {/* Comprehensive Filter Controls */}
               <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end">
-                  <div className="flex flex-col sm:flex-row gap-4 flex-1">
-                    <div className="flex flex-col">
-                      <label className="text-sm font-medium text-gray-700 mb-1">From Date</label>
-                      <input
-                        type="date"
-                        value={dateFilterFrom}
-                        onChange={(e) => setDateFilterFrom(e.target.value)}
-                        className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                        max={new Date().toISOString().split('T')[0]} // Prevent future dates
-                      />
+                {/* Date Filters Row */}
+                <div className="mb-4">
+                  <h4 className="text-sm font-semibold text-gray-800 mb-3 text-left">Date Range Filter</h4>
+                  <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end">
+                    <div className="flex flex-col sm:flex-row gap-4 flex-1">
+                      <div className="flex flex-col">
+                        <label className="text-sm font-medium text-gray-700 mb-1 text-left">From Date</label>
+                        <input
+                          type="date"
+                          value={dateFilterFrom}
+                          onChange={(e) => setDateFilterFrom(e.target.value)}
+                          className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                          max={new Date().toISOString().split('T')[0]} // Prevent future dates
+                        />
+                      </div>
+                      <div className="flex flex-col">
+                        <label className="text-sm font-medium text-gray-700 mb-1 text-left">To Date</label>
+                        <input
+                          type="date"
+                          value={dateFilterTo}
+                          onChange={(e) => setDateFilterTo(e.target.value)}
+                          className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                          max={new Date().toISOString().split('T')[0]} // Prevent future dates
+                          min={dateFilterFrom} // Ensure To date is not before From date
+                        />
+                      </div>
                     </div>
-                    <div className="flex flex-col">
-                      <label className="text-sm font-medium text-gray-700 mb-1">To Date</label>
-                      <input
-                        type="date"
-                        value={dateFilterTo}
-                        onChange={(e) => setDateFilterTo(e.target.value)}
-                        className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                        max={new Date().toISOString().split('T')[0]} // Prevent future dates
-                        min={dateFilterFrom} // Ensure To date is not before From date
-                      />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleApplyDateFilter}
+                        disabled={!dateFilterFrom}
+                        className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2 text-sm font-medium"
+                      >
+                        <Filter className="h-4 w-4" />
+                        Apply Date Filter
+                      </button>
+                      <button
+                        onClick={handleClearDateFilter}
+                        className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 flex items-center gap-2 text-sm font-medium"
+                      >
+                        <X className="h-4 w-4" />
+                        Clear Date
+                      </button>
                     </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleApplyDateFilter}
-                      disabled={!dateFilterFrom}
-                      className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2 text-sm font-medium"
-                    >
-                      <Filter className="h-4 w-4" />
-                      Apply Filter
-                    </button>
-                    <button
-                      onClick={handleClearDateFilter}
-                      className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 flex items-center gap-2 text-sm font-medium"
-                    >
-                      <X className="h-4 w-4" />
-                      Clear
-                    </button>
                   </div>
                 </div>
 
-                {/* Current Filter Display */}
-                {isDateFilterApplied && (
-                  <div className="mt-3 flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded-md">
-                    <Calendar className="h-4 w-4" />
-                    <span>
-                      Showing sales from {new Date(dateFilterFrom).toLocaleDateString('en-IN')}
-                      {dateFilterTo && dateFilterFrom !== dateFilterTo && (
-                        <> to {new Date(dateFilterTo).toLocaleDateString('en-IN')}</>
+                {/* Advanced Filters Row */}
+                <div className="mb-4">
+                  <h4 className="text-sm font-semibold text-gray-800 mb-3 text-left">Advanced Filters</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                    <div className="flex flex-col">
+                      <label className="text-sm font-medium text-gray-700 mb-1 text-left">Doctor Name</label>
+                      <input
+                        type="text"
+                        value={filterDoctorName}
+                        onChange={(e) => setFilterDoctorName(e.target.value)}
+                        placeholder="Enter doctor name"
+                        className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                      />
+                    </div>
+                    <div className="flex flex-col">
+                      <label className="text-sm font-medium text-gray-700 mb-1 text-left">Customer Name</label>
+                      <input
+                        type="text"
+                        value={filterCustomerName}
+                        onChange={(e) => setFilterCustomerName(e.target.value)}
+                        placeholder="Enter customer name"
+                        className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                      />
+                    </div>
+                    <div className="flex flex-col">
+                      <label className="text-sm font-medium text-gray-700 mb-1 text-left">Phone Number</label>
+                      <input
+                        type="text"
+                        value={filterPhoneNumber}
+                        onChange={(e) => setFilterPhoneNumber(e.target.value)}
+                        placeholder="Enter phone number"
+                        className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                      />
+                    </div>
+                    <div className="flex flex-col">
+                      <label className="text-sm font-medium text-gray-700 mb-1 text-left">Payment Status</label>
+                      <select
+                        value={filterCreditStatus}
+                        onChange={(e) => setFilterCreditStatus(e.target.value)}
+                        className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                      >
+                        <option value="">All Sales</option>
+                        <option value="paid">Paid Sales</option>
+                        <option value="credit">Credit Sales (Unpaid/Partial)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleApplyAdvancedFilters}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center gap-2 text-sm font-medium"
+                    >
+                      <Filter className="h-4 w-4" />
+                      Apply Advanced Filters
+                    </button>
+                    <button
+                      onClick={handleClearAdvancedFilters}
+                      className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 flex items-center gap-2 text-sm font-medium"
+                    >
+                      <X className="h-4 w-4" />
+                      Clear Advanced
+                    </button>
+                    {(isDateFilterApplied || isAdvancedFilterApplied) && (
+                      <button
+                        onClick={handleClearAllFilters}
+                        className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center gap-2 text-sm font-medium"
+                      >
+                        <X className="h-4 w-4" />
+                        Clear All Filters
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Active Filters Display */}
+                {(isDateFilterApplied || isAdvancedFilterApplied) && (
+                  <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-md">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Filter className="h-4 w-4 text-green-600" />
+                      <span className="text-sm font-medium text-green-800">Active Filters:</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {isDateFilterApplied && (
+                        <div className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">
+                          <Calendar className="h-3 w-3" />
+                          <span>
+                            Date: {new Date(dateFilterFrom).toLocaleDateString('en-IN')}
+                            {dateFilterTo && dateFilterFrom !== dateFilterTo && (
+                              <> to {new Date(dateFilterTo).toLocaleDateString('en-IN')}</>
+                            )}
+                          </span>
+                          <button
+                            onClick={handleClearDateFilter}
+                            className="ml-1 hover:bg-green-200 rounded-full p-0.5"
+                            title="Clear date filter"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
                       )}
-                    </span>
+                      {isAdvancedFilterApplied && filterDoctorName.trim() && (
+                        <div className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                          <span>Doctor: {filterDoctorName}</span>
+                          <button
+                            onClick={() => {
+                              setFilterDoctorName('');
+                              // Re-apply filters without doctor name
+                              const filters = {
+                                doctorName: '',
+                                customerName: filterCustomerName,
+                                phoneNumber: filterPhoneNumber,
+                                creditStatus: filterCreditStatus
+                              };
+                              const hasOtherFilters = filters.customerName.trim() || filters.phoneNumber.trim() || filters.creditStatus;
+                              if (!hasOtherFilters) {
+                                setIsAdvancedFilterApplied(false);
+                              }
+                              const fromDate = isDateFilterApplied ? dateFilterFrom : null;
+                              const toDate = isDateFilterApplied ? dateFilterTo : null;
+                              fetchSalesHistory(fromDate, toDate, 1, hasOtherFilters ? filters : {});
+                            }}
+                            className="ml-1 hover:bg-blue-200 rounded-full p-0.5"
+                            title="Clear doctor filter"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
+                      {isAdvancedFilterApplied && filterCustomerName.trim() && (
+                        <div className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                          <span>Customer: {filterCustomerName}</span>
+                          <button
+                            onClick={() => {
+                              setFilterCustomerName('');
+                              // Re-apply filters without customer name
+                              const filters = {
+                                doctorName: filterDoctorName,
+                                customerName: '',
+                                phoneNumber: filterPhoneNumber,
+                                creditStatus: filterCreditStatus
+                              };
+                              const hasOtherFilters = filters.doctorName.trim() || filters.phoneNumber.trim() || filters.creditStatus;
+                              if (!hasOtherFilters) {
+                                setIsAdvancedFilterApplied(false);
+                              }
+                              const fromDate = isDateFilterApplied ? dateFilterFrom : null;
+                              const toDate = isDateFilterApplied ? dateFilterTo : null;
+                              fetchSalesHistory(fromDate, toDate, 1, hasOtherFilters ? filters : {});
+                            }}
+                            className="ml-1 hover:bg-blue-200 rounded-full p-0.5"
+                            title="Clear customer filter"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
+                      {isAdvancedFilterApplied && filterPhoneNumber.trim() && (
+                        <div className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                          <span>Phone: {filterPhoneNumber}</span>
+                          <button
+                            onClick={() => {
+                              setFilterPhoneNumber('');
+                              // Re-apply filters without phone number
+                              const filters = {
+                                doctorName: filterDoctorName,
+                                customerName: filterCustomerName,
+                                phoneNumber: '',
+                                creditStatus: filterCreditStatus
+                              };
+                              const hasOtherFilters = filters.doctorName.trim() || filters.customerName.trim() || filters.creditStatus;
+                              if (!hasOtherFilters) {
+                                setIsAdvancedFilterApplied(false);
+                              }
+                              const fromDate = isDateFilterApplied ? dateFilterFrom : null;
+                              const toDate = isDateFilterApplied ? dateFilterTo : null;
+                              fetchSalesHistory(fromDate, toDate, 1, hasOtherFilters ? filters : {});
+                            }}
+                            className="ml-1 hover:bg-blue-200 rounded-full p-0.5"
+                            title="Clear phone filter"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
+                      {isAdvancedFilterApplied && filterCreditStatus && (
+                        <div className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                          <span>Status: {filterCreditStatus === 'credit' ? 'Credit Sales' : 'Paid Sales'}</span>
+                          <button
+                            onClick={() => {
+                              setFilterCreditStatus('');
+                              // Re-apply filters without credit status
+                              const filters = {
+                                doctorName: filterDoctorName,
+                                customerName: filterCustomerName,
+                                phoneNumber: filterPhoneNumber,
+                                creditStatus: ''
+                              };
+                              const hasOtherFilters = filters.doctorName.trim() || filters.customerName.trim() || filters.phoneNumber.trim();
+                              if (!hasOtherFilters) {
+                                setIsAdvancedFilterApplied(false);
+                              }
+                              const fromDate = isDateFilterApplied ? dateFilterFrom : null;
+                              const toDate = isDateFilterApplied ? dateFilterTo : null;
+                              fetchSalesHistory(fromDate, toDate, 1, hasOtherFilters ? filters : {});
+                            }}
+                            className="ml-1 hover:bg-blue-200 rounded-full p-0.5"
+                            title="Clear status filter"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2576,9 +2917,12 @@ Get well soon! 🌟`;
                     <div className="mb-4 flex justify-between items-center text-sm text-gray-600">
                       <div>
                         Showing {((currentPage - 1) * itemsPerPage) + 1}-{Math.min(currentPage * itemsPerPage, totalSales)} of {totalSales} sales
-                        {isDateFilterApplied && (
+                        {(isDateFilterApplied || isAdvancedFilterApplied) && (
                           <span className="ml-2 text-green-600">
-                            (filtered by date)
+                            (filtered
+                            {isDateFilterApplied && ' by date'}
+                            {isAdvancedFilterApplied && (isDateFilterApplied ? ' and advanced filters' : ' by advanced filters')}
+                            )
                           </span>
                         )}
                       </div>

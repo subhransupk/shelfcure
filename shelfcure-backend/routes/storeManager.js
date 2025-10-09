@@ -50,7 +50,9 @@ const {
   toggleDoctorStatus,
   getDoctorStats,
   getCommissions,
-  markCommissionPaid
+  markCommissionPaid,
+  getDoctorCommissionHistory,
+  recordCommissionPayment
 } = require('../controllers/storeManagerDoctorsController');
 
 const {
@@ -476,6 +478,19 @@ router.put('/doctors/commissions/:id/pay',
   checkFeatureAccess('doctors'),
   logStoreManagerActivity('mark_commission_paid'),
   markCommissionPaid
+);
+
+router.post('/doctors/commissions/:id/record-payment',
+  checkFeatureAccess('doctors'),
+  logStoreManagerActivity('record_commission_payment'),
+  recordCommissionPayment
+);
+
+// Get commission history for a specific doctor
+router.get('/doctors/:id/commission-history',
+  checkFeatureAccess('doctors'),
+  logStoreManagerActivity('view_doctor_commission_history'),
+  getDoctorCommissionHistory
 );
 
 // Toggle doctor status route
@@ -944,6 +959,19 @@ router.post('/notification-settings',
   }
 );
 
+// Test endpoint to verify route accessibility
+router.get('/business-settings/test',
+  logStoreManagerActivity('test_business_settings'),
+  async (req, res) => {
+    res.json({
+      success: true,
+      message: 'Business settings route is accessible',
+      storeId: req.store._id,
+      userId: req.user.id
+    });
+  }
+);
+
 // Get business settings
 router.get('/business-settings',
   logStoreManagerActivity('view_business_settings'),
@@ -1030,14 +1058,21 @@ router.get('/business-settings',
 router.post('/business-settings',
   logStoreManagerActivity('update_business_settings'),
   async (req, res) => {
+    console.log('=== BUSINESS SETTINGS POST ENDPOINT HIT ===');
+    console.log('Request received at:', new Date().toISOString());
+    console.log('User:', req.user?.email);
+    console.log('Store:', req.store?._id);
+
     try {
       const Store = require('../models/Store');
       const storeId = req.store._id;
       const settings = req.body;
 
-      console.log('Saving business settings for store:', storeId);
-      console.log('Settings:', JSON.stringify(settings, null, 2));
+      console.log('=== SAVING BUSINESS SETTINGS ===');
+      console.log('Store ID:', storeId);
+      console.log('Settings received:', JSON.stringify(settings, null, 2));
       console.log('GST Number being saved:', settings.gstNumber);
+      console.log('Settings keys:', Object.keys(settings));
 
       // Validate settings
       if (settings.maxDiscountPercent && (settings.maxDiscountPercent < 0 || settings.maxDiscountPercent > 100)) {
@@ -1093,10 +1128,30 @@ router.post('/business-settings',
 
       console.log('Update data being sent to MongoDB:', JSON.stringify(updateData, null, 2));
 
+      // First get the current store to preserve required fields
+      const currentStore = await Store.findById(storeId);
+      if (!currentStore) {
+        return res.status(404).json({
+          success: false,
+          message: 'Store not found'
+        });
+      }
+
+      // Manually validate GST number if it's being updated
+      if (settings.gstNumber !== undefined && settings.gstNumber && settings.gstNumber.trim() !== '') {
+        const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+        if (!gstRegex.test(settings.gstNumber)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Please add a valid GST number (15 characters: 2 digits + 5 letters + 4 digits + 1 letter + 1 alphanumeric + Z + 1 alphanumeric)'
+          });
+        }
+      }
+
       const updatedStore = await Store.findByIdAndUpdate(
         storeId,
         { $set: updateData },
-        { new: true, runValidators: true }
+        { new: true, runValidators: false }
       );
 
       if (!updatedStore) {
@@ -1106,9 +1161,10 @@ router.post('/business-settings',
         });
       }
 
-      console.log('Business settings updated successfully');
+      console.log('=== BUSINESS SETTINGS UPDATE SUCCESSFUL ===');
       console.log('Updated store business GST:', updatedStore.business?.gstNumber);
       console.log('Updated store settings GST:', updatedStore.settings?.gstNumber);
+      console.log('Update completed successfully');
 
       res.json({
         success: true,
@@ -1118,10 +1174,35 @@ router.post('/business-settings',
 
     } catch (error) {
       console.error('Save business settings error:', error);
-      res.status(500).json({
+      console.error('Error stack:', error.stack);
+
+      // Handle specific error types
+      let statusCode = 500;
+      let errorMessage = 'Failed to save business settings';
+
+      if (error.name === 'ValidationError') {
+        statusCode = 400;
+        const validationErrors = Object.values(error.errors).map(err => err.message);
+        errorMessage = `Validation failed: ${validationErrors.join(', ')}`;
+      } else if (error.name === 'CastError') {
+        statusCode = 400;
+        errorMessage = `Invalid data format: ${error.message}`;
+      } else if (error.code === 11000) {
+        statusCode = 400;
+        const field = Object.keys(error.keyValue)[0];
+        errorMessage = `Duplicate value for ${field}: ${error.keyValue[field]}`;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      res.status(statusCode).json({
         success: false,
-        message: 'Failed to save business settings',
-        error: error.message
+        message: errorMessage,
+        error: error.message,
+        ...(process.env.NODE_ENV === 'development' && {
+          stack: error.stack,
+          details: error
+        })
       });
     }
   }

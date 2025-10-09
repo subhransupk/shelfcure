@@ -197,6 +197,51 @@ const purchaseSchema = new mongoose.Schema({
   paymentDate: Date,
   dueDate: Date,
 
+  // Payment history tracking
+  paymentHistory: [{
+    amount: {
+      type: Number,
+      required: true,
+      min: 0
+    },
+    paymentMethod: {
+      type: String,
+      enum: ['cash', 'card', 'upi', 'bank_transfer', 'check'],
+      required: true
+    },
+    transactionId: {
+      type: String,
+      trim: true
+    },
+    checkNumber: {
+      type: String,
+      trim: true
+    },
+    notes: {
+      type: String,
+      trim: true,
+      maxlength: 500
+    },
+    paymentDate: {
+      type: Date,
+      default: Date.now
+    },
+    processedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+    runningBalance: {
+      type: Number,
+      required: true,
+      min: 0
+    },
+    supplierTransactionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'SupplierTransaction'
+    }
+  }],
+
   // Purchase status and tracking
   status: {
     type: String,

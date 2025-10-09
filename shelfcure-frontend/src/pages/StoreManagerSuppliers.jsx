@@ -52,6 +52,7 @@ const StoreManagerSuppliers = () => {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [refreshingStats, setRefreshingStats] = useState(false);
   const [pagination, setPagination] = useState({
     page: 1,
     pages: 1,
@@ -149,6 +150,36 @@ const StoreManagerSuppliers = () => {
     setNewSupplier(supplier);
     setError('');
     setShowEditModal(true);
+  };
+
+  const handleRefreshStats = async () => {
+    try {
+      setRefreshingStats(true);
+      setError('');
+
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/store-manager/suppliers/refresh-stats', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Refresh the suppliers list to show updated stats
+        await fetchSuppliers();
+      } else {
+        setError(data.message || 'Failed to refresh supplier statistics');
+      }
+    } catch (error) {
+      console.error('Refresh stats error:', error);
+      setError('Failed to refresh supplier statistics. Please try again.');
+    } finally {
+      setRefreshingStats(false);
+    }
   };
 
   // Form validation function
@@ -352,14 +383,28 @@ const StoreManagerSuppliers = () => {
             </select>
           </div>
 
-          {/* Add Supplier Button */}
-          <button
-            onClick={handleAddSupplier}
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Add Supplier
-          </button>
+          {/* Action Buttons */}
+          <div className="flex gap-2">
+            <button
+              onClick={handleRefreshStats}
+              disabled={refreshingStats}
+              className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50"
+            >
+              {refreshingStats ? (
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600 mr-2"></div>
+              ) : (
+                <DollarSign className="h-4 w-4 mr-2" />
+              )}
+              {refreshingStats ? 'Updating...' : 'Refresh Stats'}
+            </button>
+            <button
+              onClick={handleAddSupplier}
+              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add Supplier
+            </button>
+          </div>
         </div>
 
         {/* Error Display */}
@@ -397,8 +442,8 @@ const StoreManagerSuppliers = () => {
                   </div>
                   <div className="flex items-center space-x-2">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      supplier.isActive 
-                        ? 'bg-green-100 text-green-800' 
+                      supplier.isActive
+                        ? 'bg-green-100 text-green-800'
                         : 'bg-red-100 text-red-800'
                     }`}>
                       {supplier.isActive ? 'Active' : 'Inactive'}
@@ -411,6 +456,16 @@ const StoreManagerSuppliers = () => {
                     </button>
                   </div>
                 </div>
+
+                {/* Outstanding Balance Badge */}
+                {supplier.outstandingBalance > 0 && (
+                  <div className="mb-3">
+                    <div className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-50 text-red-700 border border-red-200">
+                      <AlertCircle className="w-4 h-4 mr-1" />
+                      Outstanding: ₹{supplier.outstandingBalance.toLocaleString()}
+                    </div>
+                  </div>
+                )}
 
                 {/* Contact Info */}
                 <div className="space-y-2 mb-4">
@@ -431,11 +486,37 @@ const StoreManagerSuppliers = () => {
                 {/* Stats */}
                 <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-200 mb-4">
                   <div className="text-center">
-                    <div className="text-lg font-semibold text-gray-900">₹{((supplier.totalPurchaseAmount || 0) / 100000).toFixed(1)}L</div>
+                    <div className="text-lg font-semibold text-gray-900">
+                      {supplier.totalPurchaseAmount > 0
+                        ? supplier.totalPurchaseAmount >= 100000
+                          ? `₹${(supplier.totalPurchaseAmount / 100000).toFixed(1)}L`
+                          : `₹${supplier.totalPurchaseAmount.toLocaleString()}`
+                        : '₹0'
+                      }
+                    </div>
                     <div className="text-xs text-gray-500">Total Purchases</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-lg font-semibold text-gray-900">{supplier.paymentTerms}</div>
+                    <div className="text-lg font-semibold text-gray-900">
+                      {supplier.outstandingBalance > 0
+                        ? supplier.outstandingBalance >= 100000
+                          ? `₹${(supplier.outstandingBalance / 100000).toFixed(1)}L`
+                          : `₹${supplier.outstandingBalance.toLocaleString()}`
+                        : '₹0'
+                      }
+                    </div>
+                    <div className="text-xs text-gray-500">Outstanding</div>
+                  </div>
+                </div>
+
+                {/* Additional Stats Row */}
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div className="text-center">
+                    <div className="text-sm font-medium text-gray-900">{supplier.totalPurchases || 0}</div>
+                    <div className="text-xs text-gray-500">Orders</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-sm font-medium text-gray-900">{supplier.paymentTerms}</div>
                     <div className="text-xs text-gray-500">Payment Terms</div>
                   </div>
                 </div>

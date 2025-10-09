@@ -164,11 +164,12 @@ router.get('/admin/export', protect, authorize('superadmin', 'admin'), async (re
         affiliate.createdBy?.name || ''
       ]);
 
-      const csvContent = [csvHeaders, ...csvRows]
+      let csvContent = '\uFEFF'; // UTF-8 BOM for proper encoding
+      csvContent += [csvHeaders, ...csvRows]
         .map(row => row.map(field => `"${field}"`).join(','))
         .join('\n');
 
-      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="affiliates-${new Date().toISOString().split('T')[0]}.csv"`);
       res.send(csvContent);
     } else {
@@ -1150,9 +1151,12 @@ router.get('/admin/commissions/export', protect, authorize('superadmin', 'admin'
       const csv = require('csv-stringify/sync');
       const csvString = csv.stringify(csvData, { header: true });
 
-      res.setHeader('Content-Type', 'text/csv');
+      // Add UTF-8 BOM for proper encoding
+      const csvWithBOM = '\uFEFF' + csvString;
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename=commissions-${new Date().toISOString().split('T')[0]}.csv`);
-      res.send(csvString);
+      res.send(csvWithBOM);
     } else {
       res.status(200).json({
         success: true,

@@ -11,7 +11,9 @@ const {
   updatePurchase,
   deletePurchase,
   getPurchaseAnalytics,
-  getDeliveryTracking
+  getDeliveryTracking,
+  recordPurchasePayment,
+  getPurchasePaymentHistory
 } = require('../controllers/purchaseController');
 
 const {
@@ -30,9 +32,10 @@ router.use(storeManagerOnly);
 // Validation rules for purchase creation/update
 const purchaseValidation = [
   body('supplier')
-    .optional()
+    .notEmpty()
+    .withMessage('Supplier is required')
     .isMongoId()
-    .withMessage('Valid supplier ID is required when provided'),
+    .withMessage('Valid supplier ID is required'),
   body('purchaseOrderNumber')
     .trim()
     .isLength({ min: 1, max: 50 })
@@ -73,6 +76,30 @@ const purchaseUpdateValidation = [
     .optional()
     .isFloat({ min: 0 })
     .withMessage('Paid amount must be a positive number')
+];
+
+const purchasePaymentValidation = [
+  body('amount')
+    .isFloat({ min: 0.01 })
+    .withMessage('Payment amount must be greater than 0'),
+  body('paymentMethod')
+    .isIn(['cash', 'card', 'upi', 'bank_transfer', 'check'])
+    .withMessage('Invalid payment method'),
+  body('transactionId')
+    .optional()
+    .isString()
+    .trim()
+    .withMessage('Transaction ID must be a string'),
+  body('checkNumber')
+    .optional()
+    .isString()
+    .trim()
+    .withMessage('Check number must be a string'),
+  body('notes')
+    .optional()
+    .isString()
+    .trim()
+    .withMessage('Notes must be a string')
 ];
 
 // @route   GET /api/store-manager/purchases/reorder-suggestions
@@ -222,10 +249,29 @@ router.post('/',
   createPurchase
 );
 
+// @route   POST /api/store-manager/purchases/:id/payment
+// @desc    Record payment for purchase
+// @access  Private
+router.post('/:id/payment',
+  checkFeatureAccess('purchases'),
+  purchasePaymentValidation,
+  logStoreManagerActivity('record_purchase_payment'),
+  recordPurchasePayment
+);
+
+// @route   GET /api/store-manager/purchases/:id/payment-history
+// @desc    Get payment history for purchase
+// @access  Private
+router.get('/:id/payment-history',
+  checkFeatureAccess('purchases'),
+  logStoreManagerActivity('view_purchase_payment_history'),
+  getPurchasePaymentHistory
+);
+
 // @route   GET /api/store-manager/purchases/:id
 // @desc    Get single purchase
 // @access  Private
-router.get('/:id', 
+router.get('/:id',
   checkFeatureAccess('purchases'),
   getPurchase
 );
@@ -233,7 +279,7 @@ router.get('/:id',
 // @route   PUT /api/store-manager/purchases/:id
 // @desc    Update purchase
 // @access  Private
-router.put('/:id', 
+router.put('/:id',
   checkFeatureAccess('purchases'),
   purchaseUpdateValidation,
   logStoreManagerActivity('update_purchase'),

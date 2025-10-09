@@ -6,7 +6,6 @@ import {
   AlertCircle,
   Calendar,
   Search,
-  Filter,
   Download,
   Trash2,
   RotateCcw,
@@ -38,8 +37,16 @@ const StoreManagerExpiryAlerts = () => {
   const [sortOrder, setSortOrder] = useState('asc');
 
   // UI state
-  const [showFilters, setShowFilters] = useState(false);
   const [selectedItems, setSelectedItems] = useState([]);
+
+  // State for expiry date update modal
+  const [showExpiryModal, setShowExpiryModal] = useState(false);
+  const [selectedMedicine, setSelectedMedicine] = useState(null);
+  const [expiryFormData, setExpiryFormData] = useState({
+    newExpiryDate: '',
+    reason: '',
+    notes: ''
+  });
 
   useEffect(() => {
     fetchExpiryAlerts();
@@ -158,8 +165,49 @@ const StoreManagerExpiryAlerts = () => {
     }
   };
 
+  // Utility function to validate date format
+  const validateDateFormat = (dateString) => {
+    // Check if date matches YYYY-MM-DD format
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(dateString)) {
+      return { isValid: false, error: 'Please use YYYY-MM-DD format (e.g., 2024-12-31)' };
+    }
+
+    // Check if date is valid
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) {
+      return { isValid: false, error: 'Invalid date. Please check the date values.' };
+    }
+
+    // Check if date is in the past
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    date.setHours(0, 0, 0, 0);
+
+    if (date < today) {
+      return { isValid: false, error: 'Expiry date cannot be in the past.' };
+    }
+
+    // Check if date is too far in the future (10 years)
+    const maxFutureDate = new Date();
+    maxFutureDate.setFullYear(maxFutureDate.getFullYear() + 10);
+
+    if (date > maxFutureDate) {
+      return { isValid: false, error: 'Expiry date cannot be more than 10 years in the future.' };
+    }
+
+    return { isValid: true, date };
+  };
+
   const handleExtendExpiry = async (medicineId, newExpiryDate, reason = '', notes = '') => {
     try {
+      // Validate date format before sending to server
+      const validation = validateDateFormat(newExpiryDate);
+      if (!validation.isValid) {
+        alert(`Invalid Date: ${validation.error}`);
+        return;
+      }
+
       const token = localStorage.getItem('token');
       const response = await fetch(`/api/store-manager/expiry-alerts/${medicineId}/extend-expiry`, {
         method: 'PUT',
@@ -174,22 +222,89 @@ const StoreManagerExpiryAlerts = () => {
         })
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to extend expiry date');
-      }
-
       const data = await response.json();
+
+      if (!response.ok) {
+        // Handle specific error messages from server
+        let errorMessage = 'Failed to update expiry date';
+
+        if (data.message) {
+          errorMessage = data.message;
+        }
+
+        if (data.field && data.providedValue) {
+          errorMessage += `\nField: ${data.field}\nProvided value: ${data.providedValue}`;
+        }
+
+        if (data.errors && Array.isArray(data.errors)) {
+          errorMessage += '\nErrors:\n' + data.errors.join('\n');
+        }
+
+        alert(errorMessage);
+        return;
+      }
 
       // Refresh the data
       fetchExpiryAlerts();
       fetchSummary();
 
-      // Show success message
-      alert('Expiry date updated successfully');
+      // Show success message with details
+      const successMessage = `Expiry date updated successfully!\n\nMedicine: ${data.data.medicineName}\nOld Date: ${new Date(data.data.oldExpiryDate).toLocaleDateString()}\nNew Date: ${new Date(data.data.newExpiryDate).toLocaleDateString()}`;
+      alert(successMessage);
+
     } catch (error) {
       console.error('Extend expiry error:', error);
-      alert('Failed to update expiry date');
+
+      // More specific error handling
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        alert('Network error: Please check your internet connection and try again.');
+      } else if (error.message.includes('JSON')) {
+        alert('Server response error: Please try again or contact support.');
+      } else {
+        alert(`Error: ${error.message || 'Failed to update expiry date. Please try again.'}`);
+      }
     }
+  };
+
+  // Handler for opening expiry date update modal
+  const handleExtendExpiryClick = (medicine) => {
+    setSelectedMedicine(medicine);
+
+    // Pre-fill with current expiry date + 30 days as suggestion
+    const currentExpiry = new Date(medicine.expiryDate);
+    const suggestedDate = new Date(currentExpiry);
+    suggestedDate.setDate(suggestedDate.getDate() + 30);
+
+    setExpiryFormData({
+      newExpiryDate: suggestedDate.toISOString().split('T')[0], // Format as YYYY-MM-DD
+      reason: 'Manual extension',
+      notes: 'Extended from expiry alerts'
+    });
+
+    setShowExpiryModal(true);
+  };
+
+  // Handler for submitting expiry date update
+  const handleExpirySubmit = async (e) => {
+    e.preventDefault();
+
+    if (!selectedMedicine) return;
+
+    await handleExtendExpiry(
+      selectedMedicine._id,
+      expiryFormData.newExpiryDate,
+      expiryFormData.reason,
+      expiryFormData.notes
+    );
+
+    // Close modal on success (handleExtendExpiry will show success/error messages)
+    setShowExpiryModal(false);
+    setSelectedMedicine(null);
+    setExpiryFormData({
+      newExpiryDate: '',
+      reason: '',
+      notes: ''
+    });
   };
 
   const getUrgencyBadge = (urgencyLevel, daysToExpiry) => {
@@ -263,13 +378,6 @@ const StoreManagerExpiryAlerts = () => {
                 <p className="text-gray-600 text-left">Monitor and manage medicine expiry dates</p>
               </div>
               <div className="flex space-x-3">
-                <button
-                  onClick={() => setShowFilters(!showFilters)}
-                  className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-                >
-                  <Filter className="h-4 w-4 mr-2" />
-                  Filters
-                </button>
                 <button className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
                   <Download className="h-4 w-4 mr-2" />
                   Export
@@ -337,75 +445,100 @@ const StoreManagerExpiryAlerts = () => {
             )}
           </div>
 
-          {/* Filters Panel */}
-          {showFilters && (
-            <div className="mb-6 bg-gray-50 border border-gray-200 rounded-lg p-4">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                {/* Urgency Filter */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Urgency Level</label>
-                  <select
-                    value={filters.urgency}
-                    onChange={(e) => handleFilterChange('urgency', e.target.value)}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                  >
-                    {urgencyOptions.map(option => (
-                      <option key={option.value} value={option.value}>
-                        {option.label} ({option.count})
-                      </option>
-                    ))}
-                  </select>
+          {/* Filters */}
+          <div className="bg-white shadow rounded-lg p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-medium text-gray-900">Filters</h3>
+              {loading && (
+                <div className="flex items-center text-sm text-gray-500">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-600 mr-2"></div>
+                  Loading...
                 </div>
+              )}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              {/* Urgency Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Urgency Level</label>
+                <select
+                  value={filters.urgency}
+                  onChange={(e) => handleFilterChange('urgency', e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
+                >
+                  {urgencyOptions.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label} ({option.count})
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-                {/* Category Filter */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
-                  <select
-                    value={filters.category}
-                    onChange={(e) => handleFilterChange('category', e.target.value)}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                  >
-                    {categories.map(category => (
-                      <option key={category} value={category}>
-                        {category === 'all' ? 'All Categories' : category}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              {/* Category Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+                <select
+                  value={filters.category}
+                  onChange={(e) => handleFilterChange('category', e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
+                >
+                  {categories.map(category => (
+                    <option key={category} value={category}>
+                      {category === 'all' ? 'All Categories' : category}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-                {/* Days Filter */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Days Ahead</label>
-                  <select
-                    value={filters.days}
-                    onChange={(e) => handleFilterChange('days', e.target.value)}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                  >
-                    <option value={30}>30 days</option>
-                    <option value={60}>60 days</option>
-                    <option value={90}>90 days</option>
-                    <option value={180}>180 days</option>
-                    <option value={365}>1 year</option>
-                  </select>
-                </div>
+              {/* Days Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Days Ahead</label>
+                <select
+                  value={filters.days}
+                  onChange={(e) => handleFilterChange('days', e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
+                >
+                  <option value={30}>30 days</option>
+                  <option value={60}>60 days</option>
+                  <option value={90}>90 days</option>
+                  <option value={180}>180 days</option>
+                  <option value={365}>1 year</option>
+                </select>
+              </div>
 
-                {/* Search */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <input
-                      type="text"
-                      placeholder="Search medicines..."
-                      value={filters.search}
-                      onChange={(e) => handleFilterChange('search', e.target.value)}
-                      className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md text-sm"
-                    />
-                  </div>
+              {/* Search */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search medicines..."
+                    value={filters.search}
+                    onChange={(e) => handleFilterChange('search', e.target.value)}
+                    className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
+                  />
                 </div>
               </div>
             </div>
-          )}
+
+            {/* Clear Filters Button */}
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={() => {
+                  setFilters({
+                    urgency: 'all',
+                    category: 'all',
+                    search: '',
+                    days: 90
+                  });
+                  setCurrentPage(1);
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+              >
+                Clear Filters
+              </button>
+            </div>
+          </div>
 
           {error && (
             <div className="mb-6 bg-red-50 border border-red-200 rounded-md p-4">
@@ -591,13 +724,7 @@ const StoreManagerExpiryAlerts = () => {
                                 <Trash2 className="h-4 w-4" />
                               </button>
                               <button
-                                onClick={() => {
-                                  const newDate = prompt('Enter new expiry date (YYYY-MM-DD):');
-                                  if (newDate) {
-                                    const reason = prompt('Reason for extending expiry date:') || 'Manual extension';
-                                    handleExtendExpiry(medicine._id, newDate, reason, 'Extended from expiry alerts');
-                                  }
-                                }}
+                                onClick={() => handleExtendExpiryClick(medicine)}
                                 className="text-orange-600 hover:text-orange-900"
                                 title="Extend Expiry Date"
                               >
@@ -639,6 +766,102 @@ const StoreManagerExpiryAlerts = () => {
             </div>
           </div>
         </div>
+
+        {/* Expiry Date Update Modal */}
+        {showExpiryModal && selectedMedicine && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 text-left">
+                  Update Expiry Date
+                </h3>
+                <button
+                  onClick={() => setShowExpiryModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                <p className="text-sm text-gray-600 text-left">Medicine:</p>
+                <p className="font-medium text-gray-900 text-left">{selectedMedicine.name}</p>
+                <p className="text-sm text-gray-600 text-left mt-1">
+                  Current Expiry: {new Date(selectedMedicine.expiryDate).toLocaleDateString()}
+                </p>
+              </div>
+
+              <form onSubmit={handleExpirySubmit}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1 text-left">
+                      New Expiry Date *
+                    </label>
+                    <input
+                      type="date"
+                      value={expiryFormData.newExpiryDate}
+                      onChange={(e) => setExpiryFormData({
+                        ...expiryFormData,
+                        newExpiryDate: e.target.value
+                      })}
+                      min={new Date().toISOString().split('T')[0]}
+                      required
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1 text-left">
+                      Reason
+                    </label>
+                    <input
+                      type="text"
+                      value={expiryFormData.reason}
+                      onChange={(e) => setExpiryFormData({
+                        ...expiryFormData,
+                        reason: e.target.value
+                      })}
+                      placeholder="e.g., Manual extension, Supplier correction"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1 text-left">
+                      Notes
+                    </label>
+                    <textarea
+                      value={expiryFormData.notes}
+                      onChange={(e) => setExpiryFormData({
+                        ...expiryFormData,
+                        notes: e.target.value
+                      })}
+                      placeholder="Additional notes about this expiry date change"
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex space-x-3 mt-6">
+                  <button
+                    type="button"
+                    onClick={() => setShowExpiryModal(false)}
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                  >
+                    Update Expiry Date
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     </StoreManagerLayout>
   );

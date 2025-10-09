@@ -154,9 +154,14 @@ creditTransactionSchema.virtual('direction').get(function() {
   return this.balanceChange >= 0 ? 'credit' : 'debit';
 });
 
-// Pre-save middleware to set fiscal information
+// Pre-save middleware to set fiscal information and ensure transactionDate
 creditTransactionSchema.pre('save', function(next) {
-  const date = this.transactionDate || new Date();
+  // Ensure transactionDate is always set
+  if (!this.transactionDate) {
+    this.transactionDate = new Date();
+  }
+
+  const date = this.transactionDate;
   this.fiscalYear = `${date.getFullYear()}-${date.getFullYear() + 1}`;
   this.quarter = `Q${Math.ceil((date.getMonth() + 1) / 3)}`;
   this.month = date.toLocaleString('default', { month: 'long' });
@@ -185,7 +190,8 @@ creditTransactionSchema.statics.createTransaction = async function(transactionDa
   const transaction = await this.create({
     ...transactionData,
     previousBalance,
-    newBalance
+    newBalance,
+    transactionDate: transactionData.transactionDate || new Date() // Ensure transactionDate is always set
   });
 
   // Update customer balance

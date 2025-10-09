@@ -102,6 +102,17 @@ const markAttendance = asyncHandler(async (req, res) => {
     const attendanceDate = new Date(date);
     attendanceDate.setHours(0, 0, 0, 0);
 
+    // Validate attendance date is not before staff joining date
+    const joiningDate = new Date(staff.dateOfJoining);
+    joiningDate.setHours(0, 0, 0, 0);
+
+    if (attendanceDate < joiningDate) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot mark attendance for ${staff.name} before their joining date (${joiningDate.toLocaleDateString()})`
+      });
+    }
+
     // Check if attendance already exists for this date
     let attendance = await StaffAttendance.findOne({
       staff: staffId,
@@ -207,13 +218,14 @@ const getAttendanceStats = asyncHandler(async (req, res) => {
     const nextDay = new Date(targetDate);
     nextDay.setDate(nextDay.getDate() + 1);
 
-    // Get all staff in the store
-    const totalStaff = await Staff.countDocuments({ 
-      store: storeId, 
-      status: 'active' 
+    // Get all staff in the store who were employed on the target date
+    const totalStaff = await Staff.countDocuments({
+      store: storeId,
+      status: 'active',
+      dateOfJoining: { $lte: targetDate }
     });
 
-    // Get attendance statistics
+    // Get attendance statistics (only for staff who were employed on the target date)
     const stats = await StaffAttendance.aggregate([
       {
         $match: {
@@ -221,6 +233,22 @@ const getAttendanceStats = asyncHandler(async (req, res) => {
           date: {
             $gte: targetDate,
             $lt: nextDay
+          }
+        }
+      },
+      {
+        $lookup: {
+          from: 'staff',
+          localField: 'staff',
+          foreignField: '_id',
+          as: 'staffDetails'
+        }
+      },
+      { $unwind: '$staffDetails' },
+      {
+        $match: {
+          $expr: {
+            $gte: ['$date', '$staffDetails.dateOfJoining']
           }
         }
       },
@@ -305,6 +333,18 @@ const bulkMarkAttendance = asyncHandler(async (req, res) => {
         const staff = await Staff.findOne({ _id: data.staffId, store: storeId });
         if (!staff) {
           errors.push({ staffId: data.staffId, error: 'Staff not found in this store' });
+          continue;
+        }
+
+        // Validate attendance date is not before staff joining date
+        const joiningDate = new Date(staff.dateOfJoining);
+        joiningDate.setHours(0, 0, 0, 0);
+
+        if (attendanceDate < joiningDate) {
+          errors.push({
+            staffId: data.staffId,
+            error: `Cannot mark attendance before joining date (${joiningDate.toLocaleDateString()})`
+          });
           continue;
         }
 
@@ -394,11 +434,12 @@ const getStaffWithAttendance = asyncHandler(async (req, res) => {
     const nextDay = new Date(targetDate);
     nextDay.setDate(nextDay.getDate() + 1);
 
-    // Get all active staff in the store
+    // Get all active staff in the store who were employed on the target date
     const staff = await Staff.find({
       store: storeId,
-      status: 'active'
-    }).select('name email phone employeeId role department').lean();
+      status: 'active',
+      dateOfJoining: { $lte: targetDate }
+    }).select('name email phone employeeId role department dateOfJoining').lean();
 
     // Get attendance records for the date
     const attendanceRecords = await StaffAttendance.find({
@@ -487,24 +528,96 @@ const getAttendanceHistory = asyncHandler(async (req, res) => {
     // Calculate pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Get attendance records with staff details
-    const attendanceRecords = await StaffAttendance.find(query)
-      .populate({
-        path: 'staff',
-        select: 'name email phone employeeId role department'
-      })
-      .sort({ date: -1, 'staff.name': 1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .lean();
+    // Get attendance records with staff details, filtering by joining date
+    const attendanceRecords = await StaffAttendance.aggregate([
+      { $match: query },
+      {
+        $lookup: {
+          from: 'staff',
+          localField: 'staff',
+          foreignField: '_id',
+          as: 'staffDetails'
+        }
+      },
+      { $unwind: '$staffDetails' },
+      {
+        $match: {
+          $expr: {
+            $gte: ['$date', '$staffDetails.dateOfJoining']
+          }
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          date: 1,
+          status: 1,
+          checkIn: 1,
+          checkOut: 1,
+          workingHours: 1,
+          leaveDetails: 1,
+          performance: 1,
+          notes: 1,
+          staff: {
+            _id: '$staffDetails._id',
+            name: '$staffDetails.name',
+            email: '$staffDetails.email',
+            phone: '$staffDetails.phone',
+            employeeId: '$staffDetails.employeeId',
+            role: '$staffDetails.role',
+            department: '$staffDetails.department',
+            dateOfJoining: '$staffDetails.dateOfJoining'
+          }
+        }
+      },
+      { $sort: { date: -1, 'staff.name': 1 } },
+      { $skip: skip },
+      { $limit: parseInt(limit) }
+    ]);
 
-    // Get total count for pagination
-    const totalRecords = await StaffAttendance.countDocuments(query);
+    // Get total count for pagination (respecting joining dates)
+    const totalCountResult = await StaffAttendance.aggregate([
+      { $match: query },
+      {
+        $lookup: {
+          from: 'staff',
+          localField: 'staff',
+          foreignField: '_id',
+          as: 'staffDetails'
+        }
+      },
+      { $unwind: '$staffDetails' },
+      {
+        $match: {
+          $expr: {
+            $gte: ['$date', '$staffDetails.dateOfJoining']
+          }
+        }
+      },
+      { $count: 'total' }
+    ]);
+    const totalRecords = totalCountResult.length > 0 ? totalCountResult[0].total : 0;
     const totalPages = Math.ceil(totalRecords / parseInt(limit));
 
-    // Get summary statistics
+    // Get summary statistics (respecting joining dates)
     const summaryStats = await StaffAttendance.aggregate([
       { $match: query },
+      {
+        $lookup: {
+          from: 'staff',
+          localField: 'staff',
+          foreignField: '_id',
+          as: 'staffDetails'
+        }
+      },
+      { $unwind: '$staffDetails' },
+      {
+        $match: {
+          $expr: {
+            $gte: ['$date', '$staffDetails.dateOfJoining']
+          }
+        }
+      },
       {
         $group: {
           _id: '$status',

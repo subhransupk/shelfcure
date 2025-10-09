@@ -1,6 +1,7 @@
 const Medicine = require('../models/Medicine');
 const Supplier = require('../models/Supplier');
 const { validationResult } = require('express-validator');
+const mongoose = require('mongoose');
 
 // @desc    Get comprehensive expiry alerts for a store
 // @route   GET /api/store-manager/expiry-alerts
@@ -202,19 +203,21 @@ const getExpiryAlertsSummary = async (req, res) => {
       store: store._id,
       isActive: true,
       expiryDate: { $lt: currentDate }
-    }).select('unitTypes stripInfo individualInfo');
+    }).select('name unitTypes stripInfo individualInfo expiryDate');
 
     const criticalMedicines = await Medicine.find({
       store: store._id,
       isActive: true,
       expiryDate: { $gte: currentDate, $lte: criticalDate }
-    }).select('unitTypes stripInfo individualInfo');
+    }).select('name unitTypes stripInfo individualInfo expiryDate');
 
     const warningMedicines = await Medicine.find({
       store: store._id,
       isActive: true,
       expiryDate: { $gt: criticalDate, $lte: warningDate }
-    }).select('unitTypes stripInfo individualInfo');
+    }).select('name unitTypes stripInfo individualInfo expiryDate');
+
+
 
     // Calculate values
     const calculateValue = (medicines) => {
@@ -237,6 +240,8 @@ const getExpiryAlertsSummary = async (req, res) => {
     // Calculate the actual total count of medicines in alert categories
     const totalAlertCount = expiredCount + criticalCount + warningCount + upcomingCount;
 
+
+
     // Add cache-busting headers
     res.set({
       'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -244,7 +249,7 @@ const getExpiryAlertsSummary = async (req, res) => {
       'Expires': '0'
     });
 
-    res.json({
+    const responseData = {
       success: true,
       data: {
         summary: {
@@ -261,7 +266,10 @@ const getExpiryAlertsSummary = async (req, res) => {
           upcoming: { label: 'Upcoming (31-90 days)', color: 'blue', days: '31-90' }
         }
       }
-    });
+    };
+
+
+    res.json(responseData);
   } catch (error) {
     console.error('Get expiry alerts summary error:', error);
     res.status(500).json({
@@ -329,38 +337,131 @@ const markMedicinesAsDisposed = async (req, res) => {
 // @access  Private (Store Manager only)
 const extendExpiryDate = async (req, res) => {
   try {
+    // Check for validation errors from express-validator
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array().map(error => ({
+          field: error.path,
+          message: error.msg,
+          value: error.value
+        }))
+      });
+    }
+
     const store = req.store;
     const { id } = req.params;
     const { newExpiryDate, reason, notes } = req.body;
 
-    if (!newExpiryDate) {
+    // Validate date format and create date object
+    let parsedExpiryDate;
+    try {
+      parsedExpiryDate = new Date(newExpiryDate);
+
+      // Check if the date is valid
+      if (isNaN(parsedExpiryDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid date format. Please use YYYY-MM-DD format',
+          field: 'newExpiryDate',
+          providedValue: newExpiryDate
+        });
+      }
+
+      // Check if date is in the past (allow same day)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      parsedExpiryDate.setHours(0, 0, 0, 0);
+
+      if (parsedExpiryDate < today) {
+        return res.status(400).json({
+          success: false,
+          message: 'Expiry date cannot be in the past',
+          field: 'newExpiryDate',
+          providedValue: newExpiryDate
+        });
+      }
+
+      // Check if date is too far in the future (10 years)
+      const maxFutureDate = new Date();
+      maxFutureDate.setFullYear(maxFutureDate.getFullYear() + 10);
+
+      if (parsedExpiryDate > maxFutureDate) {
+        return res.status(400).json({
+          success: false,
+          message: 'Expiry date cannot be more than 10 years in the future',
+          field: 'newExpiryDate',
+          providedValue: newExpiryDate
+        });
+      }
+
+    } catch (dateError) {
+      console.error('Date parsing error:', dateError);
       return res.status(400).json({
         success: false,
-        message: 'Please provide new expiry date'
+        message: 'Invalid date format. Please use YYYY-MM-DD format',
+        field: 'newExpiryDate',
+        providedValue: newExpiryDate
       });
     }
 
+    // Find the medicine
     const medicine = await Medicine.findOne({
       _id: id,
-      store: store._id
+      store: store._id,
+      isActive: true
     });
 
     if (!medicine) {
       return res.status(404).json({
         success: false,
-        message: 'Medicine not found'
+        message: 'Medicine not found or has been deactivated'
       });
     }
 
+    // Store original expiry date for comparison and logging
     const oldExpiryDate = medicine.expiryDate;
-    medicine.expiryDate = new Date(newExpiryDate);
-    medicine.expiryExtensionReason = reason;
-    medicine.expiryExtensionNotes = notes;
-    medicine.expiryExtendedBy = req.user.id;
-    medicine.expiryExtensionDate = new Date();
-    medicine.originalExpiryDate = oldExpiryDate;
 
-    await medicine.save();
+    // Check if the new date is actually different
+    if (oldExpiryDate && parsedExpiryDate.getTime() === new Date(oldExpiryDate).getTime()) {
+      return res.status(400).json({
+        success: false,
+        message: 'New expiry date is the same as current expiry date',
+        currentExpiryDate: oldExpiryDate
+      });
+    }
+
+    // Use transaction to ensure data consistency
+    const session = await mongoose.startSession();
+
+    try {
+      await session.withTransaction(async () => {
+        // Update medicine with new expiry date
+        medicine.expiryDate = parsedExpiryDate;
+        medicine.expiryExtensionReason = reason || 'Manual extension';
+        medicine.expiryExtensionNotes = notes || '';
+        medicine.expiryExtendedBy = req.user.id;
+        medicine.expiryExtensionDate = new Date();
+
+        // Store original expiry date if not already stored
+        if (!medicine.originalExpiryDate) {
+          medicine.originalExpiryDate = oldExpiryDate;
+        }
+
+        // Save with validation within transaction
+        await medicine.save({ session });
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    // Log the successful update
+    console.log(`✅ Expiry date updated for medicine ${medicine.name} (ID: ${medicine._id})`);
+    console.log(`   Old date: ${oldExpiryDate}`);
+    console.log(`   New date: ${parsedExpiryDate}`);
+    console.log(`   Updated by: ${req.user.name || req.user.email} (ID: ${req.user.id})`);
 
     res.json({
       success: true,
@@ -370,15 +471,37 @@ const extendExpiryDate = async (req, res) => {
         medicineName: medicine.name,
         oldExpiryDate,
         newExpiryDate: medicine.expiryDate,
-        reason,
-        notes
+        reason: medicine.expiryExtensionReason,
+        notes: medicine.expiryExtensionNotes,
+        updatedBy: req.user.name || req.user.email,
+        updatedAt: medicine.expiryExtensionDate
       }
     });
   } catch (error) {
-    console.error('Extend expiry date error:', error);
+    console.error('❌ Extend expiry date error:', error);
+
+    // Handle specific MongoDB errors
+    if (error.name === 'ValidationError') {
+      const validationErrors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: validationErrors
+      });
+    }
+
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid medicine ID format'
+      });
+    }
+
+    // Generic server error
     res.status(500).json({
       success: false,
-      message: 'Server error while updating expiry date'
+      message: 'Server error while updating expiry date. Please try again.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };

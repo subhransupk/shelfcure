@@ -214,17 +214,16 @@ class AIDataService {
   /**
    * Get low stock medicines with enhanced analysis
    */
-  async getLowStockMedicines(storeId, threshold = 10) {
-    const cacheKey = `low_stock_${storeId}_${threshold}`;
+  async getLowStockMedicines(storeId, threshold = null) {
+    const cacheKey = `low_stock_${storeId}_${threshold || 'default'}`;
     return await this.getCachedData(cacheKey, async () => {
       const validStoreId = this.validateStoreId(storeId);
-      const medicines = await Medicine.find({
-        store: validStoreId,
-        $or: [
-          { 'inventory.strips': { $lte: threshold } },
-          { 'inventory.units': { $lte: threshold } }
-        ]
-      }).select('name genericName manufacturer inventory pricing category location reorderLevel');
+      const LowStockService = require('./lowStockService');
+
+      // Use standardized low stock calculation
+      const medicines = await LowStockService.findLowStockMedicines(validStoreId, {
+        select: 'name genericName manufacturer inventory pricing category location reorderLevel stripInfo individualInfo unitTypes'
+      });
 
       return medicines.map(med => {
         const totalUnits = (med.inventory.strips * (med.inventory.unitsPerStrip || 1)) + med.inventory.units;
@@ -426,15 +425,19 @@ class AIDataService {
    */
   async searchMedicines(storeId, searchTerm, limit = 20) {
     const validStoreId = this.validateStoreId(storeId);
-    const medicines = await Medicine.find({
-      store: validStoreId,
+
+    // Use batch-aware search for available medicines
+    const searchQuery = {
       $or: [
         { name: { $regex: searchTerm, $options: 'i' } },
         { genericName: { $regex: searchTerm, $options: 'i' } },
         { manufacturer: { $regex: searchTerm, $options: 'i' } },
         { category: { $regex: searchTerm, $options: 'i' } }
       ]
-    }).limit(limit).select('name genericName manufacturer category inventory pricing location');
+    };
+
+    const availableMedicines = await Medicine.findAvailableForSale(validStoreId, searchQuery);
+    const medicines = availableMedicines.slice(0, limit);
 
     return medicines.map(med => ({
       name: med.name,

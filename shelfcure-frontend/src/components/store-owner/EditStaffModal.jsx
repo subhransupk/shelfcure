@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, User, Mail, Phone, MapPin, Shield, Building, Save } from 'lucide-react';
+import { X, User, Mail, Phone, MapPin, Shield, Building, Save, XCircle } from 'lucide-react';
+import useAutoMessage from '../../hooks/useAutoMessage';
 
 const EditStaffModal = ({ isOpen, onClose, staff, stores, onStaffUpdated }) => {
   const [formData, setFormData] = useState({
@@ -16,7 +17,7 @@ const EditStaffModal = ({ isOpen, onClose, staff, stores, onStaffUpdated }) => {
     }
   });
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const { error, setError, clearError } = useAutoMessage(4000);
 
   useEffect(() => {
     if (staff) {
@@ -108,7 +109,17 @@ const EditStaffModal = ({ isOpen, onClose, staff, stores, onStaffUpdated }) => {
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-              <p className="text-red-600 text-sm text-left">{error}</p>
+              <div className="flex items-center justify-between">
+                <p className="text-red-600 text-sm text-left">{error}</p>
+                <button
+                  type="button"
+                  onClick={clearError}
+                  className="text-red-600 hover:text-red-800 ml-4"
+                  aria-label="Dismiss error"
+                >
+                  <XCircle className="h-5 w-5" />
+                </button>
+              </div>
             </div>
           )}
 

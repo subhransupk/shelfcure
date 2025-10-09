@@ -614,14 +614,14 @@ const processInventoryUpdates = async (purchaseReturn, userId) => {
       const unitType = item.unitType || 'strip';
       const returnQuantity = item.returnQuantity || 0;
 
-      console.log(`📦 Restoring inventory - Medicine: ${medicine.name}, Unit: ${unitType}, Quantity: ${returnQuantity}`);
+      console.log(`📦 Restoring inventory - Medicine: ${medicineToUpdate.name}, Unit: ${unitType}, Quantity: ${returnQuantity}`);
 
       console.log('🔍 Medicine unit configuration:', {
-        hasStrips: medicine.unitTypes?.hasStrips,
-        hasIndividual: medicine.unitTypes?.hasIndividual,
+        hasStrips: medicineToUpdate.unitTypes?.hasStrips,
+        hasIndividual: medicineToUpdate.unitTypes?.hasIndividual,
         unitType: unitType,
-        currentStripStock: medicine.stripInfo?.stock || 0,
-        currentIndividualStock: medicine.individualInfo?.stock || 0
+        currentStripStock: medicineToUpdate.stripInfo?.stock || 0,
+        currentIndividualStock: medicineToUpdate.individualInfo?.stock || 0
       });
 
       // Ensure stripInfo and individualInfo objects exist

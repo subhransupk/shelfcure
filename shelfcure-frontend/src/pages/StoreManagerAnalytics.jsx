@@ -188,8 +188,8 @@ const StoreManagerAnalytics = () => {
     }
 
     try {
-      // Create CSV content
-      let csvContent = "data:text/csv;charset=utf-8,";
+      // Create CSV content with UTF-8 BOM
+      let csvContent = '\uFEFF'; // UTF-8 BOM for proper encoding
 
       // Add summary data
       csvContent += "ShelfCure Store Analytics Report\n";
@@ -236,14 +236,16 @@ const StoreManagerAnalytics = () => {
         csvContent += `Customer Growth,${analyticsData.customers.customerGrowth}%\n`;
       }
 
-      // Create and download file
-      const encodedUri = encodeURI(csvContent);
+      // Create and download file with proper UTF-8 encoding
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.setAttribute("href", encodedUri);
+      link.setAttribute("href", url);
       link.setAttribute("download", `store-analytics-${period}-${new Date().toISOString().split('T')[0]}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
 
       console.log('Analytics data exported successfully');
     } catch (error) {
@@ -647,13 +649,21 @@ const StoreManagerAnalytics = () => {
         {activeTab === 'inventory' && (
           <div className="space-y-6">
             {/* Inventory Metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               <MetricCard
                 title="Total Medicines"
                 value={analyticsData?.inventory?.totalMedicines || 0}
                 subtitle="Active medicines"
                 icon={Package}
                 color="blue"
+                loading={loading}
+              />
+              <MetricCard
+                title="Inventory Value"
+                value={formatCurrency(analyticsData?.inventory?.totalValue || 0)}
+                subtitle="Total stock value"
+                icon={DollarSign}
+                color="green"
                 loading={loading}
               />
               <MetricCard
@@ -673,11 +683,27 @@ const StoreManagerAnalytics = () => {
                 loading={loading}
               />
               <MetricCard
+                title="Expiring Soon"
+                value={analyticsData?.inventory?.expiringMedicines || 0}
+                subtitle="Within 30 days"
+                icon={Clock}
+                color="yellow"
+                loading={loading}
+              />
+              <MetricCard
+                title="Expired Items"
+                value={analyticsData?.inventory?.expiredMedicines || 0}
+                subtitle="Already expired"
+                icon={AlertTriangle}
+                color="red"
+                loading={loading}
+              />
+              <MetricCard
                 title="Stock Health"
                 value={`${analyticsData?.inventory?.stockHealthPercentage || 0}%`}
                 subtitle="Healthy stock levels"
                 icon={TrendingUp}
-                color="green"
+                color="purple"
                 loading={loading}
               />
             </div>
@@ -785,7 +811,7 @@ const StoreManagerAnalytics = () => {
         {activeTab === 'customers' && (
           <div className="space-y-6">
             {/* Customer Metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-6">
               <MetricCard
                 title="Total Customers"
                 value={analyticsData?.customers?.totalCustomers || 0}
@@ -812,10 +838,26 @@ const StoreManagerAnalytics = () => {
               />
               <MetricCard
                 title="Active Customers"
-                value={analyticsData?.customers?.totalCustomers || 0}
-                subtitle="Total active"
+                value={analyticsData?.customers?.activeCustomers || 0}
+                subtitle="Recently active"
                 icon={Activity}
                 color="orange"
+                loading={loading}
+              />
+              <MetricCard
+                title="Average Spending"
+                value={formatCurrency(analyticsData?.customers?.averageSpending || 0)}
+                subtitle="Per customer"
+                icon={DollarSign}
+                color="green"
+                loading={loading}
+              />
+              <MetricCard
+                title="Average Order Value"
+                value={formatCurrency(analyticsData?.customers?.averageOrderValue || 0)}
+                subtitle="Per transaction"
+                icon={TrendingUp}
+                color="purple"
                 loading={loading}
               />
             </div>
@@ -938,7 +980,7 @@ const StoreManagerAnalytics = () => {
         {activeTab === 'operations' && (
           <div className="space-y-6">
             {/* Operational Metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-6">
               <MetricCard
                 title="Daily Transactions"
                 value={analyticsData?.operations?.dailyTransactions || 0}
@@ -969,6 +1011,22 @@ const StoreManagerAnalytics = () => {
                 subtitle="Availability"
                 icon={Activity}
                 color="orange"
+                loading={loading}
+              />
+              <MetricCard
+                title="Avg Transaction Time"
+                value={`${analyticsData?.operations?.averageTransactionTime || 0} min`}
+                subtitle="Processing time"
+                icon={Clock}
+                color="indigo"
+                loading={loading}
+              />
+              <MetricCard
+                title="Total Transactions"
+                value={analyticsData?.operations?.totalTransactions || 0}
+                subtitle={`This ${getPeriodLabel(period)}`}
+                icon={ShoppingCart}
+                color="pink"
                 loading={loading}
               />
             </div>

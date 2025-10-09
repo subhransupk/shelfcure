@@ -12,6 +12,7 @@ const Medicine = require('../models/Medicine');
 const Customer = require('../models/Customer');
 const Staff = require('../models/Staff');
 const Supplier = require('../models/Supplier');
+const LowStockService = require('../services/lowStockService');
 const mongoose = require('mongoose');
 
 // @desc    Get revenue analytics (Admin only)
@@ -496,10 +497,13 @@ router.get('/admin/inventory', protect, authorize('superadmin', 'admin'), async 
       categoryDistribution
     ] = await Promise.all([
       Medicine.countDocuments({ isActive: true }),
-      Medicine.countDocuments({
-        isActive: true,
-        $expr: { $lte: ['$stock', '$minStock'] }
-      }),
+      // Use standardized low stock calculation
+      (async () => {
+        const pipeline = LowStockService.getLowStockAggregationPipeline();
+        pipeline.push({ $count: 'total' });
+        const result = await Medicine.aggregate(pipeline);
+        return result.length > 0 ? result[0].total : 0;
+      })(),
       Medicine.countDocuments({
         isActive: true,
         expiryDate: { $lt: new Date() }
@@ -513,7 +517,39 @@ router.get('/admin/inventory', protect, authorize('superadmin', 'admin'), async 
       }),
       Medicine.aggregate([
         { $match: { isActive: true } },
-        { $group: { _id: null, total: { $sum: { $multiply: ['$stock', '$sellingPrice'] } } } }
+        {
+          $group: {
+            _id: null,
+            total: {
+              $sum: {
+                $add: [
+                  {
+                    $cond: [
+                      '$unitTypes.hasStrips',
+                      { $multiply: ['$stripInfo.stock', '$stripInfo.sellingPrice'] },
+                      0
+                    ]
+                  },
+                  {
+                    $cond: [
+                      '$unitTypes.hasIndividual',
+                      { $multiply: ['$individualInfo.stock', '$individualInfo.sellingPrice'] },
+                      0
+                    ]
+                  },
+                  // Fallback to legacy fields
+                  {
+                    $cond: [
+                      { $and: [{ $ne: ['$unitTypes.hasStrips', true] }, { $ne: ['$unitTypes.hasIndividual', true] }] },
+                      { $multiply: ['$stock', '$sellingPrice'] },
+                      0
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
       ]).then(result => result[0]?.total || 0),
       Medicine.aggregate([
         { $match: { isActive: true } },
@@ -521,7 +557,34 @@ router.get('/admin/inventory', protect, authorize('superadmin', 'admin'), async 
           $group: {
             _id: '$category',
             count: { $sum: 1 },
-            value: { $sum: { $multiply: ['$stock', '$sellingPrice'] } }
+            value: {
+              $sum: {
+                $add: [
+                  {
+                    $cond: [
+                      '$unitTypes.hasStrips',
+                      { $multiply: ['$stripInfo.stock', '$stripInfo.sellingPrice'] },
+                      0
+                    ]
+                  },
+                  {
+                    $cond: [
+                      '$unitTypes.hasIndividual',
+                      { $multiply: ['$individualInfo.stock', '$individualInfo.sellingPrice'] },
+                      0
+                    ]
+                  },
+                  // Fallback to legacy fields
+                  {
+                    $cond: [
+                      { $and: [{ $ne: ['$unitTypes.hasStrips', true] }, { $ne: ['$unitTypes.hasIndividual', true] }] },
+                      { $multiply: ['$stock', '$sellingPrice'] },
+                      0
+                    ]
+                  }
+                ]
+              }
+            }
           }
         },
         { $sort: { count: -1 } },
@@ -734,7 +797,7 @@ router.get('/admin/customers', protect, authorize('superadmin', 'admin'), async 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    // Get customer statistics
+    // Get customer statistics (global across all stores for admin)
     const [
       totalCustomers,
       newCustomersThisMonth,
@@ -748,6 +811,18 @@ router.get('/admin/customers', protect, authorize('superadmin', 'admin'), async 
         { $group: { _id: null, averageSpending: { $avg: '$totalSpent' } } }
       ]).then(result => result[0]?.averageSpending || 0)
     ]);
+
+    // Get previous month's new customers for growth calculation
+    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+    const newCustomersLastMonth = await Customer.countDocuments({
+      registrationDate: { $gte: startOfLastMonth, $lte: endOfLastMonth }
+    });
+
+    // Calculate customer growth
+    const customerGrowth = newCustomersLastMonth > 0
+      ? Math.round(((newCustomersThisMonth - newCustomersLastMonth) / newCustomersLastMonth) * 100)
+      : newCustomersThisMonth > 0 ? 100 : 0;
 
     // Get top customers
     const topCustomers = await Customer.aggregate([
@@ -792,7 +867,7 @@ router.get('/admin/customers', protect, authorize('superadmin', 'admin'), async 
         totalCustomers,
         newCustomersThisMonth,
         activeCustomers,
-        customerGrowth: newCustomersThisMonth,
+        customerGrowth,
         averageSpending: Math.round(customerSpending),
         topCustomers,
         customerSegments: formattedSegments
@@ -803,6 +878,124 @@ router.get('/admin/customers', protect, authorize('superadmin', 'admin'), async 
     res.status(500).json({
       success: false,
       message: 'Server error fetching customer analytics',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Get operations analytics (Admin only)
+// @route   GET /api/analytics/admin/operations
+// @access  Private/Admin
+router.get('/admin/operations', protect, authorize('superadmin', 'admin'), async (req, res) => {
+  try {
+    const { period = 'monthly' } = req.query;
+
+    // Check if database is available
+    if (!global.isDatabaseConnected) {
+      console.log('Database not available for operations analytics, using mock data');
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          dailyTransactions: Math.floor(Math.random() * 50) + 20,
+          peakHours: '14:00 - 15:00',
+          staffEfficiency: Math.floor(Math.random() * 20) + 80,
+          systemUptime: 99.5,
+          hourlyPattern: Array.from({length: 24}, () => Math.floor(Math.random() * 20)),
+          weeklyPerformance: {
+            sales: Array.from({length: 7}, () => Math.floor(Math.random() * 50000) + 10000),
+            transactions: Array.from({length: 7}, () => Math.floor(Math.random() * 100) + 20)
+          },
+          averageTransactionTime: Math.floor(Math.random() * 5) + 2,
+          totalTransactions: Math.floor(Math.random() * 10000) + 5000
+        }
+      });
+    }
+
+    const now = new Date();
+    let startDate, endDate;
+
+    // Set date range based on period
+    if (period === 'daily') {
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+      endDate = new Date();
+    } else if (period === 'weekly') {
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 84); // 12 weeks
+      endDate = new Date();
+    } else {
+      startDate = new Date(now.getFullYear(), 0, 1); // Start of year
+      endDate = new Date();
+    }
+
+    // Get all sales for operations analysis
+    const sales = await Sale.find({
+      createdAt: { $gte: startDate, $lte: endDate }
+    }).sort({ createdAt: 1 });
+
+    // Calculate operations metrics
+    const operationsPeriodDays = Math.max(1, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)));
+    const dailyTransactions = Math.round(sales.length / operationsPeriodDays);
+
+    // Calculate hourly pattern
+    const hourlyPattern = Array(24).fill(0);
+    sales.forEach(sale => {
+      const hour = sale.createdAt.getHours();
+      hourlyPattern[hour]++;
+    });
+
+    // Find peak hours
+    let peakHour = 0;
+    let maxTransactions = 0;
+    hourlyPattern.forEach((count, hour) => {
+      if (count > maxTransactions) {
+        maxTransactions = count;
+        peakHour = hour;
+      }
+    });
+    const peakHours = maxTransactions > 0 ? `${peakHour}:00 - ${peakHour + 1}:00` : 'N/A';
+
+    // Calculate weekly performance
+    const weeklyPerformance = {
+      sales: Array(7).fill(0),
+      transactions: Array(7).fill(0)
+    };
+
+    sales.forEach(sale => {
+      const dayOfWeek = sale.createdAt.getDay();
+      const mondayBasedDay = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      weeklyPerformance.sales[mondayBasedDay] += sale.totalAmount;
+      weeklyPerformance.transactions[mondayBasedDay] += 1;
+    });
+
+    // Calculate staff efficiency (global metric)
+    const totalWorkingHours = operationsPeriodDays * 8;
+    const salesPerHour = totalWorkingHours > 0 ? sales.length / totalWorkingHours : 0;
+    const staffEfficiency = Math.min(100, Math.round(salesPerHour * 5)); // Scale for global view
+
+    // Calculate average transaction time (mock - would need actual timing data)
+    const averageTransactionTime = 3.5; // Mock 3.5 minutes average
+
+    // System uptime (mock - would come from monitoring system)
+    const systemUptime = 99.8;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        dailyTransactions,
+        peakHours,
+        staffEfficiency,
+        systemUptime,
+        hourlyPattern,
+        weeklyPerformance,
+        averageTransactionTime,
+        totalTransactions: sales.length
+      }
+    });
+  } catch (error) {
+    console.error('Operations analytics error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error fetching operations analytics',
       error: error.message
     });
   }

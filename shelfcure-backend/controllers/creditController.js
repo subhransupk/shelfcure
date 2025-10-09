@@ -124,7 +124,8 @@ const recordCreditPayment = async (req, res) => {
       },
       description: `Credit payment received - ${paymentMethod}`,
       notes: notes || '',
-      processedBy: req.user.id
+      processedBy: req.user.id,
+      transactionDate: new Date() // Explicitly set transaction date
     });
 
     // Get updated customer data
@@ -224,7 +225,8 @@ const makeCreditAdjustment = async (req, res) => {
       },
       description: `Credit ${adjustmentType} - ${reason}`,
       notes: notes || '',
-      processedBy: req.user.id
+      processedBy: req.user.id,
+      transactionDate: new Date() // Explicitly set transaction date
     });
 
     // Get updated customer data

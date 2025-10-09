@@ -368,6 +368,22 @@ const StoreManagerInventory = () => {
     }
   };
 
+  // Helper function to check if medicine supports cutting (strip to individual conversion)
+  const supportsCutting = (medicine) => {
+    // Cut Medicine functionality should only be available for medicines that have BOTH strips AND individual units
+    // If a medicine only has individual units (hasStrips: false), it's a single-piece medicine (bottles, injections) - no cutting allowed
+    return medicine.unitTypes?.hasStrips === true && medicine.unitTypes?.hasIndividual === true;
+  };
+
+  // Helper function to get appropriate label for individual units
+  const getIndividualUnitsLabel = (medicine) => {
+    if (supportsCutting(medicine)) {
+      return 'Cut Medicines';
+    } else {
+      return 'Individual Units';
+    }
+  };
+
   const getStockStatus = (medicine) => {
     const stripStock = medicine.stripInfo?.stock || medicine.inventory?.stripQuantity || 0;
     const individualStock = medicine.individualInfo?.stock || medicine.inventory?.individualQuantity || 0;
@@ -2061,7 +2077,7 @@ const StoreManagerInventory = () => {
                                       Min: {medicine.individualInfo?.minStock || medicine.inventory?.individualMinimumStock || 0}
                                     </div>
                                     <div className="text-xs text-gray-400">
-                                      (Cut medicines only)
+                                      ({getIndividualUnitsLabel(medicine).toLowerCase()})
                                     </div>
                                   </div>
                                 ) : (
@@ -2718,7 +2734,7 @@ const StoreManagerInventory = () => {
                           
                           <div className="mt-2 flex items-center space-x-4">
                             <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                              {medicine.unitTypes?.hasStrips && medicine.unitTypes?.hasIndividual ? 'Dual Unit' : 
+                              {supportsCutting(medicine) ? 'Cut Medicine' :
                                medicine.unitTypes?.hasStrips ? 'Strip Only' : 'Individual Only'}
                             </span>
                             {medicine.unitTypes?.hasStrips && (
@@ -3543,7 +3559,12 @@ const StoreManagerInventory = () => {
 
                       {((isCustomMode && customMedicineData.unitTypes.hasIndividual) || (!isCustomMode && editableMasterMedicineData.unitTypes?.hasIndividual)) && (
                       <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                        <h6 className="text-sm font-medium text-purple-900 mb-3 text-left">Individual Unit Pricing & Stock</h6>
+                        <h6 className="text-sm font-medium text-purple-900 mb-3 text-left">
+                          {isCustomMode
+                            ? getIndividualUnitsLabel(customMedicineData)
+                            : (editableMasterMedicineData ? getIndividualUnitsLabel(editableMasterMedicineData) : 'Individual Unit')
+                          } Pricing & Stock
+                        </h6>
                         <div className="space-y-3">
                           <div className="grid grid-cols-2 gap-3">
                             <div>
@@ -4236,10 +4257,10 @@ const StoreManagerInventory = () => {
 
                         {editMedicineData.unitTypes?.hasIndividual && (
                           <div className="bg-green-50 p-4 rounded-lg">
-                            <h5 className="font-medium text-green-900 mb-3">Individual Information</h5>
+                            <h5 className="font-medium text-green-900 mb-3">{getIndividualUnitsLabel(editMedicineData)} Information</h5>
                             <div className="space-y-3">
                               <div>
-                                <label className="block text-sm font-medium text-gray-700">Stock (Cut Medicines)</label>
+                                <label className="block text-sm font-medium text-gray-700">Stock ({getIndividualUnitsLabel(editMedicineData)})</label>
                                 <input
                                   type="number"
                                   value={editMedicineData.individualInfo?.stock || ''}

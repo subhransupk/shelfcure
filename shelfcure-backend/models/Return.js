@@ -360,6 +360,41 @@ returnSchema.virtual('pendingRestorationCount').get(function() {
   ).length;
 });
 
+// Helper function to generate unique return number for sales returns
+async function generateUniqueReturnNumber(store) {
+  try {
+    const storeDoc = await mongoose.model('Store').findById(store).select('name');
+    const storePrefix = storeDoc?.name?.substring(0, 3).toUpperCase() || 'STR';
+    const year = new Date().getFullYear().toString().slice(-2);
+    const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
+
+    // Create a unique identifier for this store and month
+    const counterId = `sales_return_${store}_${year}_${month}`;
+
+    // Use MongoDB's atomic findOneAndUpdate to get next sequence number
+    const Counter = mongoose.model('Counter');
+    const counter = await Counter.findOneAndUpdate(
+      { _id: counterId },
+      { $inc: { sequence: 1 } },
+      {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true
+      }
+    );
+
+    const sequence = counter.sequence;
+    return `RET-${storePrefix}-${year}${month}-${String(sequence).padStart(4, '0')}`;
+
+  } catch (error) {
+    console.error('Error with counter-based return number generation:', error);
+
+    // Fallback: Use timestamp-based approach
+    const timestamp = Date.now().toString().slice(-6);
+    return `RET-STR-${timestamp}`;
+  }
+}
+
 // Pre-save middleware to generate return number
 returnSchema.pre('save', async function(next) {
   console.log('🔄 Pre-save middleware triggered. isNew:', this.isNew, 'returnNumber:', this.returnNumber);
@@ -367,14 +402,9 @@ returnSchema.pre('save', async function(next) {
   if (this.isNew && !this.returnNumber) {
     try {
       console.log('🔄 Generating return number for store:', this.store);
-      const count = await this.constructor.countDocuments({ store: this.store });
-      const store = await mongoose.model('Store').findById(this.store).select('name');
-      const year = new Date().getFullYear().toString().slice(-2);
-      const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
 
-      // Use store name instead of storeCode since storeCode doesn't exist
-      const storePrefix = store?.name?.substring(0, 3).toUpperCase() || 'STR';
-      this.returnNumber = `RET-${storePrefix}-${year}${month}-${(count + 1).toString().padStart(4, '0')}`;
+      // Generate unique return number
+      this.returnNumber = await generateUniqueReturnNumber(this.store);
 
       console.log('✅ Generated return number:', this.returnNumber);
     } catch (error) {

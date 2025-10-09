@@ -2095,7 +2095,19 @@ const StoreManagerCustomers = () => {
                                 {transaction.transactionType.replace('_', ' ').toUpperCase()}
                               </span>
                               <span className="text-sm text-gray-500">
-                                {new Date(transaction.transactionDate).toLocaleDateString()}
+                                {(() => {
+                                  const date = transaction.transactionDate || transaction.createdAt;
+                                  if (!date) return 'No date available';
+
+                                  return new Date(date).toLocaleDateString('en-IN', {
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: true
+                                  });
+                                })()}
                               </span>
                             </div>
                             <p className="text-sm text-gray-900 mt-1 text-left">{transaction.description}</p>

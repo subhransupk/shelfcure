@@ -472,11 +472,12 @@ router.get('/admin/master/csv-template', protect, authorize('superadmin', 'admin
       'true'
     ];
 
-    const csvContent = [csvHeaders, sampleData]
+    let csvContent = '\uFEFF'; // UTF-8 BOM for proper encoding
+    csvContent += [csvHeaders, sampleData]
       .map(row => row.map(field => `"${field}"`).join(','))
       .join('\n');
 
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="medicine-import-template.csv"');
     res.send(csvContent);
 

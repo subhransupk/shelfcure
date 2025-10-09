@@ -14,7 +14,7 @@ const getSuppliers = async (req, res) => {
     const options = {
       search,
       isActive: status === 'active' ? true : status === 'inactive' ? false : undefined,
-      sort: sort === 'recent' ? { createdAt: -1 } : 
+      sort: sort === 'recent' ? { createdAt: -1 } :
             sort === 'purchases' ? { totalPurchases: -1 } :
             sort === 'amount' ? { totalPurchaseAmount: -1 } : { name: 1 }
     };
@@ -22,6 +22,22 @@ const getSuppliers = async (req, res) => {
     const suppliers = await Supplier.getStoreSuppliers(store._id, options)
       .limit(limit * 1)
       .skip((page - 1) * limit);
+
+    // Update supplier statistics for all suppliers if they haven't been updated recently
+    for (const supplier of suppliers) {
+      // Check if stats need updating (if totalPurchaseAmount is 0 or last update was more than 1 hour ago)
+      const needsUpdate = supplier.totalPurchaseAmount === 0 ||
+                         !supplier.updatedAt ||
+                         (new Date() - supplier.updatedAt) > (60 * 60 * 1000); // 1 hour
+
+      if (needsUpdate) {
+        try {
+          await supplier.updatePurchaseStats();
+        } catch (updateError) {
+          console.error(`Error updating stats for supplier ${supplier._id}:`, updateError);
+        }
+      }
+    }
 
     const total = await Supplier.countDocuments({
       store: store._id,
@@ -443,6 +459,69 @@ const getSuppliersAnalytics = async (req, res) => {
   }
 };
 
+// @desc    Refresh supplier statistics
+// @route   POST /api/store-manager/suppliers/refresh-stats
+// @access  Private (Store Manager only)
+const refreshSupplierStats = async (req, res) => {
+  try {
+    const store = req.store;
+    const { supplierId } = req.body;
+
+    if (supplierId) {
+      // Refresh stats for specific supplier
+      const supplier = await Supplier.findOne({
+        _id: supplierId,
+        store: store._id
+      });
+
+      if (!supplier) {
+        return res.status(404).json({
+          success: false,
+          message: 'Supplier not found'
+        });
+      }
+
+      await supplier.updatePurchaseStats();
+
+      res.json({
+        success: true,
+        message: 'Supplier statistics updated successfully',
+        data: {
+          supplierId: supplier._id,
+          totalPurchases: supplier.totalPurchases,
+          totalPurchaseAmount: supplier.totalPurchaseAmount,
+          outstandingBalance: supplier.outstandingBalance
+        }
+      });
+    } else {
+      // Refresh stats for all suppliers in the store
+      const suppliers = await Supplier.find({ store: store._id });
+      let updatedCount = 0;
+
+      for (const supplier of suppliers) {
+        try {
+          await supplier.updatePurchaseStats();
+          updatedCount++;
+        } catch (error) {
+          console.error(`Error updating stats for supplier ${supplier._id}:`, error);
+        }
+      }
+
+      res.json({
+        success: true,
+        message: `Updated statistics for ${updatedCount} suppliers`,
+        data: { updatedCount, totalSuppliers: suppliers.length }
+      });
+    }
+  } catch (error) {
+    console.error('Refresh supplier stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while refreshing supplier statistics'
+    });
+  }
+};
+
 // @desc    Search suppliers for autocomplete
 // @route   GET /api/store-manager/suppliers/search
 // @access  Private (Store Manager only)
@@ -492,5 +571,6 @@ module.exports = {
   deleteSupplier,
   getSupplierPurchases,
   getSuppliersAnalytics,
-  searchSuppliers
+  searchSuppliers,
+  refreshSupplierStats
 };

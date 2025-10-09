@@ -1,5 +1,6 @@
 const Doctor = require('../models/Doctor');
 const Sale = require('../models/Sale');
+const Commission = require('../models/Commission');
 const mongoose = require('mongoose');
 
 /**
@@ -235,7 +236,8 @@ class DoctorStatsService {
       const { dateRange = 'thisMonth', status } = options;
       const { startDate, endDate } = this.getDateRange(dateRange);
 
-      const commissions = await Sale.aggregate([
+      // First, get calculated commissions from sales data
+      const calculatedCommissions = await Sale.aggregate([
         {
           $match: {
             store: new mongoose.Types.ObjectId(storeId),
@@ -262,7 +264,8 @@ class DoctorStatsService {
             prescriptionCount: { $sum: 1 },
             salesValue: { $sum: '$totalAmount' },
             commissionRate: { $first: '$doctorInfo.commissionRate' },
-            lastSaleDate: { $max: '$saleDate' }
+            lastSaleDate: { $max: '$saleDate' },
+            firstSaleDate: { $min: '$saleDate' }
           }
         },
         {
@@ -274,30 +277,75 @@ class DoctorStatsService {
               ]
             }
           }
-        },
-        {
-          $project: {
-            _id: { $concat: ['comm_', { $toString: '$_id' }] },
-            doctor: {
-              _id: '$doctor._id',
-              name: '$doctor.name',
-              specialization: '$doctor.specialization'
-            },
-            prescriptionCount: 1,
-            salesValue: 1,
-            commissionRate: 1,
-            commissionAmount: { $round: ['$commissionAmount', 0] },
-            status: 'pending', // For now, all commissions are pending
-            createdAt: '$lastSaleDate',
-            updatedAt: '$lastSaleDate'
-          }
-        },
-        {
-          $sort: { 'doctor.name': 1 }
         }
       ]);
 
-      return commissions;
+      // Get existing commission records from database
+      const existingCommissions = await Commission.find({
+        store: storeId,
+        createdAt: { $gte: startDate, $lte: endDate }
+      }).populate('doctor', 'name specialization');
+
+      // Create a map of existing commissions by doctor ID
+      const existingCommissionMap = new Map();
+      existingCommissions.forEach(comm => {
+        const doctorId = comm.doctor._id.toString();
+        existingCommissionMap.set(doctorId, comm);
+      });
+
+      // Merge calculated and existing commissions
+      const mergedCommissions = calculatedCommissions.map(calc => {
+        const doctorId = calc._id.toString();
+        const existing = existingCommissionMap.get(doctorId);
+
+        if (existing) {
+          // Use existing commission record with updated calculations
+          return {
+            _id: existing._id,
+            doctor: {
+              _id: existing.doctor._id,
+              name: existing.doctor.name,
+              specialization: existing.doctor.specialization
+            },
+            prescriptionCount: calc.prescriptionCount,
+            salesValue: calc.salesValue,
+            commissionRate: calc.commissionRate,
+            commissionAmount: Math.round(calc.commissionAmount),
+            status: existing.status,
+            paymentDate: existing.paymentDate,
+            paymentMethod: existing.paymentMethod,
+            createdAt: existing.createdAt,
+            updatedAt: existing.updatedAt || existing.lastUpdated
+          };
+        } else {
+          // Create new commission format for display
+          return {
+            _id: `comm_${doctorId}`,
+            doctor: {
+              _id: calc.doctor._id,
+              name: calc.doctor.name,
+              specialization: calc.doctor.specialization
+            },
+            prescriptionCount: calc.prescriptionCount,
+            salesValue: calc.salesValue,
+            commissionRate: calc.commissionRate,
+            commissionAmount: Math.round(calc.commissionAmount),
+            status: 'pending',
+            createdAt: calc.lastSaleDate,
+            updatedAt: calc.lastSaleDate
+          };
+        }
+      });
+
+      // Filter by status if specified
+      const filteredCommissions = status && status !== 'all'
+        ? mergedCommissions.filter(comm => comm.status === status)
+        : mergedCommissions;
+
+      // Sort by doctor name
+      filteredCommissions.sort((a, b) => a.doctor.name.localeCompare(b.doctor.name));
+
+      return filteredCommissions;
 
     } catch (error) {
       console.error('Error getting commission history:', error);

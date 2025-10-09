@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { X, User, Mail, Phone, MapPin, Shield, Building, Eye, EyeOff } from 'lucide-react';
+import { X, User, Mail, Phone, MapPin, Shield, Building, Eye, EyeOff, XCircle } from 'lucide-react';
+import useAutoMessage from '../../hooks/useAutoMessage';
 
 const AddStaffModal = ({ isOpen, onClose, stores, onStaffAdded }) => {
   const [formData, setFormData] = useState({
@@ -17,7 +18,7 @@ const AddStaffModal = ({ isOpen, onClose, stores, onStaffAdded }) => {
     }
   });
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const { error, setError, clearError } = useAutoMessage(4000);
   const [showPassword, setShowPassword] = useState(false);
 
   const handleInputChange = (e) => {
@@ -106,7 +107,17 @@ const AddStaffModal = ({ isOpen, onClose, stores, onStaffAdded }) => {
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-              <p className="text-red-600 text-sm text-left">{error}</p>
+              <div className="flex items-center justify-between">
+                <p className="text-red-600 text-sm text-left">{error}</p>
+                <button
+                  type="button"
+                  onClick={clearError}
+                  className="text-red-600 hover:text-red-800 ml-4"
+                  aria-label="Dismiss error"
+                >
+                  <XCircle className="h-5 w-5" />
+                </button>
+              </div>
             </div>
           )}
 

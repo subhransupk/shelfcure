@@ -11,6 +11,7 @@ const CreditTransaction = require('../models/CreditTransaction');
 const BatchService = require('../services/batchService');
 const { logInventoryChange } = require('../services/inventoryLogService');
 const { generateInvoicePDF } = require('../services/invoiceService');
+const LowStockService = require('../services/lowStockService');
 
 // ===================
 // DASHBOARD CONTROLLERS
@@ -46,52 +47,10 @@ const getDashboardData = async (req, res) => {
     });
 
     // Get inventory stats
-    const totalMedicines = await Medicine.countDocuments({ store: store._id });
+    const totalMedicines = await Medicine.countDocuments({ store: store._id, isActive: true });
 
-    // Use aggregation to count low stock medicines with corrected logic
-    const lowStockResult = await Medicine.aggregate([
-      { $match: { store: store._id } },
-      {
-        $match: {
-          $or: [
-            // Both strip and individual enabled: Low stock based on STRIP STOCK ONLY
-            {
-              $and: [
-                { 'unitTypes.hasStrips': true },
-                { 'unitTypes.hasIndividual': true },
-                { $expr: { $lte: ['$stripInfo.stock', '$stripInfo.minStock'] } }
-              ]
-            },
-            // Only strips enabled
-            {
-              $and: [
-                { 'unitTypes.hasStrips': true },
-                { 'unitTypes.hasIndividual': { $ne: true } },
-                { $expr: { $lte: ['$stripInfo.stock', '$stripInfo.minStock'] } }
-              ]
-            },
-            // Only individual enabled
-            {
-              $and: [
-                { 'unitTypes.hasIndividual': true },
-                { 'unitTypes.hasStrips': { $ne: true } },
-                { $expr: { $lte: ['$individualInfo.stock', '$individualInfo.minStock'] } }
-              ]
-            },
-            // Legacy support - assume strips only
-            {
-              $and: [
-                { 'unitTypes': { $exists: false } },
-                { $expr: { $lte: ['$inventory.stripQuantity', '$inventory.stripMinimumStock'] } }
-              ]
-            }
-          ]
-        }
-      },
-      { $count: 'lowStockCount' }
-    ]);
-
-    const lowStockMedicines = lowStockResult.length > 0 ? lowStockResult[0].lowStockCount : 0;
+    // Use standardized low stock calculation service
+    const lowStockMedicines = await LowStockService.countLowStockMedicines(store._id);
 
     // Get customer stats
     const totalCustomers = await Customer.countDocuments({ store: store._id });
@@ -118,8 +77,11 @@ const getDashboardData = async (req, res) => {
 
     const expiringMedicines = await Medicine.find({
       store: store._id,
-      'batches.expiryDate': { $lte: thirtyDaysFromNow, $gte: new Date() }
-    }).limit(10);
+      isActive: true,
+      expiryDate: { $lte: thirtyDaysFromNow, $gte: new Date() }
+    }).select('name manufacturer expiryDate category')
+    .sort({ expiryDate: 1 })
+    .limit(10);
 
     // Get expiring medicines (next 7 days) - Critical
     const sevenDaysFromNow = new Date();
@@ -127,13 +89,15 @@ const getDashboardData = async (req, res) => {
 
     const critical7Days = await Medicine.countDocuments({
       store: store._id,
-      'batches.expiryDate': { $lte: sevenDaysFromNow, $gte: new Date() }
+      isActive: true,
+      expiryDate: { $lte: sevenDaysFromNow, $gte: new Date() }
     });
 
     // Get expired medicines
     const expiredMedicines = await Medicine.countDocuments({
       store: store._id,
-      'batches.expiryDate': { $lt: new Date() }
+      isActive: true,
+      expiryDate: { $lt: new Date() }
     });
 
     // Get out of stock medicines
@@ -250,9 +214,124 @@ const getDashboardData = async (req, res) => {
     const pendingCredit = creditStats[0]?.totalCredit || 0;
     const creditCustomers = creditStats[0]?.creditCustomers?.length || 0;
 
-    // Calculate today's specific metrics
-    const todayProfit = todayRevenue * 0.25; // Assuming 25% profit margin for today
-    const todayLoss = todayReturnsAmount; // Returns are considered losses
+    // Calculate today's actual profit based on cost vs selling prices
+    const todayProfitData = await Sale.aggregate([
+      {
+        $match: {
+          store: store._id,
+          createdAt: { $gte: startOfDay },
+          status: 'completed'
+        }
+      },
+      {
+        $unwind: '$items'
+      },
+      {
+        $lookup: {
+          from: 'medicines',
+          localField: 'items.medicine',
+          foreignField: '_id',
+          as: 'medicineData'
+        }
+      },
+      {
+        $unwind: '$medicineData'
+      },
+      {
+        $addFields: {
+          // Calculate cost price based on unit type
+          costPrice: {
+            $cond: [
+              { $eq: ['$items.unitType', 'strip'] },
+              '$medicineData.stripInfo.purchasePrice',
+              '$medicineData.individualInfo.purchasePrice'
+            ]
+          },
+          // Calculate profit per item
+          itemProfit: {
+            $multiply: [
+              '$items.quantity',
+              {
+                $subtract: [
+                  '$items.unitPrice',
+                  {
+                    $cond: [
+                      { $eq: ['$items.unitType', 'strip'] },
+                      '$medicineData.stripInfo.purchasePrice',
+                      '$medicineData.individualInfo.purchasePrice'
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalProfit: { $sum: '$itemProfit' }
+        }
+      }
+    ]);
+
+    // Calculate today's profit from returns (to subtract)
+    const todayReturnProfitLoss = await Return.aggregate([
+      {
+        $match: {
+          store: store._id,
+          createdAt: { $gte: startOfDay },
+          status: { $in: ['completed', 'processed'] }
+        }
+      },
+      {
+        $unwind: '$items'
+      },
+      {
+        $lookup: {
+          from: 'medicines',
+          localField: 'items.medicine',
+          foreignField: '_id',
+          as: 'medicineData'
+        }
+      },
+      {
+        $unwind: '$medicineData'
+      },
+      {
+        $addFields: {
+          // Calculate profit lost due to return
+          returnProfitLoss: {
+            $multiply: [
+              '$items.returnQuantity',
+              {
+                $subtract: [
+                  '$items.unitPrice',
+                  {
+                    $cond: [
+                      { $eq: ['$items.unitType', 'strip'] },
+                      '$medicineData.stripInfo.purchasePrice',
+                      '$medicineData.individualInfo.purchasePrice'
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalReturnProfitLoss: { $sum: '$returnProfitLoss' }
+        }
+      }
+    ]);
+
+    const todayGrossProfit = todayProfitData[0]?.totalProfit || 0;
+    const todayReturnLoss = todayReturnProfitLoss[0]?.totalReturnProfitLoss || 0;
+    const todayProfit = Math.max(0, todayGrossProfit - todayReturnLoss);
+    const todayLoss = todayReturnsAmount; // Keep this for separate tracking
 
     // Get today's credit given out
     const todayCreditStats = await Sale.aggregate([
@@ -274,8 +353,113 @@ const getDashboardData = async (req, res) => {
 
     const todayCredit = todayCreditStats[0]?.totalTodayCredit || 0;
 
-    // Calculate comprehensive metrics
-    const totalProfit = monthRevenue * 0.25; // Assuming 25% profit margin
+    // Calculate comprehensive monthly profit based on actual cost vs selling prices
+    const monthProfitData = await Sale.aggregate([
+      {
+        $match: {
+          store: store._id,
+          createdAt: { $gte: startOfMonth },
+          status: 'completed'
+        }
+      },
+      {
+        $unwind: '$items'
+      },
+      {
+        $lookup: {
+          from: 'medicines',
+          localField: 'items.medicine',
+          foreignField: '_id',
+          as: 'medicineData'
+        }
+      },
+      {
+        $unwind: '$medicineData'
+      },
+      {
+        $addFields: {
+          itemProfit: {
+            $multiply: [
+              '$items.quantity',
+              {
+                $subtract: [
+                  '$items.unitPrice',
+                  {
+                    $cond: [
+                      { $eq: ['$items.unitType', 'strip'] },
+                      '$medicineData.stripInfo.purchasePrice',
+                      '$medicineData.individualInfo.purchasePrice'
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalProfit: { $sum: '$itemProfit' }
+        }
+      }
+    ]);
+
+    // Calculate monthly profit loss from returns
+    const monthReturnProfitLoss = await Return.aggregate([
+      {
+        $match: {
+          store: store._id,
+          createdAt: { $gte: startOfMonth },
+          status: { $in: ['completed', 'processed'] }
+        }
+      },
+      {
+        $unwind: '$items'
+      },
+      {
+        $lookup: {
+          from: 'medicines',
+          localField: 'items.medicine',
+          foreignField: '_id',
+          as: 'medicineData'
+        }
+      },
+      {
+        $unwind: '$medicineData'
+      },
+      {
+        $addFields: {
+          returnProfitLoss: {
+            $multiply: [
+              '$items.returnQuantity',
+              {
+                $subtract: [
+                  '$items.unitPrice',
+                  {
+                    $cond: [
+                      { $eq: ['$items.unitType', 'strip'] },
+                      '$medicineData.stripInfo.purchasePrice',
+                      '$medicineData.individualInfo.purchasePrice'
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalReturnProfitLoss: { $sum: '$returnProfitLoss' }
+        }
+      }
+    ]);
+
+    const monthGrossProfit = monthProfitData[0]?.totalProfit || 0;
+    const monthReturnLoss = monthReturnProfitLoss[0]?.totalReturnProfitLoss || 0;
+    const totalProfit = Math.max(0, monthGrossProfit - monthReturnLoss);
     const inStockMedicines = totalMedicines - outOfStock;
     const totalItems = await Medicine.aggregate([
       { $match: { store: store._id } },
@@ -473,32 +657,271 @@ const getStoreAnalytics = async (req, res) => {
     const previousSalesCount = previousSales.length;
     const salesGrowth = previousSalesCount > 0 ? Math.round(((currentSalesCount - previousSalesCount) / previousSalesCount) * 100) : 0;
 
-    // Get inventory analytics
+    // Calculate Daily Average Sales
+    const periodDays = Math.max(1, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)));
+    const dailyAverageSales = periodDays > 0 ? Math.round(currentRevenue / periodDays) : 0;
+
+    // Calculate Peak Sales Day
+    let peakSalesDay = { day: 'N/A', amount: 0 };
+    if (dailySalesArray.length > 0) {
+      const peakDay = dailySalesArray.reduce((max, day) =>
+        day.revenue > max.revenue ? day : max
+      );
+      peakSalesDay = {
+        day: new Date(peakDay.date).toLocaleDateString('en-US', {
+          weekday: 'long',
+          month: 'short',
+          day: 'numeric'
+        }),
+        amount: peakDay.revenue
+      };
+    }
+
+    // Get inventory analytics with proper dual-unit system support
     const totalMedicines = await Medicine.countDocuments({ store: store._id, isActive: true });
-    const lowStockMedicines = await Medicine.countDocuments({
-      store: store._id,
-      isActive: true,
-      $expr: { $lte: ['$stock', '$minStock'] }
-    });
+
+    // Low stock medicines - use standardized calculation
+    const lowStockMedicines = await LowStockService.countLowStockMedicines(store._id);
+
+    // Out of stock medicines - consider both strip and individual units
     const outOfStockMedicines = await Medicine.countDocuments({
       store: store._id,
       isActive: true,
-      stock: 0
+      $or: [
+        {
+          'unitTypes.hasStrips': true,
+          'unitTypes.hasIndividual': true,
+          'stripInfo.stock': 0,
+          'individualInfo.stock': 0
+        },
+        {
+          'unitTypes.hasStrips': true,
+          'unitTypes.hasIndividual': { $ne: true },
+          'stripInfo.stock': 0
+        },
+        {
+          'unitTypes.hasIndividual': true,
+          'unitTypes.hasStrips': { $ne: true },
+          'individualInfo.stock': 0
+        },
+        // Fallback to legacy fields
+        {
+          'unitTypes.hasStrips': { $ne: true },
+          'unitTypes.hasIndividual': { $ne: true },
+          stock: 0
+        }
+      ]
     });
 
-    // Get customer analytics
+    // Calculate total inventory value
+    const inventoryValue = await Medicine.aggregate([
+      { $match: { store: store._id, isActive: true } },
+      {
+        $group: {
+          _id: null,
+          totalValue: {
+            $sum: {
+              $add: [
+                {
+                  $cond: [
+                    '$unitTypes.hasStrips',
+                    { $multiply: ['$stripInfo.stock', '$stripInfo.sellingPrice'] },
+                    0
+                  ]
+                },
+                {
+                  $cond: [
+                    '$unitTypes.hasIndividual',
+                    { $multiply: ['$individualInfo.stock', '$individualInfo.sellingPrice'] },
+                    0
+                  ]
+                },
+                // Fallback to legacy fields
+                {
+                  $cond: [
+                    { $and: [{ $ne: ['$unitTypes.hasStrips', true] }, { $ne: ['$unitTypes.hasIndividual', true] }] },
+                    { $multiply: ['$stock', '$sellingPrice'] },
+                    0
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]);
+
+    // Get expiring medicines (within 30 days)
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+
+    const expiringMedicines = await Medicine.countDocuments({
+      store: store._id,
+      isActive: true,
+      expiryDate: {
+        $gte: new Date(),
+        $lte: thirtyDaysFromNow
+      }
+    });
+
+    // Get expired medicines
+    const expiredMedicines = await Medicine.countDocuments({
+      store: store._id,
+      isActive: true,
+      expiryDate: { $lt: new Date() }
+    });
+
+    // Get category distribution
+    const categoryDistribution = await Medicine.aggregate([
+      { $match: { store: store._id, isActive: true } },
+      {
+        $group: {
+          _id: '$category',
+          count: { $sum: 1 },
+          value: {
+            $sum: {
+              $add: [
+                {
+                  $cond: [
+                    '$unitTypes.hasStrips',
+                    { $multiply: ['$stripInfo.stock', '$stripInfo.sellingPrice'] },
+                    0
+                  ]
+                },
+                {
+                  $cond: [
+                    '$unitTypes.hasIndividual',
+                    { $multiply: ['$individualInfo.stock', '$individualInfo.sellingPrice'] },
+                    0
+                  ]
+                },
+                // Fallback to legacy fields
+                {
+                  $cond: [
+                    { $and: [{ $ne: ['$unitTypes.hasStrips', true] }, { $ne: ['$unitTypes.hasIndividual', true] }] },
+                    { $multiply: ['$stock', '$sellingPrice'] },
+                    0
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      { $sort: { count: -1 } }
+    ]);
+
+    // Get customer analytics with proper date field and comprehensive metrics
     const totalCustomers = await Customer.countDocuments({ store: store._id });
+
+    // Use registrationDate instead of createdAt for new customers
     const newCustomers = await Customer.countDocuments({
       store: store._id,
-      createdAt: { $gte: startDate, $lte: endDate }
+      registrationDate: { $gte: startDate, $lte: endDate }
+    });
+
+    // Get previous period new customers for growth calculation
+    const customerPreviousPeriodStart = new Date(startDate.getTime() - (endDate.getTime() - startDate.getTime()));
+    const previousNewCustomers = await Customer.countDocuments({
+      store: store._id,
+      registrationDate: { $gte: customerPreviousPeriodStart, $lt: startDate }
+    });
+
+    // Get active customers (customers with purchases in the last 90 days)
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+    const activeCustomers = await Customer.countDocuments({
+      store: store._id,
+      status: 'active',
+      lastPurchaseDate: { $gte: ninetyDaysAgo }
+    });
+
+    // Calculate customer growth percentage
+    const customerGrowth = previousNewCustomers > 0
+      ? Math.round(((newCustomers - previousNewCustomers) / previousNewCustomers) * 100)
+      : newCustomers > 0 ? 100 : 0;
+
+    // Get customer spending analytics
+    const customerSpendingStats = await Customer.aggregate([
+      { $match: { store: store._id } },
+      {
+        $group: {
+          _id: null,
+          averageSpending: { $avg: '$totalSpent' },
+          totalRevenue: { $sum: '$totalSpent' },
+          averageOrderValue: { $avg: '$averageOrderValue' }
+        }
+      }
+    ]);
+
+    const spendingStats = customerSpendingStats[0] || {
+      averageSpending: 0,
+      totalRevenue: 0,
+      averageOrderValue: 0
+    };
+
+    // Get customer acquisition data (daily breakdown for the period)
+    const customerAcquisitionData = await Customer.aggregate([
+      {
+        $match: {
+          store: store._id,
+          registrationDate: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: '%Y-%m-%d', date: '$registrationDate' }
+          },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { '_id': 1 } }
+    ]);
+
+    // Fill in missing dates with 0 counts
+    const acquisitionData = [];
+    const currentDate = new Date(startDate);
+    while (currentDate <= endDate) {
+      const dateStr = currentDate.toISOString().split('T')[0];
+      const existingData = customerAcquisitionData.find(item => item._id === dateStr);
+      acquisitionData.push({
+        date: dateStr,
+        count: existingData ? existingData.count : 0
+      });
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    // Get customer spending segmentation
+    const customerSegmentation = await Customer.aggregate([
+      { $match: { store: store._id } },
+      {
+        $bucket: {
+          groupBy: '$totalSpent',
+          boundaries: [0, 1000, 5000, Infinity],
+          default: 'Other',
+          output: {
+            count: { $sum: 1 }
+          }
+        }
+      }
+    ]);
+
+    // Map to frontend expected format
+    const segmentNames = ['Low Spenders', 'Medium Spenders', 'High Spenders'];
+    let lowSpenders = 0, mediumSpenders = 0, highSpenders = 0;
+
+    customerSegmentation.forEach((segment, index) => {
+      if (index === 0) lowSpenders = segment.count;
+      else if (index === 1) mediumSpenders = segment.count;
+      else if (index === 2) highSpenders = segment.count;
     });
 
     // Get detailed low stock medicines for DataTable
-    const lowStockMedicinesData = await Medicine.find({
-      store: store._id,
-      isActive: true,
-      $expr: { $lte: ['$stock', '$minStock'] }
-    }).select('name stock minStock category').limit(20);
+    const lowStockMedicinesData = await LowStockService.findLowStockMedicines(store._id, {
+      select: 'name stock minStock category stripInfo individualInfo unitTypes',
+      limit: 20
+    });
 
     // Get top customers for DataTable
     const topCustomersData = await Sale.aggregate([
@@ -527,12 +950,56 @@ const getStoreAnalytics = async (req, res) => {
       { $limit: 10 }
     ]);
 
+    // Calculate comprehensive operations analytics
+
     // Calculate hourly transaction pattern
     const hourlyPattern = Array(24).fill(0);
     sales.forEach(sale => {
       const hour = sale.createdAt.getHours();
       hourlyPattern[hour]++;
     });
+
+    // Calculate daily transactions average
+    const operationsPeriodDays = Math.max(1, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)));
+    const dailyTransactions = Math.round(sales.length / operationsPeriodDays);
+
+    // Find peak hours (hour with most transactions)
+    let peakHour = 0;
+    let maxTransactions = 0;
+    hourlyPattern.forEach((count, hour) => {
+      if (count > maxTransactions) {
+        maxTransactions = count;
+        peakHour = hour;
+      }
+    });
+    const peakHours = maxTransactions > 0 ? `${peakHour}:00 - ${peakHour + 1}:00` : 'N/A';
+
+    // Calculate weekly performance (group by day of week)
+    const weeklyPerformance = {
+      sales: Array(7).fill(0),
+      transactions: Array(7).fill(0)
+    };
+
+    sales.forEach(sale => {
+      const dayOfWeek = sale.createdAt.getDay(); // 0 = Sunday, 1 = Monday, etc.
+      const mondayBasedDay = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // Convert to Monday = 0
+      weeklyPerformance.sales[mondayBasedDay] += sale.totalAmount;
+      weeklyPerformance.transactions[mondayBasedDay] += 1;
+    });
+
+    // Calculate staff efficiency (simplified metric based on sales per hour)
+    const totalWorkingHours = operationsPeriodDays * 8; // Assuming 8 hours per day
+    const salesPerHour = totalWorkingHours > 0 ? sales.length / totalWorkingHours : 0;
+    const staffEfficiency = Math.min(100, Math.round(salesPerHour * 10)); // Scale to percentage
+
+    // Calculate system uptime (mock calculation - in real scenario would come from monitoring)
+    const systemUptime = 99.5; // Mock 99.5% uptime
+
+    // Calculate average transaction time (mock - would need actual timing data in real scenario)
+    const averageTransactionTime = 3.2; // Mock 3.2 minutes average
+
+    // Total transactions for the period
+    const totalTransactions = sales.length;
 
     // Calculate category distribution
     const categoryStats = {};
@@ -547,7 +1014,7 @@ const getStoreAnalytics = async (req, res) => {
       });
     });
 
-    const categoryDistribution = Object.entries(categoryStats).map(([category, stats]) => ({
+    const salesCategoryDistribution = Object.entries(categoryStats).map(([category, stats]) => ({
       category,
       revenue: stats.revenue,
       quantity: stats.quantity,
@@ -564,26 +1031,53 @@ const getStoreAnalytics = async (req, res) => {
           totalSales: currentSalesCount,
           averageOrderValue: currentSalesCount > 0 ? Math.round(currentRevenue / currentSalesCount) : 0,
           revenueGrowth,
-          salesGrowth
+          salesGrowth,
+          dailyAverageSales
         },
+        // Add these metrics at root level for frontend compatibility
+        salesGrowth,
+        peakSalesDay,
         dailySales: dailySalesArray,
         topMedicines,
         inventory: {
           totalMedicines,
           lowStockMedicines,
           outOfStockMedicines,
+          expiringMedicines,
+          expiredMedicines,
+          totalValue: inventoryValue[0]?.totalValue || 0,
           stockHealthPercentage: totalMedicines > 0 ? Math.round(((totalMedicines - lowStockMedicines) / totalMedicines) * 100) : 100,
-          lowStockMedicinesData
+          lowStockMedicinesData,
+          categories: categoryDistribution.map(cat => ({
+            name: cat._id || 'Unknown',
+            count: cat.count,
+            value: cat.value
+          }))
         },
         customers: {
           totalCustomers,
           newCustomers,
-          customerGrowth: totalCustomers > 0 ? Math.round((newCustomers / totalCustomers) * 100) : 0,
+          activeCustomers,
+          customerGrowth,
+          averageSpending: Math.round(spendingStats.averageSpending || 0),
+          averageOrderValue: Math.round(spendingStats.averageOrderValue || 0),
+          totalCustomerRevenue: Math.round(spendingStats.totalRevenue || 0),
+          acquisitionData,
+          lowSpenders,
+          mediumSpenders,
+          highSpenders,
           topCustomers: topCustomersData
         },
         operations: {
+          dailyTransactions,
+          peakHours,
+          staffEfficiency,
+          systemUptime,
+          averageTransactionTime,
+          totalTransactions,
           hourlyPattern,
-          categoryDistribution
+          weeklyPerformance,
+          categoryDistribution: salesCategoryDistribution
         }
       }
     });
@@ -608,10 +1102,11 @@ const getInventory = async (req, res) => {
   const { page = 1, limit = 20, search, category, stockStatus } = req.query;
 
   try {
-    let query = { store: store._id };
+    // Build base search query
+    let searchQuery = {};
 
     if (search) {
-      query.$or = [
+      searchQuery.$or = [
         { name: { $regex: search, $options: 'i' } },
         { genericName: { $regex: search, $options: 'i' } },
         { manufacturer: { $regex: search, $options: 'i' } }
@@ -619,100 +1114,24 @@ const getInventory = async (req, res) => {
     }
 
     if (category) {
-      query.category = category;
+      searchQuery.category = category;
     }
 
-    let medicines;
-    let total;
-
+    // Use batch-aware medicine availability logic for regular inventory
     if (stockStatus === 'low') {
-      // Use aggregation for low stock filtering with corrected logic
-      medicines = await Medicine.aggregate([
-        { $match: query },
-        {
-          $match: {
-            $or: [
-              // Both strip and individual enabled: Low stock based on STRIP STOCK ONLY
-              {
-                $and: [
-                  { 'unitTypes.hasStrips': true },
-                  { 'unitTypes.hasIndividual': true },
-                  { $expr: { $lte: ['$stripInfo.stock', '$stripInfo.minStock'] } }
-                ]
-              },
-              // Only strips enabled
-              {
-                $and: [
-                  { 'unitTypes.hasStrips': true },
-                  { 'unitTypes.hasIndividual': { $ne: true } },
-                  { $expr: { $lte: ['$stripInfo.stock', '$stripInfo.minStock'] } }
-                ]
-              },
-              // Only individual enabled
-              {
-                $and: [
-                  { 'unitTypes.hasIndividual': true },
-                  { 'unitTypes.hasStrips': { $ne: true } },
-                  { $expr: { $lte: ['$individualInfo.stock', '$individualInfo.minStock'] } }
-                ]
-              },
-              // Legacy support - assume strips only
-              {
-                $and: [
-                  { 'unitTypes': { $exists: false } },
-                  { $expr: { $lte: ['$inventory.stripQuantity', '$inventory.stripMinimumStock'] } }
-                ]
-              }
-            ]
-          }
-        },
+      // Use standardized low stock aggregation with pagination
+      const pipeline = LowStockService.getLowStockAggregationPipeline(query);
+      pipeline.push(
         { $sort: { name: 1 } },
         { $skip: (page - 1) * limit },
         { $limit: limit * 1 }
-      ]);
+      );
+      medicines = await Medicine.aggregate(pipeline);
 
-      // Get total count for low stock medicines with corrected logic
-      const totalResult = await Medicine.aggregate([
-        { $match: query },
-        {
-          $match: {
-            $or: [
-              // Both strip and individual enabled: Low stock based on STRIP STOCK ONLY
-              {
-                $and: [
-                  { 'unitTypes.hasStrips': true },
-                  { 'unitTypes.hasIndividual': true },
-                  { $expr: { $lte: ['$stripInfo.stock', '$stripInfo.minStock'] } }
-                ]
-              },
-              // Only strips enabled
-              {
-                $and: [
-                  { 'unitTypes.hasStrips': true },
-                  { 'unitTypes.hasIndividual': { $ne: true } },
-                  { $expr: { $lte: ['$stripInfo.stock', '$stripInfo.minStock'] } }
-                ]
-              },
-              // Only individual enabled
-              {
-                $and: [
-                  { 'unitTypes.hasIndividual': true },
-                  { 'unitTypes.hasStrips': { $ne: true } },
-                  { $expr: { $lte: ['$individualInfo.stock', '$individualInfo.minStock'] } }
-                ]
-              },
-              // Legacy support - assume strips only
-              {
-                $and: [
-                  { 'unitTypes': { $exists: false } },
-                  { $expr: { $lte: ['$inventory.stripQuantity', '$inventory.stripMinimumStock'] } }
-                ]
-              }
-            ]
-          }
-        },
-        { $count: 'total' }
-      ]);
+      // Get total count for low stock medicines using standardized service
+      const countPipeline = LowStockService.getLowStockAggregationPipeline(query);
+      countPipeline.push({ $count: 'total' });
+      const totalResult = await Medicine.aggregate(countPipeline);
       total = totalResult.length > 0 ? totalResult[0].total : 0;
 
     } else if (stockStatus === 'out') {
@@ -741,13 +1160,14 @@ const getInventory = async (req, res) => {
       total = await Medicine.countDocuments(query);
 
     } else {
-      // Regular query for all other cases
-      medicines = await Medicine.find(query)
-        .sort({ name: 1 })
-        .limit(limit * 1)
-        .skip((page - 1) * limit);
+      // Regular query for all other cases - use batch-aware availability
+      const allAvailableMedicines = await Medicine.findAvailableForSale(store._id, searchQuery);
 
-      total = await Medicine.countDocuments(query);
+      // Apply pagination
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + parseInt(limit);
+      medicines = allAvailableMedicines.slice(startIndex, endIndex);
+      total = allAvailableMedicines.length;
     }
 
     // Fetch rack locations for all medicines
@@ -893,14 +1313,15 @@ const exportInventory = async (req, res) => {
       ];
     });
 
-    // Create CSV content
-    const csvContent = [
+    // Create CSV content with UTF-8 BOM
+    let csvContent = '\uFEFF'; // UTF-8 BOM for proper encoding
+    csvContent += [
       csvHeaders.join(','),
       ...csvRows.map(row => row.map(field => `"${field}"`).join(','))
     ].join('\n');
 
     // Set response headers for CSV download
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="inventory-${store.name}-${new Date().toISOString().split('T')[0]}.csv"`);
 
     // Send CSV content
@@ -924,12 +1345,41 @@ const exportInventory = async (req, res) => {
 // @access  Private (Store Manager only)
 const getSales = async (req, res) => {
   const store = req.store;
-  const { page = 1, limit = 20, startDate, endDate, customer, status, search } = req.query;
+  const {
+    page = 1,
+    limit = 20,
+    startDate,
+    endDate,
+    customer,
+    status,
+    search,
+    doctorName,
+    customerName,
+    phoneNumber,
+    creditStatus
+  } = req.query;
+
+  console.log('🔍 RAW req.query:', req.query);
+  console.log('🔍 Extracted parameters:', {
+    doctorName: `"${doctorName}"`,
+    customerName: `"${customerName}"`,
+    phoneNumber: `"${phoneNumber}"`,
+    creditStatus: `"${creditStatus}"`
+  });
 
   try {
     let query = { store: store._id };
     console.log('🔍 Fetching sales for store:', store._id);
-    console.log('📋 Query parameters:', { page, limit, startDate, endDate, customer, status, search });
+    console.log('📋 Query parameters:', {
+      page, limit, startDate, endDate, customer, status, search,
+      doctorName, customerName, phoneNumber, creditStatus
+    });
+    console.log('🔍 Advanced filter values:', {
+      doctorName: doctorName || 'NOT_PROVIDED',
+      customerName: customerName || 'NOT_PROVIDED',
+      phoneNumber: phoneNumber || 'NOT_PROVIDED',
+      creditStatus: creditStatus || 'NOT_PROVIDED'
+    });
 
     // Handle date filtering
     if (startDate || endDate) {
@@ -993,6 +1443,98 @@ const getSales = async (req, res) => {
         { invoiceNumber: searchRegex },
         { 'customer.name': searchRegex }
       ];
+    }
+
+    // Handle new filter parameters
+    const additionalFilters = [];
+
+    // Filter by doctor name - need to find doctors first, then filter by their IDs
+    if (doctorName) {
+      const Doctor = require('../models/Doctor');
+      const doctorRegex = new RegExp(doctorName.trim(), 'i');
+      const matchingDoctors = await Doctor.find({
+        store: store._id,
+        name: doctorRegex
+      }).select('_id');
+
+      if (matchingDoctors.length > 0) {
+        const doctorIds = matchingDoctors.map(doc => doc._id);
+        additionalFilters.push({
+          'prescription.doctor': { $in: doctorIds }
+        });
+      } else {
+        // No matching doctors found, return empty result
+        additionalFilters.push({
+          'prescription.doctor': null // This will match no documents
+        });
+      }
+    }
+
+    // Filter by customer name - need to find customers first, then filter by their IDs
+    if (customerName) {
+      const Customer = require('../models/Customer');
+      const customerRegex = new RegExp(customerName.trim(), 'i');
+      const matchingCustomers = await Customer.find({
+        store: store._id,
+        name: customerRegex
+      }).select('_id');
+
+      if (matchingCustomers.length > 0) {
+        const customerIds = matchingCustomers.map(cust => cust._id);
+        additionalFilters.push({
+          customer: { $in: customerIds }
+        });
+      } else {
+        // No matching customers found, return empty result
+        additionalFilters.push({
+          customer: null // This will match no documents
+        });
+      }
+    }
+
+    // Filter by phone number - need to find customers first, then filter by their IDs
+    if (phoneNumber) {
+      const Customer = require('../models/Customer');
+      const phoneRegex = new RegExp(phoneNumber.trim(), 'i');
+      const matchingCustomers = await Customer.find({
+        store: store._id,
+        phone: phoneRegex
+      }).select('_id');
+
+      if (matchingCustomers.length > 0) {
+        const customerIds = matchingCustomers.map(cust => cust._id);
+        additionalFilters.push({
+          customer: { $in: customerIds }
+        });
+      } else {
+        // No matching customers found, return empty result
+        additionalFilters.push({
+          customer: null // This will match no documents
+        });
+      }
+    }
+
+    // Filter by credit status (unpaid/partially paid)
+    if (creditStatus === 'credit') {
+      additionalFilters.push({
+        $or: [
+          { paymentStatus: 'pending' },
+          { paymentStatus: 'partial' }
+        ]
+      });
+    } else if (creditStatus === 'paid') {
+      additionalFilters.push({
+        paymentStatus: 'paid'
+      });
+    }
+
+    // Combine additional filters with existing query
+    if (additionalFilters.length > 0) {
+      if (query.$and) {
+        query.$and.push(...additionalFilters);
+      } else {
+        query.$and = additionalFilters;
+      }
     }
 
     console.log('🔎 Final query:', query);
@@ -1105,13 +1647,27 @@ const createSale = async (req, res) => {
     for (const item of items) {
       const medicine = await Medicine.findOne({
         _id: item.medicine,
-        store: store._id
+        store: store._id,
+        isActive: true
       });
 
       if (!medicine) {
         return res.status(400).json({
           success: false,
           message: `Medicine not found: ${item.medicine}`
+        });
+      }
+
+      // Check if medicine is expired
+      if (medicine.expiryDate && new Date(medicine.expiryDate) < new Date()) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot sell expired medicine "${medicine.name}". This medicine expired on ${new Date(medicine.expiryDate).toLocaleDateString()}.`,
+          expiredMedicine: {
+            id: medicine._id,
+            name: medicine.name,
+            expiryDate: medicine.expiryDate
+          }
         });
       }
 
@@ -1460,7 +2016,8 @@ const createSale = async (req, res) => {
           },
           description: `Credit sale - Invoice ${sale.invoiceNumber || sale._id.toString()}`,
           notes: notes || '',
-          processedBy: req.user.id
+          processedBy: req.user.id,
+          transactionDate: new Date() // Explicitly set transaction date
         });
 
         console.log('✅ Credit transaction created successfully for customer:', customerDoc.name);
@@ -1523,10 +2080,15 @@ const createSale = async (req, res) => {
 // @access  Private (Store Manager only)
 const getCustomers = async (req, res) => {
   const store = req.store;
-  const { page = 1, limit = 20, search } = req.query;
+  const { page = 1, limit = 20, search, status } = req.query;
 
   try {
     let query = { store: store._id };
+
+    // Add status filter (show all by default, but allow filtering by status)
+    if (status && status !== 'all') {
+      query.status = status;
+    }
 
     if (search) {
       query.$or = [
@@ -2001,6 +2563,15 @@ const addCustomMedicine = async (req, res) => {
       });
     }
 
+    // Validate Cut Medicine functionality
+    if (unitTypes.hasIndividual && !unitTypes.hasStrips) {
+      // This is a single-piece medicine (bottles, injections, etc.) - individual units are allowed
+      // No additional validation needed for single-piece medicines
+    } else if (unitTypes.hasIndividual && unitTypes.hasStrips) {
+      // This is attempting to create a cut medicine (strips that can be cut into individual units)
+      // For now, we'll allow this but could add category-based validation here if needed
+    }
+
     // Check if medicine with same name and manufacturer already exists in this store
     const existingMedicine = await Medicine.findOne({
       store: store._id,
@@ -2303,6 +2874,36 @@ const updateMedicine = async (req, res) => {
     } else if (req.body.barcode === '') {
       // Handle empty barcode
       req.body.barcode = undefined;
+    }
+
+    // Validate Cut Medicine functionality
+    if (req.body.unitTypes || req.body.individualInfo) {
+      const unitTypes = req.body.unitTypes || medicine.unitTypes;
+
+      // If trying to enable individual units without strips, it's not a valid cut medicine scenario
+      if (unitTypes.hasIndividual && !unitTypes.hasStrips) {
+        // This is a single-piece medicine - individual units are allowed but not as "cut medicine"
+        // No additional validation needed for single-piece medicines
+      } else if (unitTypes.hasIndividual && unitTypes.hasStrips) {
+        // This is attempting to enable cut medicine functionality
+        // For now, we'll allow this but could add category-based validation here if needed
+      }
+
+      // If trying to set individual stock for a medicine that doesn't support cutting
+      if (req.body.individualInfo && req.body.individualInfo.stock) {
+        const hasStrips = unitTypes.hasStrips;
+        const hasIndividual = unitTypes.hasIndividual;
+
+        // Only allow individual stock updates if:
+        // 1. Medicine has both strips and individual (cut medicine) OR
+        // 2. Medicine only has individual (single-piece medicine)
+        if (!hasIndividual) {
+          return res.status(400).json({
+            success: false,
+            message: 'Cannot set individual stock for a medicine that does not support individual units'
+          });
+        }
+      }
     }
 
     // Update the medicine

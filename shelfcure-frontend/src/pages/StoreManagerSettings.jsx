@@ -685,6 +685,11 @@ const StoreManagerSettings = () => {
         taxTypes
       };
 
+      console.log('=== FRONTEND: Saving business settings ===');
+      console.log('Settings data:', settingsData);
+      console.log('Token exists:', !!localStorage.getItem('token'));
+      console.log('Token preview:', localStorage.getItem('token')?.substring(0, 20) + '...');
+
       const response = await fetch('/api/store-manager/business-settings', {
         method: 'POST',
         headers: {
@@ -694,17 +699,34 @@ const StoreManagerSettings = () => {
         body: JSON.stringify(settingsData)
       });
 
+      console.log('Response status:', response.status);
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
       if (response.ok) {
+        const successData = await response.json();
+        console.log('Success response data:', successData);
         setMessage('Business settings updated successfully!');
         // Refetch the settings to get the updated data from database
         await fetchBusinessSettings();
         // Also refetch store info to show updated GST number
         await fetchStoreInfo();
       } else {
-        throw new Error('Failed to update settings');
+        // Get detailed error information from response
+        let errorMessage = 'Failed to update settings';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.message || errorData.error || errorMessage;
+          console.error('Backend error response:', errorData);
+          console.error('Full error details:', errorData);
+        } catch (parseError) {
+          console.error('Failed to parse error response:', parseError);
+          console.error('Raw response text:', await response.text());
+        }
+        throw new Error(errorMessage);
       }
     } catch (error) {
-      setMessage('Failed to update business settings');
+      const errorMessage = error.message || 'Failed to update business settings';
+      setMessage(errorMessage);
       console.error('Business settings update error:', error);
     } finally {
       setLoading(false);

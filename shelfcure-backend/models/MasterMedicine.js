@@ -148,6 +148,13 @@ masterMedicineSchema.statics.findByCategory = function(category) {
   });
 };
 
+// Virtual to check if medicine supports cutting (strip to individual conversion)
+masterMedicineSchema.virtual('supportsCutting').get(function() {
+  // Cut Medicine functionality should only be available for medicines that have BOTH strips AND individual units
+  // If a medicine only has individual units (hasStrips: false), it's a single-piece medicine (bottles, injections) - no cutting allowed
+  return this.unitTypes?.hasStrips === true && this.unitTypes?.hasIndividual === true;
+});
+
 // Pre-save middleware
 masterMedicineSchema.pre('save', function(next) {
   // Normalize empty barcode to undefined so unique index on barcode doesn't clash on ""

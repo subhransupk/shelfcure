@@ -295,6 +295,41 @@ purchaseReturnSchema.virtual('returnAge').get(function() {
   return Math.floor((Date.now() - this.returnDate) / (1000 * 60 * 60 * 24));
 });
 
+// Helper function to generate unique return number
+async function generateUniqueReturnNumber(store) {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const prefix = `PR-${year}${month}-`;
+
+  // Create a unique identifier for this store and month
+  const counterId = `purchase_return_${store}_${year}_${month}`;
+
+  try {
+    // Use MongoDB's atomic findOneAndUpdate to get next sequence number
+    const Counter = mongoose.model('Counter');
+    const counter = await Counter.findOneAndUpdate(
+      { _id: counterId },
+      { $inc: { sequence: 1 } },
+      {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true
+      }
+    );
+
+    const sequence = counter.sequence;
+    return `${prefix}${String(sequence).padStart(4, '0')}`;
+
+  } catch (error) {
+    console.error('Error with counter-based return number generation:', error);
+
+    // Fallback: Use timestamp-based approach
+    const timestamp = Date.now().toString().slice(-6);
+    return `PR-${year}${month}-${timestamp}`;
+  }
+}
+
 // Pre-save middleware to generate return number
 purchaseReturnSchema.pre('save', async function(next) {
   if (this.isNew && !this.returnNumber) {
@@ -302,30 +337,32 @@ purchaseReturnSchema.pre('save', async function(next) {
       const store = this.store;
       const today = new Date();
       const year = today.getFullYear();
-      const month = String(today.getMonth() + 1).padStart(2, '0');
 
-      // Find the last return number for this store in current month
-      const lastReturn = await this.constructor.findOne({
-        store: store,
-        returnNumber: { $regex: `^PR-${year}${month}-` }
-      }).sort({ returnNumber: -1 });
-
-      let sequence = 1;
-      if (lastReturn && lastReturn.returnNumber) {
-        const lastSequence = parseInt(lastReturn.returnNumber.split('-')[2]);
-        sequence = lastSequence + 1;
-      }
-
-      this.returnNumber = `PR-${year}${month}-${String(sequence).padStart(4, '0')}`;
+      // Generate unique return number
+      this.returnNumber = await generateUniqueReturnNumber(store);
 
       // Set fiscal information
       this.fiscalYear = `${year}-${year + 1}`;
       this.quarter = `Q${Math.ceil((today.getMonth() + 1) / 3)}`;
       this.month = today.toLocaleString('default', { month: 'long' });
 
+      console.log(`Generated return number: ${this.returnNumber} for store: ${store}`);
+
     } catch (error) {
       console.error('Error generating return number:', error);
-      return next(error);
+
+      // Final fallback return number generation
+      const timestamp = Date.now().toString().slice(-6);
+      const year = new Date().getFullYear();
+      const month = String(new Date().getMonth() + 1).padStart(2, '0');
+      this.returnNumber = `PR-${year}${month}-${timestamp}`;
+
+      console.warn(`Using timestamp fallback return number: ${this.returnNumber}`);
+
+      // Set basic fiscal information
+      this.fiscalYear = `${year}-${year + 1}`;
+      this.quarter = `Q${Math.ceil((new Date().getMonth() + 1) / 3)}`;
+      this.month = new Date().toLocaleString('default', { month: 'long' });
     }
   }
   next();
