@@ -33,6 +33,14 @@ const StoreManagerNotifications = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedNotifications, setSelectedNotifications] = useState([]);
 
+  // Summary counts state
+  const [summaryStats, setSummaryStats] = useState({
+    unreadAlerts: 0,
+    whatsappMessages: 0,
+    lowStockItems: 0,
+    expiringSoon: 0
+  });
+
   // WebSocket connection state
   const [wsConnected, setWsConnected] = useState(false);
   const [wsError, setWsError] = useState('');
@@ -154,7 +162,11 @@ const StoreManagerNotifications = () => {
 
           // Listen for new notifications
           webSocketClient.on('new-notification', (notification) => {
-            setNotifications(prev => [notification, ...prev]);
+            setNotifications(prev => {
+              const updatedNotifications = [notification, ...prev];
+              calculateSummaryStats(updatedNotifications);
+              return updatedNotifications;
+            });
           });
 
           // Join store room for notifications
@@ -212,6 +224,40 @@ const StoreManagerNotifications = () => {
     fetchNotifications();
   }, [filterType, searchTerm]);
 
+  // Calculate summary statistics from notifications
+  const calculateSummaryStats = (notificationsData) => {
+    const stats = {
+      unreadAlerts: 0,
+      whatsappMessages: 0,
+      lowStockItems: 0,
+      expiringSoon: 0
+    };
+
+    notificationsData.forEach(notification => {
+      // Count unread alerts
+      if (!notification.isRead) {
+        stats.unreadAlerts++;
+      }
+
+      // Count by type
+      switch (notification.type) {
+        case 'whatsapp':
+          stats.whatsappMessages++;
+          break;
+        case 'low_stock':
+          stats.lowStockItems++;
+          break;
+        case 'expiry_alert':
+          stats.expiringSoon++;
+          break;
+        default:
+          break;
+      }
+    });
+
+    setSummaryStats(stats);
+  };
+
   const fetchNotifications = async () => {
     try {
       setLoading(true);
@@ -240,7 +286,9 @@ const StoreManagerNotifications = () => {
       }
 
       const data = await response.json();
-      setNotifications(data.data || []);
+      const notificationsData = data.data || [];
+      setNotifications(notificationsData);
+      calculateSummaryStats(notificationsData);
     } catch (error) {
       console.error('Notifications fetch error:', error);
       setError(error.message || 'Failed to load notifications');
@@ -380,13 +428,15 @@ const StoreManagerNotifications = () => {
 
       if (response.ok) {
         // Update local state immediately for better UX
-        setNotifications(prev =>
-          prev.map(notification =>
+        setNotifications(prev => {
+          const updatedNotifications = prev.map(notification =>
             notificationIds.includes(notification._id)
               ? { ...notification, isRead: true }
               : notification
-          )
-        );
+          );
+          calculateSummaryStats(updatedNotifications);
+          return updatedNotifications;
+        });
         setSelectedNotifications([]);
         console.log('✅ Notifications marked as read');
       } else {
@@ -437,9 +487,11 @@ const StoreManagerNotifications = () => {
   const deleteNotifications = async (notificationIds) => {
     try {
       // For now, just remove from local state
-      setNotifications(prev =>
-        prev.filter(notification => !notificationIds.includes(notification._id))
-      );
+      setNotifications(prev => {
+        const updatedNotifications = prev.filter(notification => !notificationIds.includes(notification._id));
+        calculateSummaryStats(updatedNotifications);
+        return updatedNotifications;
+      });
       setSelectedNotifications([]);
       console.log('✅ Notifications removed from view');
     } catch (error) {
@@ -672,7 +724,7 @@ const StoreManagerNotifications = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Unread Alerts</p>
-              <p className="text-2xl font-bold text-red-600">5</p>
+              <p className="text-2xl font-bold text-red-600">{summaryStats.unreadAlerts}</p>
               <p className="text-xs text-red-600">Requires attention</p>
             </div>
             <div className="p-3 bg-gradient-to-r from-red-500 to-red-600 rounded-full">
@@ -685,7 +737,7 @@ const StoreManagerNotifications = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">WhatsApp Messages</p>
-              <p className="text-2xl font-bold text-green-600">23</p>
+              <p className="text-2xl font-bold text-green-600">{summaryStats.whatsappMessages}</p>
               <p className="text-xs text-green-600">Today</p>
             </div>
             <div className="p-3 bg-gradient-to-r from-green-500 to-green-600 rounded-full">
@@ -698,7 +750,7 @@ const StoreManagerNotifications = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Low Stock Items</p>
-              <p className="text-2xl font-bold text-orange-600">8</p>
+              <p className="text-2xl font-bold text-orange-600">{summaryStats.lowStockItems}</p>
               <p className="text-xs text-orange-600">Need reorder</p>
             </div>
             <div className="p-3 bg-gradient-to-r from-orange-500 to-orange-600 rounded-full">
@@ -711,7 +763,7 @@ const StoreManagerNotifications = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Expiring Soon</p>
-              <p className="text-2xl font-bold text-yellow-600">12</p>
+              <p className="text-2xl font-bold text-yellow-600">{summaryStats.expiringSoon}</p>
               <p className="text-xs text-yellow-600">Next 30 days</p>
             </div>
             <div className="p-3 bg-gradient-to-r from-yellow-500 to-yellow-600 rounded-full">

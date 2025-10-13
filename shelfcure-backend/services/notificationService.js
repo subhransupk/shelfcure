@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Notification = require('../models/Notification');
 const NotificationSettings = require('../models/NotificationSettings');
 const Medicine = require('../models/Medicine');
@@ -30,9 +31,9 @@ class NotificationService {
       }
 
       // Get store managers for this store
-      const storeManagers = await User.find({ 
+      const storeManagers = await User.find({
         role: 'store_manager',
-        storeId: storeId,
+        stores: storeId,
         isActive: true
       });
 
@@ -43,7 +44,7 @@ class NotificationService {
 
       // Find medicines with low stock
       const lowStockMedicines = await Medicine.aggregate([
-        { $match: { store: storeId, isActive: true } },
+        { $match: { store: new mongoose.Types.ObjectId(storeId), isActive: true } },
         {
           $match: {
             $or: [
@@ -149,9 +150,9 @@ class NotificationService {
       const store = await Store.findById(storeId);
       if (!store) return;
 
-      const storeManagers = await User.find({ 
+      const storeManagers = await User.find({
         role: 'store_manager',
-        storeId: storeId,
+        stores: storeId,
         isActive: true
       });
 
