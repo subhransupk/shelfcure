@@ -397,8 +397,30 @@ medicineSchema.pre('save', function(next) {
   if (this.expiryDate && this.expiryDate < new Date()) {
     this.isExpired = true;
   }
-  
+
   next();
+});
+
+// Pre-find middleware to update expired status for medicines being queried
+medicineSchema.pre(['find', 'findOne', 'findOneAndUpdate'], async function() {
+  // Only run this for queries that might return expired medicines
+  if (this.getQuery().isExpired !== false) {
+    try {
+      // Update expired status for medicines that should be expired but aren't marked as such
+      await this.model.updateMany(
+        {
+          expiryDate: { $lt: new Date() },
+          isExpired: false
+        },
+        {
+          $set: { isExpired: true }
+        }
+      );
+    } catch (error) {
+      console.error('Error updating expired medicine status in pre-find middleware:', error);
+      // Don't fail the query if this update fails
+    }
+  }
 });
 
 // Static method to find medicines with low stock

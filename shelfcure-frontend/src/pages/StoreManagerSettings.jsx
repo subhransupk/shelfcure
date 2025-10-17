@@ -755,21 +755,10 @@ const StoreManagerSettings = () => {
 
           {/* Success/Error Message */}
           {message && (
-            <div className={`mb-4 p-4 rounded-md ${
+            <div className={`mb-6 p-4 rounded-md ${
               message.includes('successfully') || message.includes('updated')
                 ? 'bg-green-50 text-green-800 border border-green-200'
                 : 'bg-red-50 text-red-800 border border-red-200'
-            }`}>
-              {message}
-            </div>
-          )}
-
-          {/* Message */}
-          {message && (
-            <div className={`mb-6 p-4 rounded-md ${
-              message.includes('successfully') 
-                ? 'bg-green-50 border border-green-200 text-green-800' 
-                : 'bg-red-50 border border-red-200 text-red-800'
             }`}>
               {message}
             </div>

@@ -11,7 +11,6 @@ import {
   User,
   Phone,
   Mail,
-  MapPin,
   AlertCircle,
   CheckCircle
 } from 'lucide-react';
@@ -113,7 +112,7 @@ const CustomerPurchaseHistory = () => {
 
       // Get unit selection for this medicine
       const unitSelection = unitSelections[medicineId];
-      const selectedUnit = customUnit || unitSelection?.unit || 'strips';
+      const selectedUnit = customUnit || unitSelection?.unit || 'strip';
       const selectedQuantity = customQuantity || unitSelection?.quantity || 1;
       const unitData = unitSelection?.unitData;
 
@@ -121,24 +120,12 @@ const CustomerPurchaseHistory = () => {
 
       setAddingToCart(prev => ({ ...prev, [medicineId]: true }));
 
-      // Calculate actual quantity based on unit type
-      let actualQuantity = selectedQuantity;
-      let displayUnit = selectedUnit;
-
-      // If adding strips, convert to individual units for internal tracking
-      if (selectedUnit === 'strips' && unitData?.conversion > 1) {
-        actualQuantity = selectedQuantity * unitData.conversion;
-        displayUnit = 'individual';
-      }
-
-      // Create cart item with unit information
+      // Create cart item with unit information - preserve original unit type
       const cartItem = {
         medicineId: medicineId,
         name: medicineName,
         quantity: selectedQuantity,
-        unit: selectedUnit,
-        actualQuantity: actualQuantity, // For internal calculations
-        displayUnit: displayUnit,
+        unit: selectedUnit, // Keep original unit type from purchase history
         unitData: unitData,
         price: unitData?.price || 0
       };
@@ -153,8 +140,7 @@ const CustomerPurchaseHistory = () => {
           index === existingItemIndex
             ? {
                 ...item,
-                quantity: item.quantity + selectedQuantity,
-                actualQuantity: item.actualQuantity + actualQuantity
+                quantity: item.quantity + selectedQuantity
               }
             : item
         ));
@@ -185,13 +171,12 @@ const CustomerPurchaseHistory = () => {
   }, []);
 
   const proceedToSale = () => {
-    // Format cart items for the sales page
+    // Format cart items for the sales page - preserve original unit types
     const formattedCartItems = cartItems.map(item => ({
       medicineId: item.medicineId,
       name: item.name,
-      quantity: item.actualQuantity || item.quantity, // Use actual quantity for internal calculations
-      unit: item.displayUnit || item.unit,
-      originalUnit: item.unit, // Keep track of original unit selection
+      quantity: item.quantity, // Use original quantity
+      unit: item.unit, // Use original unit type from purchase history
       price: item.price || 0,
       unitData: item.unitData
     }));
@@ -392,7 +377,7 @@ const CustomerPurchaseHistory = () => {
                               key={`regular-${medicine._id}`}
                               medicine={medicine}
                               onUnitChange={(unitSelection) => handleUnitSelectionChange(medicine._id, unitSelection)}
-                              defaultUnit="strips"
+                              defaultUnit="strip"
                               defaultQuantity={1}
                               className="w-full"
                             />
@@ -500,7 +485,7 @@ const CustomerPurchaseHistory = () => {
                                   key={`history-${item.medicine?._id}-${idx}`}
                                   medicine={item.medicine}
                                   onUnitChange={(unitSelection) => handleUnitSelectionChange(`${item.medicine?._id}_${idx}`, unitSelection)}
-                                  defaultUnit={item.unit || 'strips'}
+                                  defaultUnit={item.unit || 'strip'}
                                   defaultQuantity={item.quantity || 1}
                                   className="w-full"
                                 />
@@ -588,12 +573,28 @@ const CustomerPurchaseHistory = () => {
                 </button>
                 <button
                   onClick={() => {
-                    // Add functionality to continue shopping (switch tabs if needed)
-                    if (activeTab === 'regular' && regularMedicines.length === 0) {
-                      setActiveTab('history');
-                    } else if (activeTab === 'history' && purchaseHistory.length === 0) {
-                      setActiveTab('regular');
+                    // Navigate back to Sales & POS with current cart items preserved
+                    if (cartItems.length > 0) {
+                      // Format cart items for the sales page - preserve original unit types
+                      const formattedCartItems = cartItems.map(item => ({
+                        medicineId: item.medicineId,
+                        name: item.name,
+                        quantity: item.quantity, // Use original quantity
+                        unit: item.unit, // Use original unit type from purchase history
+                        price: item.price || 0,
+                        unitData: item.unitData
+                      }));
+
+                      // Store cart items in localStorage and navigate to sales page
+                      localStorage.setItem('prefilledCart', JSON.stringify({
+                        customerId: customer._id,
+                        customerName: customer.name,
+                        customerPhone: customer.phone,
+                        items: formattedCartItems
+                      }));
                     }
+                    // Navigate to sales page regardless of cart status
+                    navigate('/store-panel/sales');
                   }}
                   className="px-4 py-3 border border-green-300 text-sm font-medium rounded-md text-green-700 bg-white hover:bg-green-50 transition-colors"
                 >

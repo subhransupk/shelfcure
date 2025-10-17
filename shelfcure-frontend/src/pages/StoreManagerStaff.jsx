@@ -73,7 +73,11 @@ const StoreManagerStaff = () => {
     paidCount: 0,
     pendingCount: 0,
     notProcessed: 0,
-    avgSalary: 0
+    avgSalary: 0,
+    expectedTotalPayroll: 0,
+    expectedAvgSalary: 0,
+    staffWithConfigs: 0,
+    isExpected: false
   });
   const [payrollLoading, setPayrollLoading] = useState(false);
   const [salaryConfigs, setSalaryConfigs] = useState([]);
@@ -402,7 +406,11 @@ const StoreManagerStaff = () => {
           paidCount: 0,
           pendingCount: 0,
           notProcessed: 0,
-          avgSalary: 0
+          avgSalary: 0,
+          expectedTotalPayroll: 0,
+          expectedAvgSalary: 0,
+          staffWithConfigs: 0,
+          isExpected: false
         });
       }
     } catch (error) {
@@ -829,13 +837,33 @@ const StoreManagerStaff = () => {
       'assistant': { color: 'bg-purple-100 text-purple-800', label: 'Assistant' },
       'store_manager': { color: 'bg-orange-100 text-orange-800', label: 'Store Manager' }
     };
-    
+
     const config = roleConfig[role] || roleConfig['assistant'];
     return (
       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${config.color}`}>
         {config.label}
       </span>
     );
+  };
+
+  const getRelativeTime = (date) => {
+    if (!date) return 'Never';
+
+    const now = new Date();
+    const lastSeen = new Date(date);
+    const diffMs = now - lastSeen;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'Active now';
+    if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays} days ago`;
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)} week${Math.floor(diffDays / 7) > 1 ? 's' : ''} ago`;
+    if (diffDays < 365) return `${Math.floor(diffDays / 30)} month${Math.floor(diffDays / 30) > 1 ? 's' : ''} ago`;
+    return `${Math.floor(diffDays / 365)} year${Math.floor(diffDays / 365) > 1 ? 's' : ''} ago`;
   };
 
   const getAttendanceIcon = (status) => {
@@ -1141,7 +1169,7 @@ const StoreManagerStaff = () => {
                     <td className="px-6 py-4 whitespace-nowrap">
                       {getStatusBadge(member.status)}
                       <div className="text-xs text-gray-500 mt-1">
-                        Last seen: {member.lastSeen ? new Date(member.lastSeen).toLocaleDateString() : 'Never'}
+                        Last seen: {getRelativeTime(member.lastSeen)}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
@@ -1534,9 +1562,19 @@ const StoreManagerStaff = () => {
         <div className="bg-white rounded-xl shadow-lg p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Total Payroll</p>
-              <p className="text-2xl font-bold text-gray-900">₹{payrollStats.totalPayroll?.toLocaleString() || '0'}</p>
-              <p className="text-xs text-green-600">This month</p>
+              <p className="text-sm font-medium text-gray-600">
+                Total Payroll {payrollStats.isExpected && <span className="text-xs text-blue-500">(Expected)</span>}
+              </p>
+              <p className="text-2xl font-bold text-gray-900">
+                ₹{(payrollStats.totalPayroll || payrollStats.expectedTotalPayroll || 0).toLocaleString()}
+              </p>
+              <p className="text-xs text-green-600">
+                {payrollStats.processedCount > 0
+                  ? `${payrollStats.processedCount} staff processed`
+                  : payrollStats.isExpected
+                    ? `Based on ${payrollStats.staffWithConfigs} salary configs`
+                    : 'Not processed yet'}
+              </p>
             </div>
             <div className="p-3 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full">
               <DollarSign className="h-6 w-6 text-white" />
@@ -1549,7 +1587,9 @@ const StoreManagerStaff = () => {
             <div>
               <p className="text-sm font-medium text-gray-600">Paid</p>
               <p className="text-2xl font-bold text-green-600">{payrollStats.paidCount || 0}</p>
-              <p className="text-xs text-green-600">Salaries paid</p>
+              <p className="text-xs text-green-600">
+                {payrollStats.paidCount > 0 ? 'Salaries paid' : 'No payments yet'}
+              </p>
             </div>
             <div className="p-3 bg-gradient-to-r from-green-500 to-green-600 rounded-full">
               <CheckCircle className="h-6 w-6 text-white" />
@@ -1562,7 +1602,9 @@ const StoreManagerStaff = () => {
             <div>
               <p className="text-sm font-medium text-gray-600">Pending</p>
               <p className="text-2xl font-bold text-orange-600">{payrollStats.pendingCount || 0}</p>
-              <p className="text-xs text-orange-600">Awaiting payment</p>
+              <p className="text-xs text-orange-600">
+                {payrollStats.pendingCount > 0 ? 'Awaiting payment' : 'No pending payments'}
+              </p>
             </div>
             <div className="p-3 bg-gradient-to-r from-orange-500 to-orange-600 rounded-full">
               <Clock className="h-6 w-6 text-white" />
@@ -1573,9 +1615,19 @@ const StoreManagerStaff = () => {
         <div className="bg-white rounded-xl shadow-lg p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Avg Salary</p>
-              <p className="text-2xl font-bold text-gray-900">₹{Math.round(payrollStats.avgSalary || 0).toLocaleString()}</p>
-              <p className="text-xs text-blue-600">Per employee</p>
+              <p className="text-sm font-medium text-gray-600">
+                Avg Salary {payrollStats.isExpected && <span className="text-xs text-blue-500">(Expected)</span>}
+              </p>
+              <p className="text-2xl font-bold text-gray-900">
+                ₹{Math.round(payrollStats.avgSalary || payrollStats.expectedAvgSalary || 0).toLocaleString()}
+              </p>
+              <p className="text-xs text-blue-600">
+                {payrollStats.processedCount > 0
+                  ? 'Per employee'
+                  : payrollStats.isExpected
+                    ? 'Estimated per employee'
+                    : 'No data'}
+              </p>
             </div>
             <div className="p-3 bg-gradient-to-r from-purple-500 to-purple-600 rounded-full">
               <TrendingUp className="h-6 w-6 text-white" />
@@ -1583,6 +1635,57 @@ const StoreManagerStaff = () => {
           </div>
         </div>
       </div>
+
+      {/* Info Banner when no payroll processed */}
+      {payrollStats.processedCount === 0 && (
+        <div className={`border-l-4 p-4 mb-6 ${
+          payrollStats.isExpected
+            ? 'bg-green-50 border-green-400'
+            : 'bg-blue-50 border-blue-400'
+        }`}>
+          <div className="flex">
+            <div className="flex-shrink-0">
+              {payrollStats.isExpected ? (
+                <CheckCircle className="h-5 w-5 text-green-400" />
+              ) : (
+                <AlertTriangle className="h-5 w-5 text-blue-400" />
+              )}
+            </div>
+            <div className="ml-3">
+              <h3 className={`text-sm font-medium text-left ${
+                payrollStats.isExpected ? 'text-green-800' : 'text-blue-800'
+              }`}>
+                {payrollStats.isExpected
+                  ? `Expected Payroll: ₹${payrollStats.expectedTotalPayroll?.toLocaleString()} for ${payrollStats.staffWithConfigs} staff`
+                  : 'Payroll Not Processed Yet'}
+              </h3>
+              <div className={`mt-2 text-sm text-left ${
+                payrollStats.isExpected ? 'text-green-700' : 'text-blue-700'
+              }`}>
+                {payrollStats.isExpected ? (
+                  <>
+                    <p>The amounts shown above are <strong>estimated</strong> based on salary configurations. To process actual payroll:</p>
+                    <ol className="list-decimal list-inside mt-2 space-y-1">
+                      <li>Mark attendance for all staff members for this month</li>
+                      <li>Click the "Process Payroll" button above</li>
+                      <li>Review and approve the calculated salaries</li>
+                    </ol>
+                  </>
+                ) : (
+                  <>
+                    <p>To process payroll for this month, you need to:</p>
+                    <ol className="list-decimal list-inside mt-2 space-y-1">
+                      <li>Set up salary configurations for each staff member</li>
+                      <li>Mark attendance for all staff members</li>
+                      <li>Click the "Process Payroll" button above</li>
+                    </ol>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Payroll Table */}
       <div className="bg-white shadow rounded-lg p-6">

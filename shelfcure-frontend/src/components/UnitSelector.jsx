@@ -2,10 +2,10 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { ChevronDown, Package, Pill } from 'lucide-react';
 import { createNumericInputHandler, VALIDATION_OPTIONS } from '../utils/inputValidation';
 
-const UnitSelector = ({ 
-  medicine, 
-  onUnitChange, 
-  defaultUnit = 'strips',
+const UnitSelector = ({
+  medicine,
+  onUnitChange,
+  defaultUnit = 'strip',
   defaultQuantity = 1,
   showQuantityInput = true,
   className = ''
@@ -25,7 +25,7 @@ const UnitSelector = ({
     if (medicine.unitTypes.hasStrips) {
       const stripPrice = medicine.stripInfo?.sellingPrice || 0;
       units.push({
-        value: 'strips',
+        value: 'strip',
         label: 'Strips',
         icon: Package,
         conversion: medicine.unitTypes.unitsPerStrip || 10,

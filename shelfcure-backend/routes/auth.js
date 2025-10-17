@@ -146,7 +146,23 @@ router.post('/login', async (req, res) => {
     user.loginAttempts = 0;
     user.lockUntil = undefined;
     user.lastLogin = new Date();
+    user.lastActivity = new Date();
     await user.save();
+
+    // Update Staff lastSeen if this user has a linked staff account
+    try {
+      const Staff = require('../models/Staff');
+      const staffRecord = await Staff.findOne({ userAccount: user._id });
+      if (staffRecord) {
+        staffRecord.lastSeen = new Date();
+        staffRecord.lastActivity = new Date();
+        await staffRecord.save();
+        console.log(`✅ Updated lastSeen for staff: ${staffRecord.name}`);
+      }
+    } catch (staffUpdateError) {
+      console.error('Error updating staff lastSeen:', staffUpdateError);
+      // Don't fail login if staff update fails
+    }
 
     // Generate JWT token
     console.log('Generating JWT token...');
@@ -294,7 +310,23 @@ router.post('/admin-login', async (req, res) => {
       user.loginAttempts = 0;
       user.lockUntil = undefined;
       user.lastLogin = new Date();
+      user.lastActivity = new Date();
       await user.save();
+
+      // Update Staff lastSeen if this user has a linked staff account
+      try {
+        const Staff = require('../models/Staff');
+        const staffRecord = await Staff.findOne({ userAccount: user._id });
+        if (staffRecord) {
+          staffRecord.lastSeen = new Date();
+          staffRecord.lastActivity = new Date();
+          await staffRecord.save();
+          console.log(`✅ Updated lastSeen for staff: ${staffRecord.name}`);
+        }
+      } catch (staffUpdateError) {
+        console.error('Error updating staff lastSeen:', staffUpdateError);
+        // Don't fail login if staff update fails
+      }
     }
 
     // Generate JWT token with longer expiry for admin

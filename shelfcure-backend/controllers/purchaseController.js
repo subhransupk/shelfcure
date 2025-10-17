@@ -414,6 +414,55 @@ const getReorderSuggestions = async (req, res) => {
   }
 };
 
+// @desc    Validate purchase order number for duplicates
+// @route   GET /api/store-manager/purchases/validate-po-number
+// @access  Private (Store Manager only)
+const validatePONumber = async (req, res) => {
+  try {
+    const store = req.store;
+    const { supplier, purchaseOrderNumber } = req.query;
+
+    // Validate required parameters
+    if (!supplier || !purchaseOrderNumber) {
+      return res.status(400).json({
+        success: false,
+        message: 'Supplier and purchase order number are required'
+      });
+    }
+
+    // Check for existing purchase with same supplier + PO number
+    const existingPurchase = await Purchase.findOne({
+      store: store._id,
+      supplier: supplier,
+      purchaseOrderNumber: purchaseOrderNumber.trim()
+    });
+
+    if (existingPurchase) {
+      // Get supplier name for better error message
+      const supplierDoc = await Supplier.findById(supplier);
+      return res.json({
+        success: true,
+        isDuplicate: true,
+        message: `This Purchase Order Number already exists for ${supplierDoc?.name || 'this supplier'}`,
+        existingPurchaseId: existingPurchase._id
+      });
+    }
+
+    return res.json({
+      success: true,
+      isDuplicate: false,
+      message: 'Purchase order number is available'
+    });
+
+  } catch (error) {
+    console.error('Validate PO number error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while validating purchase order number'
+    });
+  }
+};
+
 // @desc    Get all purchases for a store
 // @route   GET /api/store-manager/purchases
 // @access  Private (Store Manager only)
@@ -421,17 +470,20 @@ const getPurchases = async (req, res) => {
   try {
     const store = req.store;
     const storeManager = req.user;
-    const { 
-      search, 
-      status, 
+    const {
+      search,
+      status,
       supplier,
       paymentStatus,
+      paymentMethod,
       dateFrom,
       dateTo,
-      page = 1, 
-      limit = 20, 
-      sort = '-purchaseDate' 
+      page = 1,
+      limit = 20,
+      sort = '-purchaseDate'
     } = req.query;
+
+    console.log('🔍 GET PURCHASES - Query params received:', req.query);
 
     // Build query object
     let queryObj = { store: store._id };
@@ -439,6 +491,7 @@ const getPurchases = async (req, res) => {
     if (status) queryObj.status = status;
     if (supplier) queryObj.supplier = supplier;
     if (paymentStatus) queryObj.paymentStatus = paymentStatus;
+    if (paymentMethod) queryObj.paymentMethod = paymentMethod;
 
     if (dateFrom || dateTo) {
       queryObj.purchaseDate = {};
@@ -455,6 +508,17 @@ const getPurchases = async (req, res) => {
       ];
     }
 
+    console.log('📊 Purchase Query Filters:', {
+      supplier,
+      paymentMethod,
+      status,
+      paymentStatus,
+      dateFrom,
+      dateTo,
+      search
+    });
+    console.log('📊 Final Query Object:', JSON.stringify(queryObj, null, 2));
+
     const purchases = await Purchase.find(queryObj)
       .populate('supplier', 'name contactPerson phone email')
       .populate('createdBy', 'name email')
@@ -464,6 +528,14 @@ const getPurchases = async (req, res) => {
       .skip((page - 1) * limit);
 
     const total = await Purchase.countDocuments(queryObj);
+
+    console.log('📊 Query Results: Found', total, 'purchases');
+    if (purchases.length > 0) {
+      console.log('📊 Sample payment methods:', purchases.slice(0, 3).map(p => ({
+        po: p.purchaseOrderNumber,
+        paymentMethod: p.paymentMethod
+      })));
+    }
 
     res.json({
       success: true,
@@ -569,6 +641,34 @@ const createPurchase = async (req, res) => {
           message: 'Supplier not found or inactive'
         });
       }
+
+      // Check for duplicate purchase order number for this supplier
+      const trimmedPONumber = purchaseOrderNumber.trim();
+      console.log('🔍 Checking for duplicate PO:', {
+        store: store._id,
+        supplier: supplier,
+        purchaseOrderNumber: trimmedPONumber
+      });
+
+      const existingPurchase = await Purchase.findOne({
+        store: store._id,
+        supplier: supplier,
+        purchaseOrderNumber: trimmedPONumber
+      });
+
+      console.log('🔍 Existing purchase found:', existingPurchase ? existingPurchase._id : 'None');
+
+      if (existingPurchase) {
+        console.log('❌ DUPLICATE DETECTED - Blocking creation');
+        return res.status(400).json({
+          success: false,
+          message: `This Purchase Order Number (${trimmedPONumber}) already exists for supplier "${supplierDoc.name}". Please use a different Purchase Order Number or verify the existing order.`,
+          duplicateFound: true,
+          existingPurchaseId: existingPurchase._id
+        });
+      }
+
+      console.log('✅ No duplicate found - Proceeding with creation');
     }
 
     // Validate items and calculate amounts
@@ -687,7 +787,14 @@ const createPurchase = async (req, res) => {
       createdBy: storeManager._id
     };
 
+    console.log('💾 Creating purchase with data:', {
+      store: purchaseData.store,
+      supplier: purchaseData.supplier,
+      purchaseOrderNumber: purchaseData.purchaseOrderNumber
+    });
+
     const purchase = await Purchase.create(purchaseData);
+    console.log('✅ Purchase created successfully:', purchase._id);
     if (purchase.supplier) {
       await purchase.populate('supplier', 'name contactPerson phone email address');
     }
@@ -905,15 +1012,29 @@ const createPurchase = async (req, res) => {
     });
   } catch (error) {
     console.error('Create purchase error:', error);
+
+    // Handle MongoDB duplicate key error
     if (error.code === 11000) {
+      // Check if it's the supplier + PO number duplicate
+      if (error.keyPattern && error.keyPattern.purchaseOrderNumber) {
+        const supplierName = supplierDoc ? supplierDoc.name : 'this supplier';
+        return res.status(400).json({
+          success: false,
+          message: `This Purchase Order Number already exists for ${supplierName}. Please use a different Purchase Order Number or verify the existing order.`,
+          duplicateFound: true
+        });
+      }
+
       return res.status(400).json({
         success: false,
-        message: 'Purchase order number already exists'
+        message: 'Duplicate purchase order detected. Please check your input.'
       });
     }
+
     res.status(500).json({
       success: false,
-      message: 'Server error while creating purchase'
+      message: 'Server error while creating purchase',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
@@ -1492,9 +1613,14 @@ const recordPurchasePayment = async (req, res) => {
       const paymentId = new mongoose.Types.ObjectId();
 
       try {
-        await SupplierTransaction.createTransaction({
+        // Get the supplier ID - handle both populated and non-populated cases
+        const supplierId = purchase.supplier._id || purchase.supplier;
+
+        console.log(`💳 Creating supplier payment transaction for supplier ${supplierId}, amount: ₹${amount}`);
+
+        const transaction = await SupplierTransaction.createTransaction({
           store: store._id,
-          supplier: purchase.supplier._id,
+          supplier: supplierId,
           transactionType: 'supplier_payment',
           amount: amount,
           balanceChange: -amount,
@@ -1514,22 +1640,46 @@ const recordPurchasePayment = async (req, res) => {
           processedBy: req.user._id
         });
 
+        console.log(`✅ Supplier transaction created successfully. Previous balance: ₹${transaction.previousBalance}, New balance: ₹${transaction.newBalance}`);
+
         // Update supplier's last payment date
         const Supplier = require('../models/Supplier');
-        await Supplier.findByIdAndUpdate(purchase.supplier._id, {
+        await Supplier.findByIdAndUpdate(supplierId, {
           lastPaymentDate: new Date()
         });
+
+        console.log(`✅ Supplier last payment date updated`);
       } catch (supplierError) {
-        console.error('Error creating supplier transaction:', supplierError);
-        // Don't fail the payment if supplier transaction fails
+        console.error('❌ Error creating supplier transaction:', supplierError);
+        console.error('❌ Error details:', {
+          supplierId: purchase.supplier._id || purchase.supplier,
+          amount: amount,
+          balanceChange: -amount,
+          errorMessage: supplierError.message,
+          errorStack: supplierError.stack
+        });
+        // Don't fail the payment if supplier transaction fails, but log it prominently
+        console.warn('⚠️ WARNING: Purchase payment recorded but supplier outstanding balance may not be updated!');
       }
     }
 
     // Fetch updated purchase with supplier info and payment history
     const updatedPurchase = await Purchase.findById(purchaseId)
-      .populate('supplier', 'name contactPerson phone')
+      .populate('supplier', 'name contactPerson phone outstandingBalance')
       .populate('createdBy', 'name')
       .populate('paymentHistory.processedBy', 'name');
+
+    // Get updated supplier balance for verification
+    let supplierBalance = null;
+    if (purchase.supplier) {
+      const Supplier = require('../models/Supplier');
+      const supplierId = purchase.supplier._id || purchase.supplier;
+      const supplierDoc = await Supplier.findById(supplierId).select('outstandingBalance');
+      if (supplierDoc) {
+        supplierBalance = supplierDoc.outstandingBalance;
+        console.log(`📊 Supplier outstanding balance after payment: ₹${supplierBalance}`);
+      }
+    }
 
     res.status(200).json({
       success: true,
@@ -1541,7 +1691,8 @@ const recordPurchasePayment = async (req, res) => {
         paymentStatus: updatedPurchase.paymentStatus,
         paymentHistory: updatedPurchase.paymentHistory,
         totalPaid: updatedPurchase.paidAmount,
-        totalAmount: updatedPurchase.totalAmount
+        totalAmount: updatedPurchase.totalAmount,
+        supplierOutstandingBalance: supplierBalance
       }
     });
 
@@ -1624,5 +1775,6 @@ module.exports = {
   getPurchaseAnalytics,
   getDeliveryTracking,
   recordPurchasePayment,
-  getPurchasePaymentHistory
+  getPurchasePaymentHistory,
+  validatePONumber
 };

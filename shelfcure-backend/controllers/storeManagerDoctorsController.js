@@ -1,6 +1,7 @@
 const Doctor = require('../models/Doctor');
 const Store = require('../models/Store');
 const Commission = require('../models/Commission');
+const Sale = require('../models/Sale');
 const DoctorStatsService = require('../services/doctorStatsService');
 const CommissionPaymentService = require('../services/commissionPaymentService');
 const asyncHandler = require('express-async-handler');
@@ -78,6 +79,36 @@ const getDoctors = asyncHandler(async (req, res) => {
 
         // Add current month prescription count
         doctorObj.prescriptionCount = currentMonthSales;
+
+        // Calculate commission status for this doctor
+        const Commission = require('../models/Commission');
+        const allCommissions = await Commission.find({
+          store: storeId,
+          doctor: doctor._id
+        });
+
+        console.log(`Doctor ${doctor.name} (${doctor._id}): Found ${allCommissions.length} commissions`);
+
+        let commissionStatus = 'pending'; // Default status
+        if (allCommissions.length > 0) {
+          const paidCommissions = allCommissions.filter(c => c.status === 'paid');
+          const pendingCommissions = allCommissions.filter(c => c.status !== 'paid');
+
+          console.log(`Doctor ${doctor.name}: ${paidCommissions.length} paid, ${pendingCommissions.length} pending`);
+
+          if (paidCommissions.length === allCommissions.length) {
+            commissionStatus = 'paid'; // All commissions are paid
+          } else if (paidCommissions.length > 0) {
+            commissionStatus = 'partially_paid'; // Some commissions are paid
+          } else {
+            commissionStatus = 'pending'; // No commissions are paid
+          }
+        }
+
+        console.log(`Doctor ${doctor.name}: Final commission status = ${commissionStatus}`);
+
+        // Add commission status to doctor object
+        doctorObj.commissionStatus = commissionStatus;
 
         return doctorObj;
       })
@@ -431,50 +462,52 @@ const markCommissionPaid = asyncHandler(async (req, res) => {
   try {
     let commission;
 
-    // Check if this is an existing commission record or a calculated one
-    if (commissionId.startsWith('comm_')) {
-      // This is a calculated commission, need to create a new record
-      const doctorId = commissionId.replace('comm_', '');
+    // Check if this is an existing commission record or a temporary one
+    if (commissionId.startsWith('temp_')) {
+      // This is a temporary commission for an unsaved sale, need to create a new record
+      const saleId = commissionId.replace('temp_', '');
 
-      // Verify the doctor belongs to this store
-      const doctor = await Doctor.findOne({ _id: doctorId, store: storeId });
+      // Get the sale and verify it belongs to this store
+      const sale = await Sale.findOne({ _id: saleId, store: storeId }).populate('prescription.doctor');
 
-      if (!doctor) {
+      if (!sale) {
         return res.status(404).json({
           success: false,
-          message: 'Doctor not found or does not belong to this store'
+          message: 'Sale not found or does not belong to this store'
         });
       }
 
-      // Get current commission data from the service
-      const commissionHistory = await DoctorStatsService.getCommissionHistory(storeId, { status: 'all' });
-      const currentCommission = commissionHistory.find(c => c._id === commissionId);
-
-      if (!currentCommission) {
-        return res.status(404).json({
+      if (!sale.prescription || !sale.prescription.doctor) {
+        return res.status(400).json({
           success: false,
-          message: 'Commission record not found'
+          message: 'Sale does not have a doctor prescription'
         });
       }
 
-      // Create a new commission record
-      const currentDate = new Date();
-      commission = new Commission({
+      // Create commission record for this sale
+      const commissionData = {
         store: storeId,
-        doctor: doctorId,
-        period: {
-          month: currentDate.getMonth() + 1,
-          year: currentDate.getFullYear()
-        },
-        prescriptionCount: currentCommission.prescriptionCount,
-        salesValue: currentCommission.salesValue,
-        commissionRate: currentCommission.commissionRate,
-        commissionAmount: currentCommission.commissionAmount,
-        status: 'paid',
-        paymentDate: new Date(),
-        paidBy: userId
-      });
+        doctor: sale.prescription.doctor._id,
+        sale: sale._id,
+        saleDate: sale.saleDate,
+        invoiceNumber: sale.invoiceNumber,
+        receiptNumber: sale.receiptNumber,
+        prescriptionCount: 1,
+        salesValue: sale.totalAmount,
+        commissionRate: sale.prescription.doctor.commissionRate || 0,
+        commissionAmount: DoctorStatsService.calculateCommissionAmount(
+          sale.totalAmount,
+          sale.prescription.doctor.commissionRate || 0,
+          sale.prescription.doctor.commissionType || 'percentage'
+        )
+      };
 
+      commission = await Commission.createForSale(commissionData);
+
+      // Mark as paid immediately
+      commission.status = 'paid';
+      commission.paymentDate = new Date();
+      commission.paidBy = userId;
       await commission.save();
 
       // Populate the doctor information for the response
@@ -571,19 +604,22 @@ const recordCommissionPayment = asyncHandler(async (req, res) => {
   const { amount, paymentMethod, paymentReference, notes } = req.body;
 
   try {
-    // Validate required fields
-    if (!amount || !paymentMethod) {
+    // Validate required fields - only amount is required now
+    if (!amount) {
       return res.status(400).json({
         success: false,
-        message: 'Payment amount and method are required'
+        message: 'Payment amount is required'
       });
     }
+
+    // Auto-generate payment reference if not provided
+    const autoPaymentReference = paymentReference || `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
 
     // Record the payment
     const result = await CommissionPaymentService.recordCommissionPayment(commissionId, {
       amount: parseFloat(amount),
-      paymentMethod,
-      paymentReference,
+      paymentMethod: paymentMethod || 'cash', // Default to cash if not provided
+      paymentReference: autoPaymentReference,
       notes,
       processedBy: userId
     }, storeId);
@@ -605,6 +641,81 @@ const recordCommissionPayment = asyncHandler(async (req, res) => {
   }
 });
 
+// @desc    Pay all pending commissions for a doctor (Bulk Payment)
+// @route   POST /api/store-manager/doctors/:doctorId/pay-all-commissions
+// @access  Private (Store Manager only)
+const payAllDoctorCommissions = asyncHandler(async (req, res) => {
+  const storeId = req.store._id;
+  const doctorId = req.params.doctorId;
+  const userId = req.user._id;
+  const { notes } = req.body;
+
+  try {
+    // Get all pending commissions for this doctor
+    const Commission = require('../models/Commission');
+    const pendingCommissions = await Commission.find({
+      store: storeId,
+      doctor: doctorId,
+      status: { $ne: 'paid' } // Not fully paid
+    });
+
+    if (pendingCommissions.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No pending commissions found for this doctor'
+      });
+    }
+
+    // Calculate total amount
+    const totalAmount = pendingCommissions.reduce((sum, comm) => {
+      return sum + (comm.remainingBalance || comm.commissionAmount);
+    }, 0);
+
+    // Generate bulk payment reference
+    const bulkPaymentReference = `BULK-PAY-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+
+    // Process each commission
+    const results = [];
+    for (const commission of pendingCommissions) {
+      const paymentAmount = commission.remainingBalance || commission.commissionAmount;
+
+      const result = await CommissionPaymentService.recordCommissionPayment(commission._id, {
+        amount: paymentAmount,
+        paymentMethod: 'cash', // Default method for bulk payments
+        paymentReference: bulkPaymentReference,
+        notes: notes || `Bulk payment for all pending commissions`,
+        processedBy: userId
+      }, storeId);
+
+      results.push({
+        commissionId: commission._id,
+        amount: paymentAmount,
+        status: 'paid'
+      });
+    }
+
+    console.log(`Bulk payment processed: ₹${totalAmount} for ${pendingCommissions.length} commissions of doctor ${doctorId}`);
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully paid ${pendingCommissions.length} commissions totaling ₹${totalAmount}`,
+      data: {
+        totalAmount,
+        commissionsCount: pendingCommissions.length,
+        paymentReference: bulkPaymentReference,
+        commissions: results
+      }
+    });
+
+  } catch (error) {
+    console.error('Pay all doctor commissions error:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Server error while processing bulk payment'
+    });
+  }
+});
+
 module.exports = {
   getDoctors,
   getDoctor,
@@ -616,5 +727,6 @@ module.exports = {
   getCommissions,
   markCommissionPaid,
   getDoctorCommissionHistory,
-  recordCommissionPayment
+  recordCommissionPayment,
+  payAllDoctorCommissions
 };

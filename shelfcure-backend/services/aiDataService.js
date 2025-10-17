@@ -811,6 +811,23 @@ class AIDataService {
   async createPurchaseOrder(storeId, purchaseData) {
     const validStoreId = this.validateStoreId(storeId);
 
+    // Check for duplicate purchase order number for this supplier
+    if (purchaseData.supplierId && purchaseData.purchaseOrderNumber) {
+      const existingPurchase = await Purchase.findOne({
+        store: validStoreId,
+        supplier: new mongoose.Types.ObjectId(purchaseData.supplierId),
+        purchaseOrderNumber: purchaseData.purchaseOrderNumber
+      });
+
+      if (existingPurchase) {
+        const Supplier = require('../models/Supplier');
+        const supplierDoc = await Supplier.findById(purchaseData.supplierId);
+        throw new Error(
+          `This Purchase Order Number (${purchaseData.purchaseOrderNumber}) already exists for supplier "${supplierDoc?.name || 'this supplier'}". Please use a different Purchase Order Number.`
+        );
+      }
+    }
+
     const purchase = new Purchase({
       store: validStoreId,
       supplier: new mongoose.Types.ObjectId(purchaseData.supplierId),

@@ -52,7 +52,8 @@ const {
   getCommissions,
   markCommissionPaid,
   getDoctorCommissionHistory,
-  recordCommissionPayment
+  recordCommissionPayment,
+  payAllDoctorCommissions
 } = require('../controllers/storeManagerDoctorsController');
 
 const {
@@ -484,6 +485,13 @@ router.post('/doctors/commissions/:id/record-payment',
   checkFeatureAccess('doctors'),
   logStoreManagerActivity('record_commission_payment'),
   recordCommissionPayment
+);
+
+// Pay all pending commissions for a doctor (Bulk Payment)
+router.post('/doctors/:doctorId/pay-all-commissions',
+  checkFeatureAccess('doctors'),
+  logStoreManagerActivity('bulk_pay_doctor_commissions'),
+  payAllDoctorCommissions
 );
 
 // Get commission history for a specific doctor

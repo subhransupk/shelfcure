@@ -162,7 +162,7 @@ class NotificationService {
       const criticalDate = new Date(currentDate.getTime() + (7 * 24 * 60 * 60 * 1000)); // 7 days
       const warningDate = new Date(currentDate.getTime() + (30 * 24 * 60 * 60 * 1000)); // 30 days
 
-      // Find medicines expiring soon
+      // Find medicines expiring soon (legacy medicine-level expiry)
       const expiringMedicines = await Medicine.find({
         store: storeId,
         isActive: true,
@@ -172,8 +172,24 @@ class NotificationService {
         }
       }).select('name genericName expiryDate stripInfo individualInfo');
 
-      console.log(`📊 Found ${expiringMedicines.length} expiring medicines`);
+      // Find batches expiring soon (batch-level expiry)
+      const Batch = require('../models/Batch');
+      const expiringBatches = await Batch.find({
+        store: storeId,
+        isActive: true,
+        expiryDate: {
+          $gte: currentDate,
+          $lte: warningDate
+        },
+        $or: [
+          { stripQuantity: { $gt: 0 } },
+          { individualQuantity: { $gt: 0 } }
+        ]
+      }).populate('medicine', 'name genericName').select('medicine expiryDate batchNumber stripQuantity individualQuantity');
 
+      console.log(`📊 Found ${expiringMedicines.length} expiring medicines and ${expiringBatches.length} expiring batches`);
+
+      // Process each expiring medicine (legacy medicine-level expiry)
       for (const medicine of expiringMedicines) {
         // Check if we already have a recent notification for this medicine
         const recentNotification = await Notification.findOne({
@@ -187,7 +203,7 @@ class NotificationService {
 
         const daysToExpiry = Math.ceil((medicine.expiryDate - currentDate) / (1000 * 60 * 60 * 24));
         let priority = 'low';
-        
+
         if (daysToExpiry <= 7) {
           priority = 'high';
         } else if (daysToExpiry <= 30) {
@@ -209,6 +225,52 @@ class NotificationService {
               medicineId: medicine._id,
               medicineName: medicine.name,
               expiryDate: medicine.expiryDate,
+              daysToExpiry
+            }
+          });
+        }
+      }
+
+      // Process each expiring batch (batch-level expiry)
+      for (const batch of expiringBatches) {
+        if (!batch.medicine) continue;
+
+        // Check if we already have a recent notification for this batch
+        const recentBatchNotification = await Notification.findOne({
+          storeId,
+          type: 'batch_expiry_alert',
+          'metadata.batchId': batch._id,
+          createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+        });
+
+        if (recentBatchNotification) continue;
+
+        const daysToExpiry = Math.ceil((batch.expiryDate - currentDate) / (1000 * 60 * 60 * 24));
+        let priority = 'low';
+
+        if (daysToExpiry <= 7) {
+          priority = 'high';
+        } else if (daysToExpiry <= 30) {
+          priority = 'medium';
+        }
+
+        // Create notification for each store manager
+        for (const manager of storeManagers) {
+          await this.createNotification({
+            storeId,
+            userId: manager._id,
+            type: 'batch_expiry_alert',
+            priority,
+            title: 'Batch Expiry Alert',
+            message: `${batch.medicine.name} (Batch: ${batch.batchNumber}) expires in ${daysToExpiry} day${daysToExpiry > 1 ? 's' : ''}`,
+            actionRequired: true,
+            actionUrl: `/store-panel/expiry-alerts?search=${encodeURIComponent(batch.medicine.name)}`,
+            metadata: {
+              medicineId: batch.medicine._id,
+              medicineName: batch.medicine.name,
+              batchId: batch._id,
+              batchNumber: batch.batchNumber,
+              expiryDate: batch.expiryDate,
               daysToExpiry
             }
           });

@@ -14,10 +14,10 @@ const getPayroll = asyncHandler(async (req, res) => {
 
   try {
     console.log(`🔍 Fetching payroll for store: ${store.name} (${storeId})`);
-    
+
     // Parse month (format: YYYY-MM)
     const [year, monthNum] = month ? month.split('-').map(Number) : [new Date().getFullYear(), new Date().getMonth() + 1];
-    
+
     console.log(`📅 Payroll period: ${monthNum}/${year}`);
 
     // Get payroll records with staff details
@@ -35,6 +35,14 @@ const getPayroll = asyncHandler(async (req, res) => {
 
     console.log(`✅ Found ${payrollRecords.length} payroll records`);
 
+    if (payrollRecords.length > 0) {
+      console.log('📋 Sample payroll record:', {
+        staff: payrollRecords[0].staff?.name,
+        netSalary: payrollRecords[0].netSalary,
+        paymentStatus: payrollRecords[0].paymentStatus
+      });
+    }
+
     res.status(200).json({
       success: true,
       count: payrollRecords.length,
@@ -45,6 +53,7 @@ const getPayroll = asyncHandler(async (req, res) => {
 
   } catch (error) {
     console.error('❌ Get payroll error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
       message: 'Server error while fetching payroll records',
@@ -62,16 +71,29 @@ const getPayrollStats = asyncHandler(async (req, res) => {
   const storeId = store._id;
 
   try {
-    console.log(`📊 Getting payroll stats for store: ${store.name}`);
+    console.log(`📊 Getting payroll stats for store: ${store.name} (${storeId})`);
 
     // Parse month (format: YYYY-MM)
     const [year, monthNum] = month ? month.split('-').map(Number) : [new Date().getFullYear(), new Date().getMonth() + 1];
 
+    console.log(`📅 Payroll stats period: ${monthNum}/${year}`);
+
     // Get all active staff in the store
-    const totalStaff = await Staff.countDocuments({ 
-      store: storeId, 
-      status: 'active' 
+    const totalStaff = await Staff.countDocuments({
+      store: storeId,
+      status: 'active'
     });
+
+    console.log(`👥 Total active staff: ${totalStaff}`);
+
+    // Check if any payroll records exist for this store and month
+    const payrollCount = await StaffSalary.countDocuments({
+      store: storeId,
+      month: monthNum,
+      year: year
+    });
+
+    console.log(`📋 Payroll records found: ${payrollCount}`);
 
     // Get payroll statistics
     const stats = await StaffSalary.aggregate([
@@ -104,7 +126,7 @@ const getPayrollStats = asyncHandler(async (req, res) => {
       }
     ]);
 
-    const payrollStats = stats.length > 0 ? stats[0] : {
+    let payrollStats = stats.length > 0 ? stats[0] : {
       totalPayroll: 0,
       totalGross: 0,
       totalDeductions: 0,
@@ -118,7 +140,102 @@ const getPayrollStats = asyncHandler(async (req, res) => {
     payrollStats.notProcessed = totalStaff - payrollStats.processedCount;
     payrollStats.totalStaff = totalStaff;
 
-    console.log('📊 Payroll stats:', payrollStats);
+    // ✅ NEW: If no payroll processed, calculate expected payroll from salary configs
+    if (payrollStats.processedCount === 0 && totalStaff > 0) {
+      console.log('💡 No processed payroll found. Calculating expected payroll from salary configs...');
+
+      // Get all active salary configurations for this store
+      const salaryConfigs = await StaffSalaryConfig.find({
+        store: storeId,
+        status: 'active'
+      }).populate('staff', 'name status');
+
+      console.log(`📋 Found ${salaryConfigs.length} active salary configurations`);
+
+      let expectedTotalPayroll = 0;
+      let configCount = 0;
+
+      for (const config of salaryConfigs) {
+        // Only count active staff members
+        if (config.staff && config.staff.status === 'active') {
+          // Calculate expected gross salary
+          let grossSalary = config.baseSalary || 0;
+
+          // Add allowances
+          if (config.allowances) {
+            if (config.allowances.hra?.enabled) {
+              grossSalary += config.allowances.hra.type === 'percentage'
+                ? (config.baseSalary * (config.allowances.hra.value || 0)) / 100
+                : (config.allowances.hra.value || 0);
+            }
+            if (config.allowances.da?.enabled) {
+              grossSalary += config.allowances.da.type === 'percentage'
+                ? (config.baseSalary * (config.allowances.da.value || 0)) / 100
+                : (config.allowances.da.value || 0);
+            }
+            if (config.allowances.medical?.enabled) {
+              grossSalary += config.allowances.medical.value || 0;
+            }
+            if (config.allowances.transport?.enabled) {
+              grossSalary += config.allowances.transport.value || 0;
+            }
+            if (config.allowances.other?.enabled) {
+              grossSalary += config.allowances.other.value || 0;
+            }
+          }
+
+          // Calculate deductions
+          let totalDeductions = 0;
+          if (config.deductions) {
+            if (config.deductions.pf?.enabled) {
+              totalDeductions += config.deductions.pf.type === 'percentage'
+                ? (grossSalary * (config.deductions.pf.value || 0)) / 100
+                : (config.deductions.pf.value || 0);
+            }
+            if (config.deductions.esi?.enabled) {
+              totalDeductions += config.deductions.esi.type === 'percentage'
+                ? (grossSalary * (config.deductions.esi.value || 0)) / 100
+                : (config.deductions.esi.value || 0);
+            }
+            if (config.deductions.tds?.enabled) {
+              totalDeductions += config.deductions.tds.type === 'percentage'
+                ? (grossSalary * (config.deductions.tds.value || 0)) / 100
+                : (config.deductions.tds.value || 0);
+            }
+            if (config.deductions.other?.enabled) {
+              totalDeductions += config.deductions.other.value || 0;
+            }
+          }
+
+          const netSalary = grossSalary - totalDeductions;
+          expectedTotalPayroll += netSalary;
+          configCount++;
+
+          console.log(`  💰 ${config.staff.name}: Base ₹${config.baseSalary} → Net ₹${Math.round(netSalary)}`);
+        }
+      }
+
+      // Update stats with expected values
+      payrollStats.expectedTotalPayroll = Math.round(expectedTotalPayroll);
+      payrollStats.expectedAvgSalary = configCount > 0 ? Math.round(expectedTotalPayroll / configCount) : 0;
+      payrollStats.staffWithConfigs = configCount;
+      payrollStats.isExpected = true; // Flag to indicate these are expected values
+
+      console.log(`💡 Expected payroll calculated: ₹${payrollStats.expectedTotalPayroll} for ${configCount} staff`);
+    }
+
+    console.log('📊 Payroll stats calculated:', {
+      totalPayroll: payrollStats.totalPayroll,
+      expectedTotalPayroll: payrollStats.expectedTotalPayroll,
+      paidCount: payrollStats.paidCount,
+      pendingCount: payrollStats.pendingCount,
+      avgSalary: payrollStats.avgSalary,
+      expectedAvgSalary: payrollStats.expectedAvgSalary,
+      totalStaff: payrollStats.totalStaff,
+      processedCount: payrollStats.processedCount,
+      notProcessed: payrollStats.notProcessed,
+      isExpected: payrollStats.isExpected
+    });
 
     res.status(200).json({
       success: true,
@@ -129,6 +246,7 @@ const getPayrollStats = asyncHandler(async (req, res) => {
 
   } catch (error) {
     console.error('❌ Get payroll stats error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
       message: 'Server error while fetching payroll statistics',
@@ -150,7 +268,25 @@ const processPayroll = asyncHandler(async (req, res) => {
 
     // Parse month (format: YYYY-MM)
     const [year, monthNum] = month.split('-').map(Number);
-    
+
+    // ✅ FIX #8: Validate that attendance data exists for the month
+    const startDate = new Date(year, monthNum - 1, 1);
+    const endDate = new Date(year, monthNum, 0);
+
+    const attendanceCount = await StaffAttendance.countDocuments({
+      store: storeId,
+      date: { $gte: startDate, $lte: endDate }
+    });
+
+    if (attendanceCount === 0) {
+      return res.status(400).json({
+        success: false,
+        message: `No attendance records found for ${new Date(year, monthNum - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}. Please mark attendance before processing payroll.`
+      });
+    }
+
+    console.log(`📊 Found ${attendanceCount} attendance records for the month`);
+
     // Get staff to process
     let staffQuery = { store: storeId, status: 'active' };
     if (staffIds && staffIds.length > 0) {
@@ -286,44 +422,60 @@ const calculatePayrollForStaff = async (staffMember, salaryConfig, month, year, 
     }
   });
 
-  // Calculate base salary (pro-rated for actual working days)
+  // ✅ FIX #2: Improved salary calculation with proper pro-rating
   const standardWorkingDays = 26; // Assuming 26 working days in a month
   const actualWorkingDays = workingDays - (halfDays * 0.5);
-  const baseSalaryForMonth = (salaryConfig.baseSalary * actualWorkingDays) / standardWorkingDays;
 
-  // Calculate allowances
+  // Calculate base salary (use full base salary, deductions will handle absences)
+  const baseSalaryForMonth = salaryConfig.baseSalary;
+
+  // ✅ FIX #3: Calculate allowances based on FULL base salary
   const allowancesCalc = salaryConfig.calculateAllowances();
-  
-  // Calculate overtime pay
-  const hourlyRate = salaryConfig.hourlyRate;
-  const overtimePay = overtimeHours * hourlyRate * salaryConfig.overtimeConfig.rate;
 
-  // Calculate gross salary
-  const grossSalary = baseSalaryForMonth + allowancesCalc.total + overtimePay;
+  // ✅ FIX #4: Calculate overtime pay properly
+  const hourlyRate = salaryConfig.hourlyRate || (salaryConfig.baseSalary / (standardWorkingDays * 8));
+  const overtimeRate = salaryConfig.overtimeConfig?.rate || 1.5;
+  const overtimePay = overtimeHours * hourlyRate * overtimeRate;
 
-  // Calculate deductions
-  const deductionsCalc = salaryConfig.calculateDeductions(grossSalary);
-  
-  // Calculate absent deduction
-  const absentDeduction = (salaryConfig.baseSalary / standardWorkingDays) * absentDays;
+  // ✅ FIX #5: Calculate deductions based on base salary
+  const deductionsCalc = salaryConfig.calculateDeductions(baseSalaryForMonth);
 
-  const totalDeductions = deductionsCalc.total + absentDeduction;
-  const netSalary = grossSalary - totalDeductions;
+  // ✅ FIX #6: Calculate absent deduction correctly
+  const perDayRate = salaryConfig.baseSalary / standardWorkingDays;
+  const absentDeduction = perDayRate * absentDays;
 
+  // Build allowances object with overtime
+  const allowancesObj = {
+    ...allowancesCalc.breakdown,
+    overtime: {
+      hours: overtimeHours,
+      rate: hourlyRate * overtimeRate,
+      amount: overtimePay
+    }
+  };
+
+  // Build deductions object with absent deduction
+  const deductionsObj = {
+    ...deductionsCalc.breakdown,
+    absentDeduction: {
+      days: absentDays,
+      perDayRate: perDayRate,
+      amount: absentDeduction
+    }
+  };
+
+  // ✅ FIX #7: Let pre-save middleware calculate totals
+  // Don't calculate grossSalary and netSalary here - the model will do it
   return {
     staff: staffMember._id,
     user: staffMember.user,
     store: storeId,
     month: month,
     year: year,
-    baseSalary: salaryConfig.baseSalary,
-    allowances: allowancesCalc.breakdown,
-    deductions: {
-      ...deductionsCalc.breakdown,
-      advance: absentDeduction // Map absent deduction to advance field
-    },
-    grossSalary: grossSalary,
-    netSalary: netSalary,
+    baseSalary: baseSalaryForMonth,
+    allowances: allowancesObj,
+    deductions: deductionsObj,
+    // Don't set grossSalary and netSalary - let pre-save middleware calculate them
     attendanceData: {
       totalWorkingDays: totalDaysInMonth,
       daysWorked: actualWorkingDays,

@@ -238,7 +238,7 @@ const getAttendanceStats = asyncHandler(async (req, res) => {
       },
       {
         $lookup: {
-          from: 'staff',
+          from: 'staffs', // ✅ FIXED: MongoDB collection name is 'staffs' (pluralized)
           localField: 'staff',
           foreignField: '_id',
           as: 'staffDetails'
@@ -533,7 +533,7 @@ const getAttendanceHistory = asyncHandler(async (req, res) => {
       { $match: query },
       {
         $lookup: {
-          from: 'staff',
+          from: 'staffs', // ✅ FIXED: MongoDB collection name is 'staffs' (pluralized)
           localField: 'staff',
           foreignField: '_id',
           as: 'staffDetails'
@@ -580,7 +580,7 @@ const getAttendanceHistory = asyncHandler(async (req, res) => {
       { $match: query },
       {
         $lookup: {
-          from: 'staff',
+          from: 'staffs', // ✅ FIXED: MongoDB collection name is 'staffs' (pluralized)
           localField: 'staff',
           foreignField: '_id',
           as: 'staffDetails'
@@ -604,7 +604,7 @@ const getAttendanceHistory = asyncHandler(async (req, res) => {
       { $match: query },
       {
         $lookup: {
-          from: 'staff',
+          from: 'staffs', // ✅ FIXED: MongoDB collection name is 'staffs' (pluralized)
           localField: 'staff',
           foreignField: '_id',
           as: 'staffDetails'

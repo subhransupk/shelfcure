@@ -276,17 +276,19 @@ saleSchema.pre('save', async function(next) {
   next();
 });
 
-// Post-save middleware to update doctor statistics
+// Post-save middleware to create commission records for completed sales
 saleSchema.post('save', async function() {
-  // Only update doctor stats for completed sales with prescriptions
+  // Only create commission for completed sales with prescriptions
   if (this.status === 'completed' && this.prescription && this.prescription.doctor) {
     try {
       const DoctorStatsService = require('../services/doctorStatsService');
-      await DoctorStatsService.updateDoctorStats(this.prescription.doctor, this.store);
-      console.log(`✅ Doctor stats updated for doctor ${this.prescription.doctor}`);
+
+      // Create individual commission record for this sale
+      await DoctorStatsService.createCommissionForSale(this);
+      console.log(`✅ Commission record created for sale ${this._id}`);
     } catch (error) {
-      console.error('❌ Error updating doctor stats after sale:', error);
-      // Don't fail the sale if stats update fails
+      console.error('❌ Error creating commission after sale:', error);
+      // Don't fail the sale if commission creation fails
     }
   }
 });
@@ -296,10 +298,12 @@ saleSchema.post('findOneAndUpdate', async function(doc) {
   if (doc && doc.status === 'completed' && doc.prescription && doc.prescription.doctor) {
     try {
       const DoctorStatsService = require('../services/doctorStatsService');
-      await DoctorStatsService.updateDoctorStats(doc.prescription.doctor, doc.store);
-      console.log(`✅ Doctor stats updated for doctor ${doc.prescription.doctor} after status change`);
+
+      // Create individual commission record for this sale if it doesn't exist
+      await DoctorStatsService.createCommissionForSale(doc);
+      console.log(`✅ Commission record created/updated for sale ${doc._id} after status change`);
     } catch (error) {
-      console.error('❌ Error updating doctor stats after sale update:', error);
+      console.error('❌ Error creating commission after sale update:', error);
     }
   }
 });

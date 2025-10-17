@@ -59,6 +59,8 @@ const recordSupplierPayment = async (req, res) => {
     const mongoose = require('mongoose');
     const paymentId = new mongoose.Types.ObjectId();
 
+    console.log(`💳 Creating direct supplier payment transaction for supplier ${supplierId}, amount: ₹${amount}`);
+
     const transaction = await SupplierTransaction.createTransaction({
       store: store._id,
       supplier: supplierId,
@@ -82,6 +84,8 @@ const recordSupplierPayment = async (req, res) => {
       processedBy: req.user.id
     });
 
+    console.log(`✅ Supplier transaction created successfully. Previous balance: ₹${transaction.previousBalance}, New balance: ₹${transaction.newBalance}`);
+
     // Update supplier's last payment date
     supplier.lastPaymentDate = new Date();
     await supplier.save();
@@ -89,6 +93,8 @@ const recordSupplierPayment = async (req, res) => {
     // Get updated supplier data
     const updatedSupplier = await Supplier.findById(supplierId)
       .select('name outstandingBalance creditLimit lastPaymentDate');
+
+    console.log(`📊 Supplier outstanding balance after payment: ₹${updatedSupplier.outstandingBalance}`);
 
     res.status(200).json({
       success: true,

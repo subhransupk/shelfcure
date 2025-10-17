@@ -15,27 +15,21 @@ const commissionSchema = new mongoose.Schema({
     required: [true, 'Commission must be associated with a doctor']
   },
 
-  // Commission period (month/year)
-  period: {
-    month: {
-      type: Number,
-      required: true,
-      min: 1,
-      max: 12
-    },
-    year: {
-      type: Number,
-      required: true,
-      min: 2020
-    }
+  // Reference to the specific sale transaction that generated this commission
+  sale: {
+    type: mongoose.Schema.ObjectId,
+    ref: 'Sale',
+    required: [true, 'Commission must be associated with a sale transaction']
   },
 
-  // Commission calculation details
+
+
+  // Commission calculation details (for individual sale transaction)
   prescriptionCount: {
     type: Number,
     required: true,
-    default: 0,
-    min: 0
+    default: 1, // Each commission record represents one prescription/sale
+    min: 1
   },
 
   salesValue: {
@@ -43,6 +37,22 @@ const commissionSchema = new mongoose.Schema({
     required: true,
     default: 0,
     min: 0
+  },
+
+  // Sale transaction details for reference
+  saleDate: {
+    type: Date,
+    required: true
+  },
+
+  invoiceNumber: {
+    type: String,
+    required: false // Some sales might not have invoice numbers yet
+  },
+
+  receiptNumber: {
+    type: String,
+    required: false // Some sales might not have receipt numbers yet
   },
 
   commissionRate: {
@@ -135,9 +145,7 @@ const commissionSchema = new mongoose.Schema({
   // Remaining balance
   remainingBalance: {
     type: Number,
-    default: function() {
-      return this.commissionAmount || 0;
-    },
+    default: 0,
     min: 0
   },
 
@@ -171,12 +179,15 @@ const commissionSchema = new mongoose.Schema({
 });
 
 // Indexes for better performance
-commissionSchema.index({ store: 1, doctor: 1, 'period.month': 1, 'period.year': 1 }, { unique: true });
+// Each commission is now unique per sale transaction
+commissionSchema.index({ store: 1, sale: 1 }, { unique: true });
+commissionSchema.index({ store: 1, doctor: 1, saleDate: -1 });
 commissionSchema.index({ store: 1, status: 1 });
 commissionSchema.index({ store: 1, paymentDate: 1 });
 commissionSchema.index({ doctor: 1, status: 1 });
 commissionSchema.index({ doctor: 1, paymentDate: -1 });
 commissionSchema.index({ store: 1, doctor: 1, status: 1 });
+commissionSchema.index({ sale: 1 }); // For quick sale-based lookups
 
 // Virtual for commission ID (for compatibility with existing frontend)
 commissionSchema.virtual('commissionId').get(function() {
@@ -230,71 +241,101 @@ commissionSchema.methods.recordPayment = function(paymentData) {
   return this.save();
 };
 
-// Virtual for period display
-commissionSchema.virtual('periodDisplay').get(function() {
-  const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-  ];
-  return `${months[this.period.month - 1]} ${this.period.year}`;
+// Virtual for sale date display
+commissionSchema.virtual('saleDateDisplay').get(function() {
+  if (!this.saleDate) return 'N/A';
+  return new Date(this.saleDate).toLocaleDateString();
 });
 
-// Pre-save middleware to update lastUpdated
+// Pre-save middleware to update lastUpdated and set remainingBalance
 commissionSchema.pre('save', function(next) {
   this.lastUpdated = new Date();
-  
+
+  // Set remainingBalance to commissionAmount if it's a new document and remainingBalance is not set
+  if (this.isNew && (this.remainingBalance === undefined || this.remainingBalance === null)) {
+    this.remainingBalance = this.commissionAmount || 0;
+  }
+
   // Set payment date when status changes to paid
   if (this.isModified('status') && this.status === 'paid' && !this.paymentDate) {
     this.paymentDate = new Date();
   }
-  
+
   next();
 });
 
-// Static method to create or update commission
-commissionSchema.statics.createOrUpdate = async function(commissionData) {
-  const { store, doctor, period, prescriptionCount, salesValue, commissionRate, commissionAmount } = commissionData;
-  
-  const filter = {
+// Static method to create commission for individual sale transaction
+commissionSchema.statics.createForSale = async function(commissionData) {
+  const {
     store,
     doctor,
-    'period.month': period.month,
-    'period.year': period.year
-  };
-  
-  const update = {
+    sale,
+    saleDate,
+    invoiceNumber,
+    receiptNumber,
+    prescriptionCount = 1,
+    salesValue,
+    commissionRate,
+    commissionAmount
+  } = commissionData;
+
+  // Check if commission already exists for this sale
+  const existingCommission = await this.findOne({ store, sale });
+  if (existingCommission) {
+    console.log(`Commission already exists for sale ${sale}`);
+    return existingCommission;
+  }
+
+  const commissionRecord = new this({
+    store,
+    doctor,
+    sale,
+    saleDate,
+    invoiceNumber,
+    receiptNumber,
     prescriptionCount,
     salesValue,
     commissionRate,
     commissionAmount,
     calculatedAt: new Date(),
     lastUpdated: new Date()
-  };
-  
-  const options = {
-    upsert: true,
-    new: true,
-    setDefaultsOnInsert: true
-  };
-  
-  return await this.findOneAndUpdate(filter, update, options);
+  });
+
+  return await commissionRecord.save();
+};
+
+// Legacy method for backward compatibility - now creates individual records
+commissionSchema.statics.createOrUpdate = async function(commissionData) {
+  // This method is kept for backward compatibility but now creates individual records
+  console.warn('createOrUpdate is deprecated. Use createForSale for new implementations.');
+  return await this.createForSale(commissionData);
 };
 
 // Static method to mark commission as paid
 commissionSchema.statics.markAsPaid = async function(commissionId, paymentDetails = {}) {
   const { paymentMethod, paymentReference, paymentNotes, paidBy } = paymentDetails;
-  
+
+  // First get the commission to calculate the payment amount
+  const commission = await this.findById(commissionId);
+  if (!commission) {
+    throw new Error('Commission not found');
+  }
+
+  const paymentAmount = commission.remainingBalance || commission.commissionAmount;
+
   const update = {
     status: 'paid',
     paymentDate: new Date(),
-    lastUpdated: new Date()
+    lastUpdated: new Date(),
+    totalPaid: commission.commissionAmount, // Set total paid to full commission amount
+    remainingBalance: 0 // Set remaining balance to 0 for paid commissions
   };
-  
+
   if (paymentMethod) update.paymentMethod = paymentMethod;
   if (paymentReference) update.paymentReference = paymentReference;
   if (paymentNotes) update.paymentNotes = paymentNotes;
   if (paidBy) update.paidBy = paidBy;
-  
+
   return await this.findByIdAndUpdate(commissionId, update, { new: true });
 };
 

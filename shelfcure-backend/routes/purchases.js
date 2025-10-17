@@ -13,7 +13,8 @@ const {
   getPurchaseAnalytics,
   getDeliveryTracking,
   recordPurchasePayment,
-  getPurchasePaymentHistory
+  getPurchasePaymentHistory,
+  validatePONumber
 } = require('../controllers/purchaseController');
 
 const {
@@ -220,6 +221,14 @@ router.post('/send-reorder-whatsapp',
       });
     }
   }
+);
+
+// @route   GET /api/store-manager/purchases/validate-po-number
+// @desc    Validate purchase order number for duplicates
+// @access  Private
+router.get('/validate-po-number',
+  checkFeatureAccess('purchases'),
+  validatePONumber
 );
 
 // @route   GET /api/store-manager/purchases/analytics

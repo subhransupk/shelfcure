@@ -36,6 +36,11 @@ const MetricCard = ({
       bg: 'bg-red-50',
       icon: 'text-red-600',
       trend: 'text-red-600'
+    },
+    yellow: {
+      bg: 'bg-yellow-50',
+      icon: 'text-yellow-600',
+      trend: 'text-yellow-600'
     }
   };
 
@@ -95,8 +100,8 @@ const MetricCard = ({
           )}
         </div>
         {Icon && (
-          <div className={`p-3 rounded-lg ${colorClasses[color].bg}`}>
-            <Icon className={`w-6 h-6 ${colorClasses[color].icon}`} />
+          <div className={`p-3 rounded-lg ${colorClasses[color]?.bg || colorClasses.blue.bg}`}>
+            <Icon className={`w-6 h-6 ${colorClasses[color]?.icon || colorClasses.blue.icon}`} />
           </div>
         )}
       </div>

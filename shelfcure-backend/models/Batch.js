@@ -107,6 +107,28 @@ batchSchema.pre('save', function(next) {
   next();
 });
 
+// Pre-find middleware to update expired status for batches being queried
+batchSchema.pre(['find', 'findOne', 'findOneAndUpdate'], async function() {
+  // Only run this for queries that might return expired batches
+  if (this.getQuery().isExpired !== false) {
+    try {
+      // Update expired status for batches that should be expired but aren't marked as such
+      await this.model.updateMany(
+        {
+          expiryDate: { $lt: new Date() },
+          isExpired: false
+        },
+        {
+          $set: { isExpired: true }
+        }
+      );
+    } catch (error) {
+      console.error('Error updating expired batch status in pre-find middleware:', error);
+      // Don't fail the query if this update fails
+    }
+  }
+});
+
 // Virtual for calculating total stock
 batchSchema.virtual('totalStock').get(function() {
   return this.stripQuantity + this.individualQuantity;

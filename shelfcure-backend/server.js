@@ -27,6 +27,11 @@ const io = new Server(server, {
   }
 });
 
+// Trust proxy setting - required for rate limiting behind proxies/load balancers
+// This enables Express to trust X-Forwarded-* headers
+// Set to 1 for single proxy, true for any proxy, or specific IP addresses
+app.set('trust proxy', process.env.TRUST_PROXY || 1);
+
 // Middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
@@ -56,11 +61,17 @@ app.use(cors({
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // limit each IP to 1000 requests per windowMs
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes default
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 1000, // limit each IP to 1000 requests per windowMs
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
+  // Skip rate limiting for certain routes if needed
+  skip: (req) => {
+    // Skip rate limiting for health checks and static files
+    return req.path === '/api/health' || req.path.startsWith('/uploads/');
+  }
+  // Remove custom keyGenerator to use the default one which handles IPv6 properly
 });
 app.use(limiter);
 

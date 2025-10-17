@@ -163,12 +163,16 @@ SupplierSchema.pre('save', function(next) {
 
 // Method to update outstanding balance
 SupplierSchema.methods.updateOutstandingBalance = function(amount) {
+  const oldBalance = this.outstandingBalance;
   this.outstandingBalance += amount;
 
   // Ensure balance doesn't go negative
   if (this.outstandingBalance < 0) {
+    console.warn(`⚠️ Supplier ${this._id} (${this.name}) balance would be negative (${this.outstandingBalance}), setting to 0`);
     this.outstandingBalance = 0;
   }
+
+  console.log(`💰 Updating supplier ${this._id} (${this.name}) balance: ₹${oldBalance} → ₹${this.outstandingBalance} (change: ₹${amount})`);
 
   return this.save();
 };

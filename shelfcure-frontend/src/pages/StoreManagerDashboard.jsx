@@ -739,8 +739,8 @@ const StoreManagerDashboard = () => {
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-medium text-orange-600">
-                          {medicine.batches?.[0]?.expiryDate ? 
-                            new Date(medicine.batches[0].expiryDate).toLocaleDateString() : 
+                          {medicine.expiryDate ?
+                            new Date(medicine.expiryDate).toLocaleDateString() :
                             'No expiry date'
                           }
                         </p>

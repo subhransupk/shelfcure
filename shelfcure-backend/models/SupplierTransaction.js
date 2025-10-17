@@ -177,17 +177,23 @@ supplierTransactionSchema.pre('save', function(next) {
 supplierTransactionSchema.statics.createTransaction = async function(transactionData) {
   const Supplier = mongoose.model('Supplier');
 
+  console.log(`🔄 SupplierTransaction.createTransaction called for supplier ${transactionData.supplier}, type: ${transactionData.transactionType}, balanceChange: ${transactionData.balanceChange}`);
+
   // Get supplier current balance
   const supplier = await Supplier.findById(transactionData.supplier);
   if (!supplier) {
+    console.error(`❌ Supplier not found: ${transactionData.supplier}`);
     throw new Error('Supplier not found');
   }
 
   const previousBalance = supplier.outstandingBalance || 0;
   const newBalance = previousBalance + transactionData.balanceChange;
 
+  console.log(`📊 Supplier balance calculation: Previous: ₹${previousBalance}, Change: ₹${transactionData.balanceChange}, New: ₹${newBalance}`);
+
   // Validate new balance
   if (newBalance < 0) {
+    console.error(`❌ Outstanding balance would be negative: ${newBalance}`);
     throw new Error('Outstanding balance cannot be negative');
   }
 
@@ -198,8 +204,12 @@ supplierTransactionSchema.statics.createTransaction = async function(transaction
     newBalance
   });
 
+  console.log(`✅ Transaction record created with ID: ${transaction._id}`);
+
   // Update supplier balance
   await supplier.updateOutstandingBalance(transactionData.balanceChange);
+
+  console.log(`✅ Supplier balance updated successfully. New balance: ₹${supplier.outstandingBalance}`);
 
   return transaction;
 };

@@ -328,11 +328,32 @@ const createPurchaseFromOCR = async (req, res) => {
     const gstAmount = (subtotal * gstRate) / 100;
     const totalAmount = subtotal + gstAmount;
 
+    // Determine purchase order number
+    const finalPONumber = purchaseOrderNumber || `PO-${Date.now()}`;
+
+    // Check for duplicate purchase order number if supplier is provided
+    if (selectedSupplier) {
+      const existingPurchase = await Purchase.findOne({
+        store: store._id,
+        supplier: selectedSupplier,
+        purchaseOrderNumber: finalPONumber
+      });
+
+      if (existingPurchase) {
+        const supplierDoc = await Supplier.findById(selectedSupplier);
+        return res.status(400).json({
+          success: false,
+          message: `This Purchase Order Number (${finalPONumber}) already exists for supplier "${supplierDoc?.name || 'this supplier'}". Please use a different Purchase Order Number.`,
+          duplicateFound: true
+        });
+      }
+    }
+
     // Create purchase order
     const purchaseData = {
       store: store._id,
       supplier: selectedSupplier || null,
-      purchaseOrderNumber: purchaseOrderNumber || `PO-${Date.now()}`,
+      purchaseOrderNumber: finalPONumber,
       invoiceNumber: billData.billNumber || '',
       items: purchaseItems,
       subtotal,

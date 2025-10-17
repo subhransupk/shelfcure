@@ -56,6 +56,8 @@ const StoreManagerPurchases = () => {
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [supplierFilter, setSupplierFilter] = useState('');
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState('');
   const [dateFromFilter, setDateFromFilter] = useState('');
   const [dateToFilter, setDateToFilter] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -119,6 +121,13 @@ const StoreManagerPurchases = () => {
   const [ocrResults, setOcrResults] = useState(null);
   const [ocrProgress, setOcrProgress] = useState(0);
 
+  // PO Number Validation State
+  const [poNumberValidation, setPoNumberValidation] = useState({
+    checking: false,
+    isDuplicate: false,
+    message: ''
+  });
+
   // New Purchase State
   const [newPurchase, setNewPurchase] = useState({
     supplier: '',
@@ -159,6 +168,7 @@ const StoreManagerPurchases = () => {
   useEffect(() => {
     if (activeTab === 'list') {
       fetchPurchases();
+      fetchSuppliers(); // Fetch suppliers for the filter dropdown
     } else if (activeTab === 'new') {
       fetchSuppliers();
       fetchMedicines();
@@ -170,7 +180,18 @@ const StoreManagerPurchases = () => {
     } else if (activeTab === 'requests') {
       fetchMedicineRequests();
     }
-  }, [activeTab, currentPage, statusFilter, dateFromFilter, dateToFilter]);
+  }, [activeTab, currentPage, statusFilter, supplierFilter, paymentMethodFilter, dateFromFilter, dateToFilter]);
+
+  // Auto-dismiss error messages after 5 seconds
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => {
+        setError('');
+      }, 5000); // 5 seconds
+
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
 
   // Handle clicks outside dropdowns to close them
   useEffect(() => {
@@ -376,11 +397,21 @@ const StoreManagerPurchases = () => {
         limit: 20,
         ...(searchTerm && { search: searchTerm }),
         ...(statusFilter && { status: statusFilter }),
+        ...(supplierFilter && { supplier: supplierFilter }),
+        ...(paymentMethodFilter && { paymentMethod: paymentMethodFilter }),
         ...(dateFromFilter && { dateFrom: dateFromFilter }),
         ...(dateToFilter && { dateTo: dateToFilter })
       });
 
-      console.log('Fetching purchases with params:', Object.fromEntries(params));
+      console.log('🔍 Fetching purchases with filters:', {
+        supplierFilter,
+        paymentMethodFilter,
+        statusFilter,
+        searchTerm,
+        dateFromFilter,
+        dateToFilter
+      });
+      console.log('🔍 API Params:', Object.fromEntries(params));
 
       const response = await fetch(`/api/store-manager/purchases?${params}`, {
         headers: {
@@ -459,6 +490,7 @@ const StoreManagerPurchases = () => {
 
       if (response.ok) {
         const data = await response.json();
+        console.log('📦 Fetched suppliers:', data.data?.length || 0);
         setSuppliers(data.data || []);
       }
     } catch (error) {
@@ -885,6 +917,57 @@ const StoreManagerPurchases = () => {
     }
   };
 
+  // Validate PO Number for duplicates
+  const validatePONumber = async (poNumber, supplierId) => {
+    if (!poNumber || !poNumber.trim() || !supplierId) {
+      setPoNumberValidation({ checking: false, isDuplicate: false, message: '' });
+      return;
+    }
+
+    try {
+      setPoNumberValidation({ checking: true, isDuplicate: false, message: '' });
+      const token = localStorage.getItem('token');
+
+      const response = await fetch(
+        `/api/store-manager/purchases/validate-po-number?supplier=${supplierId}&purchaseOrderNumber=${encodeURIComponent(poNumber.trim())}`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+
+        if (data.success && data.isDuplicate) {
+          // Duplicate found
+          setPoNumberValidation({
+            checking: false,
+            isDuplicate: true,
+            message: data.message || 'This Purchase Order Number already exists for this supplier. Please use a different number.'
+          });
+        } else {
+          // No duplicate
+          setPoNumberValidation({
+            checking: false,
+            isDuplicate: false,
+            message: ''
+          });
+        }
+      } else {
+        // On error, clear validation (don't block user)
+        setPoNumberValidation({ checking: false, isDuplicate: false, message: '' });
+      }
+    } catch (error) {
+      console.error('Error validating PO number:', error);
+      // On error, clear validation (don't block user)
+      setPoNumberValidation({ checking: false, isDuplicate: false, message: '' });
+    }
+  };
+
   const handleCreatePurchase = async () => {
     try {
       setLoading(true);
@@ -899,6 +982,11 @@ const StoreManagerPurchases = () => {
       }
       if (!newPurchase.items || newPurchase.items.length === 0) {
         throw new Error('At least one item is required');
+      }
+
+      // Check for duplicate PO number
+      if (poNumberValidation.isDuplicate) {
+        throw new Error(poNumberValidation.message);
       }
 
       // Validate each item
@@ -1017,6 +1105,9 @@ const StoreManagerPurchases = () => {
       setPurchaseSupplierResults([]);
       setShowPurchaseSupplierDropdown(false);
       setMedicineSearchStates({});
+
+      // Reset PO validation state
+      setPoNumberValidation({ checking: false, isDuplicate: false, message: '' });
 
       // Switch back to list tab
       setActiveTab('list');
@@ -1431,6 +1522,8 @@ const StoreManagerPurchases = () => {
               onClick={() => {
                 setSearchTerm('');
                 setStatusFilter('');
+                setSupplierFilter('');
+                setPaymentMethodFilter('');
                 setDateFromFilter('');
                 setDateToFilter('');
                 setCurrentPage(1); // Reset to first page when clearing filters
@@ -1439,6 +1532,53 @@ const StoreManagerPurchases = () => {
             >
               Clear Filters
             </button>
+          </div>
+        </div>
+
+        {/* Separator */}
+        <div className="border-t border-gray-200 my-4"></div>
+
+        {/* Supplier and Payment Method Filters Row */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          {/* Supplier Filter */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Filter by Supplier</label>
+            <select
+              value={supplierFilter}
+              onChange={(e) => {
+                setSupplierFilter(e.target.value);
+                setCurrentPage(1); // Reset to first page when filtering
+              }}
+              className="block w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
+            >
+              <option value="">All Suppliers</option>
+              {suppliers.map((supplier) => (
+                <option key={supplier._id} value={supplier._id}>
+                  {supplier.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Payment Method Filter */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Filter by Payment Method</label>
+            <select
+              value={paymentMethodFilter}
+              onChange={(e) => {
+                setPaymentMethodFilter(e.target.value);
+                setCurrentPage(1); // Reset to first page when filtering
+              }}
+              className="block w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500"
+            >
+              <option value="">All Payment Methods</option>
+              <option value="cash">Cash</option>
+              <option value="card">Card</option>
+              <option value="upi">UPI</option>
+              <option value="bank_transfer">Bank Transfer</option>
+              <option value="check">Check</option>
+              <option value="credit">Credit</option>
+            </select>
           </div>
         </div>
 
@@ -2129,14 +2269,46 @@ const StoreManagerPurchases = () => {
             <label className="block text-sm font-medium text-gray-700 mb-2 text-left">
               Purchase Order Number *
             </label>
-            <input
-              type="text"
-              value={newPurchase.purchaseOrderNumber || ''}
-              onChange={(e) => setNewPurchase(prev => ({ ...prev, purchaseOrderNumber: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
-              placeholder="PO-001"
-              required
-            />
+            <div className="relative">
+              <input
+                type="text"
+                value={newPurchase.purchaseOrderNumber || ''}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setNewPurchase(prev => ({ ...prev, purchaseOrderNumber: value }));
+                  // Validate PO number when it changes
+                  if (value.trim() && newPurchase.supplier) {
+                    validatePONumber(value, newPurchase.supplier);
+                  } else {
+                    setPoNumberValidation({ checking: false, isDuplicate: false, message: '' });
+                  }
+                }}
+                onBlur={() => {
+                  // Validate on blur as well
+                  if (newPurchase.purchaseOrderNumber.trim() && newPurchase.supplier) {
+                    validatePONumber(newPurchase.purchaseOrderNumber, newPurchase.supplier);
+                  }
+                }}
+                className={`w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 ${
+                  poNumberValidation.isDuplicate ? 'border-red-500' : 'border-gray-300'
+                }`}
+                placeholder="PO-001"
+                required
+              />
+              {poNumberValidation.checking && (
+                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                  <svg className="animate-spin h-4 w-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                </div>
+              )}
+            </div>
+            {poNumberValidation.isDuplicate && (
+              <p className="mt-1 text-sm text-red-600 text-left">
+                {poNumberValidation.message}
+              </p>
+            )}
           </div>
         </div>
 
@@ -2470,7 +2642,13 @@ const StoreManagerPurchases = () => {
           <button
             type="button"
             onClick={handleCreatePurchase}
-            disabled={!newPurchase.supplier || !newPurchase.purchaseOrderNumber || newPurchase.items.length === 0}
+            disabled={
+              !newPurchase.supplier ||
+              !newPurchase.purchaseOrderNumber ||
+              newPurchase.items.length === 0 ||
+              poNumberValidation.isDuplicate ||
+              poNumberValidation.checking
+            }
             className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Create Purchase Order
@@ -2966,6 +3144,11 @@ const StoreManagerPurchases = () => {
     setPurchaseSupplierSearch(supplier.name);
     setShowPurchaseSupplierDropdown(false);
     setNewPurchase(prev => ({ ...prev, supplier: supplier._id }));
+
+    // Validate PO number when supplier changes
+    if (newPurchase.purchaseOrderNumber && newPurchase.purchaseOrderNumber.trim()) {
+      validatePONumber(newPurchase.purchaseOrderNumber, supplier._id);
+    }
   };
 
   const resetPurchaseSupplierSelection = () => {
@@ -2974,6 +3157,9 @@ const StoreManagerPurchases = () => {
     setPurchaseSupplierResults([]);
     setShowPurchaseSupplierDropdown(false);
     setNewPurchase(prev => ({ ...prev, supplier: '' }));
+
+    // Clear PO validation when supplier is cleared
+    setPoNumberValidation({ checking: false, isDuplicate: false, message: '' });
   };
 
   // Medicine search functions for purchase items
@@ -3813,8 +3999,20 @@ const StoreManagerPurchases = () => {
 
           {/* Error Message */}
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-6">
-              <div className="text-red-800">{error}</div>
+            <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-6 relative">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center flex-1">
+                  <AlertTriangle className="h-5 w-5 text-red-500 mr-2 flex-shrink-0" />
+                  <div className="text-red-800 text-left">{error}</div>
+                </div>
+                <button
+                  onClick={() => setError('')}
+                  className="ml-4 text-red-400 hover:text-red-600 flex-shrink-0"
+                  title="Dismiss"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
           )}
 

@@ -137,6 +137,23 @@ const staffSchema = new mongoose.Schema({
     enum: ['inventory_read', 'inventory_write', 'sales_read', 'sales_write', 'reports_read', 'customer_management']
   }],
 
+  // User Account Reference (for staff with system access)
+  userAccount: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+
+  // Activity Tracking
+  lastSeen: {
+    type: Date,
+    default: null
+  },
+  lastActivity: {
+    type: Date,
+    default: null
+  },
+
   // Audit Fields
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
@@ -157,6 +174,7 @@ staffSchema.index({ email: 1 });
 staffSchema.index({ role: 1 });
 staffSchema.index({ status: 1 });
 staffSchema.index({ store: 1, status: 1 });
+staffSchema.index({ userAccount: 1 }); // For linking to User accounts
 
 // Compound unique index: employeeId must be unique per store
 staffSchema.index({ store: 1, employeeId: 1 }, { unique: true });

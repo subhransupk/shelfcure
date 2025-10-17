@@ -126,7 +126,8 @@ const StoreOwnerAnalyticsPage = () => {
       green: 'bg-green-100 text-green-600',
       purple: 'bg-purple-100 text-purple-600',
       orange: 'bg-orange-100 text-orange-600',
-      red: 'bg-red-100 text-red-600'
+      red: 'bg-red-100 text-red-600',
+      yellow: 'bg-yellow-100 text-yellow-600'
     };
 
     return (
@@ -134,7 +135,7 @@ const StoreOwnerAnalyticsPage = () => {
         <div className="p-6">
           <div className="flex items-center">
             <div className="flex-shrink-0">
-              <div className={`h-10 w-10 rounded-lg ${colorClasses[color]} flex items-center justify-center`}>
+              <div className={`h-10 w-10 rounded-lg ${colorClasses[color] || colorClasses.blue} flex items-center justify-center`}>
                 <Icon className="h-6 w-6" />
               </div>
             </div>

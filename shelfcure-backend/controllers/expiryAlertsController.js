@@ -1,4 +1,5 @@
 const Medicine = require('../models/Medicine');
+const Batch = require('../models/Batch');
 const Supplier = require('../models/Supplier');
 const { validationResult } = require('express-validator');
 const mongoose = require('mongoose');
@@ -70,14 +71,50 @@ const getExpiryAlerts = async (req, res) => {
     const sortObj = {};
     sortObj[sortBy] = sortOrder === 'desc' ? -1 : 1;
 
-    // Execute query with pagination
+    // Execute query with pagination for medicines
     const medicines = await Medicine.find(query)
       .select('name genericName manufacturer category batchNumber expiryDate unitTypes stripInfo individualInfo supplier rackLocations')
       .sort(sortObj)
       .limit(limit * 1)
       .skip((page - 1) * limit);
 
-    const total = await Medicine.countDocuments(query);
+    // Also get batches that match the expiry criteria
+    const batchQuery = {
+      store: store._id,
+      isActive: true,
+      expiryDate: query.expiryDate,
+      $or: [
+        { stripQuantity: { $gt: 0 } },
+        { individualQuantity: { $gt: 0 } }
+      ]
+    };
+
+    // Apply search filter to batches if provided
+    if (search) {
+      const medicineIds = await Medicine.find({
+        store: store._id,
+        $or: [
+          { name: { $regex: search, $options: 'i' } },
+          { genericName: { $regex: search, $options: 'i' } },
+          { manufacturer: { $regex: search, $options: 'i' } }
+        ]
+      }).distinct('_id');
+
+      batchQuery.$or = [
+        { medicine: { $in: medicineIds } },
+        { batchNumber: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const batches = await Batch.find(batchQuery)
+      .populate('medicine', 'name genericName manufacturer category unitTypes stripInfo individualInfo')
+      .sort(sortObj)
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const medicineTotal = await Medicine.countDocuments(query);
+    const batchTotal = await Batch.countDocuments(batchQuery);
+    const total = medicineTotal + batchTotal;
 
     // Process medicines to add urgency and days to expiry
     const processedMedicines = medicines.map(medicine => {
@@ -128,8 +165,71 @@ const getExpiryAlerts = async (req, res) => {
         unitTypes: medicine.unitTypes,
         stripInfo: medicine.stripInfo,
         individualInfo: medicine.individualInfo,
-        totalStock
+        totalStock,
+        type: 'medicine'
       };
+    });
+
+    // Process batches to add urgency and days to expiry
+    const processedBatches = batches.map(batch => {
+      const daysToExpiry = Math.ceil((batch.expiryDate - currentDate) / (1000 * 60 * 60 * 24));
+
+      let urgencyLevel = 'upcoming';
+      let urgencyColor = 'blue';
+
+      if (daysToExpiry < 0) {
+        urgencyLevel = 'expired';
+        urgencyColor = 'red';
+      } else if (daysToExpiry <= 7) {
+        urgencyLevel = 'critical';
+        urgencyColor = 'red';
+      } else if (daysToExpiry <= 30) {
+        urgencyLevel = 'warning';
+        urgencyColor = 'orange';
+      }
+
+      // Calculate total stock value at risk for this batch
+      let stockValue = 0;
+      if (batch.medicine?.unitTypes?.hasStrips && batch.medicine?.stripInfo) {
+        stockValue += (batch.stripQuantity || 0) * (batch.medicine.stripInfo.sellingPrice || 0);
+      }
+      if (batch.medicine?.unitTypes?.hasIndividual && batch.medicine?.individualInfo) {
+        stockValue += (batch.individualQuantity || 0) * (batch.medicine.individualInfo.sellingPrice || 0);
+      }
+
+      const totalStock = {
+        strips: batch.stripQuantity || 0,
+        individual: batch.individualQuantity || 0
+      };
+
+      return {
+        _id: batch._id,
+        name: batch.medicine?.name || 'Unknown Medicine',
+        genericName: batch.medicine?.genericName || '',
+        manufacturer: batch.medicine?.manufacturer || '',
+        category: batch.medicine?.category || '',
+        batchNumber: batch.batchNumber,
+        expiryDate: batch.expiryDate,
+        daysToExpiry,
+        urgencyLevel,
+        urgencyColor,
+        stockValue,
+        unitTypes: batch.medicine?.unitTypes,
+        stripInfo: { stock: batch.stripQuantity, sellingPrice: batch.medicine?.stripInfo?.sellingPrice },
+        individualInfo: { stock: batch.individualQuantity, sellingPrice: batch.medicine?.individualInfo?.sellingPrice },
+        totalStock,
+        type: 'batch'
+      };
+    });
+
+    // Combine and sort all items
+    const allItems = [...processedMedicines, ...processedBatches].sort((a, b) => {
+      if (sortBy === 'expiryDate') {
+        return sortOrder === 'asc' ?
+          new Date(a.expiryDate) - new Date(b.expiryDate) :
+          new Date(b.expiryDate) - new Date(a.expiryDate);
+      }
+      return 0;
     });
 
     // Add cache-busting headers
@@ -141,7 +241,7 @@ const getExpiryAlerts = async (req, res) => {
 
     res.json({
       success: true,
-      data: processedMedicines,
+      data: allItems.slice((page - 1) * limit, page * limit), // Apply pagination to combined results
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),

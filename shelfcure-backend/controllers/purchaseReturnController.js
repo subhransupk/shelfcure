@@ -420,7 +420,7 @@ const updatePurchaseReturn = async (req, res) => {
       } else if (status === 'completed') {
         // Process inventory updates when status changes to completed
         if (previousStatus !== 'completed') {
-          console.log('🔄 Processing inventory restoration for completed purchase return');
+          console.log('🔄 Processing inventory reduction for completed purchase return');
           console.log('🔍 Purchase return details:', {
             returnNumber: purchaseReturn.returnNumber,
             itemsCount: purchaseReturn.items.length,
@@ -436,7 +436,7 @@ const updatePurchaseReturn = async (req, res) => {
           });
           await processInventoryUpdates(purchaseReturn, storeManager._id);
         } else {
-          console.log('⏭️ Skipping inventory restoration - return was already completed');
+          console.log('⏭️ Skipping inventory update - return was already completed');
         }
       }
     }
@@ -492,13 +492,13 @@ const updateBatchQuantities = async (medicineId, batchInfo, unitType, returnQuan
 
     if (batch) {
       if (unitType === 'strip') {
-        batch.stripQuantity = (batch.stripQuantity || 0) + returnQuantity;
+        batch.stripQuantity = Math.max(0, (batch.stripQuantity || 0) - returnQuantity); // Subtract and ensure non-negative
       } else if (unitType === 'individual') {
-        batch.individualQuantity = (batch.individualQuantity || 0) + returnQuantity;
+        batch.individualQuantity = Math.max(0, (batch.individualQuantity || 0) - returnQuantity); // Subtract and ensure non-negative
       }
 
       await batch.save();
-      console.log(`📦 Batch ${batchInfo.batchNumber} updated: ${unitType} increased by ${returnQuantity}`);
+      console.log(`📦 Batch ${batchInfo.batchNumber} updated: ${unitType} decreased by ${returnQuantity}`);
     } else {
       console.warn(`⚠️ Batch not found: ${batchInfo.batchNumber} for medicine ${medicineId}`);
     }
@@ -543,7 +543,7 @@ const logInventoryChange = async (changeData) => {
 // Helper function to process inventory updates for completed purchase returns
 const processInventoryUpdates = async (purchaseReturn, userId) => {
   try {
-    console.log('🔄 Starting inventory restoration for purchase return:', purchaseReturn.returnNumber);
+    console.log('🔄 Starting inventory reduction for purchase return:', purchaseReturn.returnNumber);
 
     const Medicine = require('../models/Medicine');
     const Batch = require('../models/Batch');
@@ -644,9 +644,9 @@ const processInventoryUpdates = async (purchaseReturn, userId) => {
 
       // Apply unit logic: individual-only vs strip-present medicines
       if (medicineToUpdate.unitTypes?.hasStrips && unitType === 'strip') {
-        // Update strip quantities - ADD back to inventory for purchase returns
+        // Update strip quantities - SUBTRACT from inventory for purchase returns (returning to supplier)
         const currentStripStock = medicineToUpdate.stripInfo.stock || 0;
-        const newStripStock = currentStripStock + returnQuantity;
+        const newStripStock = Math.max(0, currentStripStock - returnQuantity); // Ensure non-negative
 
         console.log(`🔄 BEFORE UPDATE - Strip stock: ${currentStripStock}`);
 
@@ -658,12 +658,12 @@ const processInventoryUpdates = async (purchaseReturn, userId) => {
           medicineToUpdate.inventory.stripQuantity = newStripStock;
         }
 
-        console.log(`📈 AFTER UPDATE - Strip inventory: ${currentStripStock} → ${newStripStock} (increased by ${returnQuantity})`);
+        console.log(`📉 AFTER UPDATE - Strip inventory: ${currentStripStock} → ${newStripStock} (decreased by ${returnQuantity})`);
 
       } else if (medicineToUpdate.unitTypes?.hasIndividual && unitType === 'individual') {
-        // Update individual quantities - ADD back to inventory for purchase returns
+        // Update individual quantities - SUBTRACT from inventory for purchase returns (returning to supplier)
         const currentIndividualStock = medicineToUpdate.individualInfo.stock || 0;
-        const newIndividualStock = currentIndividualStock + returnQuantity;
+        const newIndividualStock = Math.max(0, currentIndividualStock - returnQuantity); // Ensure non-negative
 
         console.log(`🔄 BEFORE UPDATE - Individual stock: ${currentIndividualStock}`);
 
@@ -674,7 +674,7 @@ const processInventoryUpdates = async (purchaseReturn, userId) => {
           medicineToUpdate.inventory.individualQuantity = newIndividualStock;
         }
 
-        console.log(`📈 AFTER UPDATE - Individual inventory: ${currentIndividualStock} → ${newIndividualStock} (increased by ${returnQuantity})`);
+        console.log(`📉 AFTER UPDATE - Individual inventory: ${currentIndividualStock} → ${newIndividualStock} (decreased by ${returnQuantity})`);
 
       } else {
         console.warn(`⚠️ Unit type mismatch or unsupported: ${unitType} for medicine ${medicineToUpdate.name}`);
@@ -713,10 +713,10 @@ const processInventoryUpdates = async (purchaseReturn, userId) => {
         store: medicineToUpdate.store,
         changeType: 'purchase_return',
         unitType,
-        quantityChanged: returnQuantity, // Positive because it's an increase
+        quantityChanged: -returnQuantity, // Negative because it's a decrease (returning to supplier)
         previousStock: unitType === 'strip' ?
-          (medicineToUpdate.stripInfo?.stock || 0) - returnQuantity :
-          (medicineToUpdate.individualInfo?.stock || 0) - returnQuantity,
+          (medicineToUpdate.stripInfo?.stock || 0) + returnQuantity :
+          (medicineToUpdate.individualInfo?.stock || 0) + returnQuantity,
         newStock: unitType === 'strip' ?
           (medicineToUpdate.stripInfo?.stock || 0) :
           (medicineToUpdate.individualInfo?.stock || 0),
@@ -735,18 +735,18 @@ const processInventoryUpdates = async (purchaseReturn, userId) => {
         updatedAt: new Date(),
         updatedBy: userId,
         unitType,
-        quantityChanged: returnQuantity, // Positive value indicates increase
-        quantityAdded: returnQuantity, // New field for inventory increase
+        quantityChanged: -returnQuantity, // Negative value indicates decrease
+        quantityReduced: returnQuantity, // Field for inventory decrease
         previousStock: unitType === 'strip' ?
-          (medicineToUpdate.stripInfo?.stock || 0) - returnQuantity :
-          (medicineToUpdate.individualInfo?.stock || 0) - returnQuantity,
+          (medicineToUpdate.stripInfo?.stock || 0) + returnQuantity :
+          (medicineToUpdate.individualInfo?.stock || 0) + returnQuantity,
         newStock: unitType === 'strip' ?
           (medicineToUpdate.stripInfo?.stock || 0) :
           (medicineToUpdate.individualInfo?.stock || 0)
       };
     }
 
-    // Update overall inventory restoration status
+    // Update overall inventory update status
     const allItemsProcessed = purchaseReturn.items.every(item =>
       !item.removeFromInventory || item.inventoryUpdated
     );
@@ -754,7 +754,7 @@ const processInventoryUpdates = async (purchaseReturn, userId) => {
     purchaseReturn.inventoryRestorationStatus = allItemsProcessed ? 'completed' : 'partial';
     await purchaseReturn.save();
 
-    console.log('✅ Inventory restoration completed for purchase return:', purchaseReturn.returnNumber);
+    console.log('✅ Inventory reduction completed for purchase return:', purchaseReturn.returnNumber);
 
   } catch (error) {
     console.error('❌ Inventory update error:', error);

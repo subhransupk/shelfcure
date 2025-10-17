@@ -354,6 +354,18 @@ purchaseSchema.index({ createdBy: 1, purchaseDate: -1 });
 // Compound index for store and supplier specific queries
 purchaseSchema.index({ store: 1, supplier: 1, purchaseDate: -1 });
 
+// Compound unique index to prevent duplicate purchase order numbers for the same supplier in the same store
+// Note: This allows the same PO number for different suppliers (since different suppliers may have overlapping numbering)
+// The sparse option allows multiple documents with null supplier (for purchases without supplier assigned yet)
+purchaseSchema.index(
+  { store: 1, supplier: 1, purchaseOrderNumber: 1 },
+  {
+    unique: true,
+    sparse: true,
+    name: 'unique_supplier_po_number'
+  }
+);
+
 // Virtual for total items
 purchaseSchema.virtual('totalItems').get(function() {
   return this.items && Array.isArray(this.items) ? this.items.reduce((total, item) => total + item.quantity, 0) : 0;

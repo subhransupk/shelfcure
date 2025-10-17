@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Stethoscope, 
-  Plus, 
-  Search, 
-  Edit, 
-  Eye, 
-  Phone, 
+import {
+  Stethoscope,
+  Plus,
+  Search,
+  Edit,
+  Eye,
+  Phone,
   Mail,
   MapPin,
   Calendar,
@@ -18,7 +18,8 @@ import {
   Clock,
   X,
   CheckCircle,
-  XCircle
+  XCircle,
+  Download
 } from 'lucide-react';
 import StoreManagerLayout from '../components/store-manager/StoreManagerLayout';
 
@@ -55,10 +56,23 @@ const StoreManagerDoctors = () => {
   const [commissionHistory, setCommissionHistory] = useState([]);
   const [commissionFilter, setCommissionFilter] = useState('all'); // 'all', 'pending', 'paid'
   const [successMessage, setSuccessMessage] = useState('');
+  const [showBulkPaymentModal, setShowBulkPaymentModal] = useState(false);
+  const [bulkPaymentDoctor, setBulkPaymentDoctor] = useState(null);
+  const [bulkPaymentData, setBulkPaymentData] = useState({
+    totalAmount: 0,
+    commissionsCount: 0,
+    commissions: []
+  });
+  const [processingBulkPayment, setProcessingBulkPayment] = useState(false);
   const [commissionDateRange, setCommissionDateRange] = useState('thisMonth'); // 'thisMonth', 'lastMonth', 'thisYear'
   const [doctorNameFilter, setDoctorNameFilter] = useState(''); // Filter by doctor name
   const [commissionRateFilter, setCommissionRateFilter] = useState('all'); // Filter by commission rate
   const [allCommissionHistory, setAllCommissionHistory] = useState([]); // Store all commission data for client-side filtering
+
+  // Pagination state for commission records
+  const [commissionCurrentPage, setCommissionCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10);
+  const [commissionTotalPages, setCommissionTotalPages] = useState(1);
 
   // Form state for adding/editing doctor
   const [formData, setFormData] = useState({
@@ -205,8 +219,17 @@ const StoreManagerDoctors = () => {
     if (allCommissionHistory.length > 0) {
       const filtered = filterCommissionHistory(allCommissionHistory);
       setCommissionHistory(filtered);
+      setCommissionTotalPages(Math.ceil(filtered.length / itemsPerPage));
+      setCommissionCurrentPage(1); // Reset to first page when filters change
     }
-  }, [doctorNameFilter, commissionRateFilter, allCommissionHistory]);
+  }, [doctorNameFilter, commissionRateFilter, allCommissionHistory, itemsPerPage]);
+
+  // Get paginated commission data
+  const getPaginatedCommissions = () => {
+    const startIndex = (commissionCurrentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return commissionHistory.slice(startIndex, endIndex);
+  };
 
   // Handle form input changes
   const handleInputChange = (e) => {
@@ -515,6 +538,8 @@ const StoreManagerDoctors = () => {
 
         // Refresh data to ensure consistency
         await fetchCommissions();
+        // Refresh doctor list to update commission status
+        await fetchDoctors();
       } else {
         const data = await response.json();
         console.error('Mark commission paid failed:', data);
@@ -654,8 +679,8 @@ const StoreManagerDoctors = () => {
   };
 
   const submitPayment = async () => {
-    if (!selectedCommission || !paymentFormData.amount || !paymentFormData.paymentMethod) {
-      setError('Please fill in all required payment fields');
+    if (!selectedCommission || !paymentFormData.amount) {
+      setError('Please fill in payment amount');
       return;
     }
 
@@ -668,7 +693,10 @@ const StoreManagerDoctors = () => {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(paymentFormData)
+        body: JSON.stringify({
+          amount: paymentFormData.amount,
+          notes: paymentFormData.notes
+        })
       });
 
       const data = await response.json();
@@ -688,6 +716,8 @@ const StoreManagerDoctors = () => {
         if (selectedDoctor) {
           await fetchDoctorCommissionData(selectedDoctor._id);
         }
+        await fetchCommissions(); // Refresh commission list
+        await fetchDoctors(); // Refresh doctor list to update commission status
 
         // Clear success message after 3 seconds
         setTimeout(() => setSuccessMessage(''), 3000);
@@ -699,6 +729,92 @@ const StoreManagerDoctors = () => {
       setError('Failed to record payment');
     } finally {
       setSubmittingPayment(false);
+    }
+  };
+
+  // Handle bulk payment for all doctor commissions
+  const handleBulkPayment = async (doctor) => {
+    try {
+      const token = localStorage.getItem('token');
+
+      // First, get pending commissions for this doctor to show confirmation
+      const response = await fetch(`/api/store-manager/doctors/commissions?doctorId=${doctor._id}&status=pending`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const pendingCommissions = data.data || [];
+
+        if (pendingCommissions.length === 0) {
+          setError('No pending commissions found for this doctor');
+          return;
+        }
+
+        // Calculate total amount
+        const totalAmount = pendingCommissions.reduce((sum, comm) => {
+          return sum + (comm.remainingBalance || comm.commissionAmount);
+        }, 0);
+
+        setBulkPaymentDoctor(doctor);
+        setBulkPaymentData({
+          totalAmount,
+          commissionsCount: pendingCommissions.length,
+          commissions: pendingCommissions
+        });
+        setShowBulkPaymentModal(true);
+      } else {
+        setError('Failed to fetch pending commissions');
+      }
+    } catch (error) {
+      console.error('Error fetching pending commissions:', error);
+      setError('Failed to fetch pending commissions');
+    }
+  };
+
+  // Process bulk payment
+  const processBulkPayment = async () => {
+    if (!bulkPaymentDoctor) return;
+
+    setProcessingBulkPayment(true);
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/store-manager/doctors/${bulkPaymentDoctor._id}/pay-all-commissions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          notes: `Bulk payment for all pending commissions`
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setSuccessMessage(`Successfully paid ₹${bulkPaymentData.totalAmount} for ${bulkPaymentData.commissionsCount} commissions`);
+        setShowBulkPaymentModal(false);
+        setBulkPaymentDoctor(null);
+        setBulkPaymentData({ totalAmount: 0, commissionsCount: 0, commissions: [] });
+
+        // Refresh data
+        await fetchCommissions();
+        await fetchDoctors(); // Refresh doctor list to update commission status
+
+        // Clear success message after 5 seconds
+        setTimeout(() => setSuccessMessage(''), 5000);
+      } else {
+        setError(data.message || 'Failed to process bulk payment');
+      }
+    } catch (error) {
+      console.error('Error processing bulk payment:', error);
+      setError('Failed to process bulk payment');
+    } finally {
+      setProcessingBulkPayment(false);
     }
   };
 
@@ -723,29 +839,20 @@ const StoreManagerDoctors = () => {
         <div className="sm:flex-auto">
           <h1 className="text-2xl font-semibold text-gray-900 text-left">Doctor Management</h1>
           <p className="mt-2 text-sm text-gray-700 text-left">
-            Manage doctor profiles, track commissions, and monitor prescriptions.
+            Manage doctor profiles and monitor prescriptions.
           </p>
         </div>
         <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
-          <div className="flex space-x-3">
-            <button
-              onClick={() => setActiveTab('commissions')}
-              className="inline-flex items-center px-4 py-2 border border-green-600 text-sm font-medium rounded-md text-green-600 bg-white hover:bg-green-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-            >
-              <TrendingUp className="h-4 w-4 mr-2" />
-              View Commissions
-            </button>
-            <button
-              onClick={() => {
-                resetForm();
-                setActiveTab('add');
-              }}
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Doctor
-            </button>
-          </div>
+          <button
+            onClick={() => {
+              resetForm();
+              setActiveTab('add');
+            }}
+            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Add Doctor
+          </button>
         </div>
       </div>
 
@@ -780,7 +887,7 @@ const StoreManagerDoctors = () => {
         <div className="bg-white rounded-xl shadow-lg p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Total Commissions</p>
+              <p className="text-sm font-medium text-gray-600">Total Commission Value</p>
               <p className="text-2xl font-bold text-gray-900">₹{commissionStats.thisMonthCommissions?.toLocaleString() || 0}</p>
               <p className="text-xs text-purple-600">This month</p>
             </div>
@@ -969,6 +1076,18 @@ const StoreManagerDoctors = () => {
                         <div className="text-xs text-gray-500">
                           {doctor.commissionRate || 0}% rate
                         </div>
+                        <div className="mt-1">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            doctor.commissionStatus === 'paid'
+                              ? 'bg-green-100 text-green-800'
+                              : doctor.commissionStatus === 'partially_paid'
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}>
+                            {doctor.commissionStatus === 'paid' ? 'Paid' :
+                             doctor.commissionStatus === 'partially_paid' ? 'Partially Paid' : 'Pending'}
+                          </span>
+                        </div>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
@@ -990,6 +1109,15 @@ const StoreManagerDoctors = () => {
                         >
                           <Edit className="h-4 w-4" />
                         </button>
+                        {doctor.commissionStatus !== 'paid' && (
+                          <button
+                            onClick={() => handleBulkPayment(doctor)}
+                            className="text-purple-600 hover:text-purple-900"
+                            title="Pay All Commissions"
+                          >
+                            <DollarSign className="h-4 w-4" />
+                          </button>
+                        )}
                         <button
                           onClick={() => handleToggleDoctorStatus(doctor._id, doctor.status)}
                           className={`${
@@ -1023,92 +1151,128 @@ const StoreManagerDoctors = () => {
     </div>
   );
 
+  // Render Commissions Tab
   const renderCommissionsTab = () => (
-    <div>
-      <div className="sm:flex sm:items-center sm:justify-between mb-6">
-        <div className="sm:flex-auto">
-          <h1 className="text-2xl font-semibold text-gray-900 text-left">Commission Tracking</h1>
-          <p className="mt-2 text-sm text-gray-700 text-left">
-            Monitor doctor commissions and prescription-based earnings.
-          </p>
+    <div className="space-y-6">
+      {/* Commission Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="bg-white overflow-hidden shadow rounded-lg">
+          <div className="p-5">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <DollarSign className="h-6 w-6 text-green-400" />
+              </div>
+              <div className="ml-5 w-0 flex-1">
+                <dl>
+                  <dt className="text-sm font-medium text-gray-500 truncate text-left">Total Commissions</dt>
+                  <dd className="text-lg font-medium text-gray-900 text-left">
+                    ₹{commissionStats.totalCommissions?.toLocaleString() || 0}
+                  </dd>
+                </dl>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
-          <button
-            onClick={() => setActiveTab('list')}
-            className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-          >
-            Back to Doctors
-          </button>
+
+        <div className="bg-white overflow-hidden shadow rounded-lg">
+          <div className="p-5">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <CheckCircle className="h-6 w-6 text-green-400" />
+              </div>
+              <div className="ml-5 w-0 flex-1">
+                <dl>
+                  <dt className="text-sm font-medium text-gray-500 truncate text-left">Paid</dt>
+                  <dd className="text-lg font-medium text-gray-900 text-left">
+                    ₹{commissionStats.totalPaid?.toLocaleString() || 0}
+                  </dd>
+                </dl>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white overflow-hidden shadow rounded-lg">
+          <div className="p-5">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <Clock className="h-6 w-6 text-yellow-400" />
+              </div>
+              <div className="ml-5 w-0 flex-1">
+                <dl>
+                  <dt className="text-sm font-medium text-gray-500 truncate text-left">Pending</dt>
+                  <dd className="text-lg font-medium text-gray-900 text-left">
+                    ₹{commissionStats.totalPending?.toLocaleString() || 0}
+                  </dd>
+                </dl>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white overflow-hidden shadow rounded-lg">
+          <div className="p-5">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <TrendingUp className="h-6 w-6 text-blue-400" />
+              </div>
+              <div className="ml-5 w-0 flex-1">
+                <dl>
+                  <dt className="text-sm font-medium text-gray-500 truncate text-left">This Month</dt>
+                  <dd className="text-lg font-medium text-gray-900 text-left">
+                    ₹{commissionStats.thisMonth?.toLocaleString() || 0}
+                  </dd>
+                </dl>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Commission Summary */}
-      {loadingCommissions ? (
-        <div className="flex items-center justify-center h-32">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Doctors</p>
-                <p className="text-2xl font-bold text-gray-900">{commissionStats.totalDoctors || 0}</p>
-                <p className="text-xs text-green-600">{commissionStats.activeDoctors || 0} active</p>
-              </div>
-              <div className="p-3 bg-gradient-to-r from-green-500 to-green-600 rounded-full">
-                <Users className="h-6 w-6 text-white" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">This Month</p>
-                <p className="text-2xl font-bold text-gray-900">₹{commissionStats.thisMonthCommissions?.toLocaleString() || 0}</p>
-                <p className="text-xs text-blue-600">Commission earned</p>
-              </div>
-              <div className="p-3 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full">
-                <TrendingUp className="h-6 w-6 text-white" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Pending Payments</p>
-                <p className="text-2xl font-bold text-gray-900">₹{commissionStats.pendingCommissions?.toLocaleString() || 0}</p>
-                <p className="text-xs text-orange-600">To be paid</p>
-              </div>
-              <div className="p-3 bg-gradient-to-r from-orange-500 to-orange-600 rounded-full">
-                <Clock className="h-6 w-6 text-white" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Avg Commission</p>
-                <p className="text-2xl font-bold text-gray-900">{commissionStats.averageCommissionRate?.toFixed(1) || 0}%</p>
-                <p className="text-xs text-purple-600">Across all doctors</p>
-              </div>
-              <div className="p-3 bg-gradient-to-r from-purple-500 to-purple-600 rounded-full">
-                <Award className="h-6 w-6 text-white" />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Filters */}
+      {/* Commission Analytics */}
       <div className="bg-white shadow rounded-lg p-6 mb-6">
-        <h4 className="text-md font-medium text-gray-900 mb-4 text-left">Filter Commissions</h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <h4 className="text-md font-medium text-gray-900 mb-4 text-left">Quick Analytics</h4>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-green-600">
+              ₹{commissionStats.totalPending?.toLocaleString() || 0}
+            </div>
+            <div className="text-sm text-gray-500">Pending Commissions</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-blue-600">
+              ₹{commissionStats.totalPaid?.toLocaleString() || 0}
+            </div>
+            <div className="text-sm text-gray-500">Paid Commissions</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-yellow-600">
+              ₹{commissionStats.thisMonthCommissions?.toLocaleString() || 0}
+            </div>
+            <div className="text-sm text-gray-500">Total Commission Value</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Commission Filters */}
+      <div className="bg-white shadow rounded-lg p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h4 className="text-md font-medium text-gray-900 text-left">Filter Commission Records</h4>
+          <button
+            onClick={() => {
+              setCommissionDateRange('thisMonth');
+              setCommissionFilter('all');
+              setDoctorNameFilter('');
+              setCommissionRateFilter('all');
+            }}
+            className="text-sm text-gray-600 hover:text-gray-900 underline"
+          >
+            Clear All Filters
+          </button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Date Range</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1 text-left">Date Range</label>
             <select
               value={commissionDateRange}
               onChange={(e) => setCommissionDateRange(e.target.value)}
@@ -1117,13 +1281,12 @@ const StoreManagerDoctors = () => {
               <option value="thisMonth">This Month</option>
               <option value="lastMonth">Last Month</option>
               <option value="thisYear">This Year</option>
-              <option value="lastYear">Last Year</option>
               <option value="all">All Time</option>
             </select>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1 text-left">Status</label>
             <select
               value={commissionFilter}
               onChange={(e) => setCommissionFilter(e.target.value)}
@@ -1131,23 +1294,24 @@ const StoreManagerDoctors = () => {
             >
               <option value="all">All Status</option>
               <option value="pending">Pending</option>
-              <option value="paid">Paid</option>
+              <option value="partial">Partially Paid</option>
+              <option value="paid">Fully Paid</option>
             </select>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Doctor Name</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1 text-left">Doctor Name</label>
             <input
               type="text"
               value={doctorNameFilter}
               onChange={(e) => setDoctorNameFilter(e.target.value)}
-              placeholder="Search by doctor name..."
+              placeholder="Search by doctor name"
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Commission Rate</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1 text-left">Commission Rate</label>
             <select
               value={commissionRateFilter}
               onChange={(e) => setCommissionRateFilter(e.target.value)}
@@ -1162,189 +1326,247 @@ const StoreManagerDoctors = () => {
             </select>
           </div>
         </div>
-
-        {/* Clear Filters Button */}
-        <div className="mt-4 flex justify-end">
-          <button
-            onClick={() => {
-              setCommissionDateRange('thisMonth');
-              setCommissionFilter('all');
-              setDoctorNameFilter('');
-              setCommissionRateFilter('all');
-            }}
-            className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-          >
-            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            Clear Filters
-          </button>
-        </div>
       </div>
 
-      {/* Commission Details */}
-      <div className="bg-white shadow rounded-lg p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-medium text-gray-900 text-left">Commission Details</h3>
-          <div className="text-sm text-gray-500">
-            Showing {commissionHistory.length} of {allCommissionHistory.length} records
-            {(doctorNameFilter || commissionRateFilter !== 'all') && (
-              <span className="ml-2 text-blue-600">(filtered)</span>
-            )}
-          </div>
-        </div>
+      {/* Commission Records Table */}
+      <div className="bg-white shadow rounded-lg overflow-hidden">
+        <div className="px-4 py-5 sm:p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg leading-6 font-medium text-gray-900 text-left">Commission Records</h3>
+              <p className="text-sm text-gray-500 text-left">
+                {commissionHistory.length} individual commission transactions found
+                {(doctorNameFilter || commissionRateFilter !== 'all') &&
+                  ` (filtered from ${allCommissionHistory.length} total)`
+                }
+              </p>
+              <p className="text-xs text-gray-400 text-left mt-1">
+                Each record represents a commission from an individual sale transaction
+              </p>
+            </div>
+            <div className="flex space-x-2">
+              <button
+                onClick={() => {
+                  // Export commission data to CSV
+                  const csvData = commissionHistory.map(commission => ({
+                    Doctor: commission.doctor?.name || 'Unknown',
+                    Specialization: commission.doctor?.specialization || 'General',
+                    'Sale Date': new Date(commission.saleDate || commission.createdAt).toLocaleDateString('en-IN'),
+                    'Invoice Number': commission.invoiceNumber || 'N/A',
+                    'Receipt Number': commission.receiptNumber || 'N/A',
+                    'Sale Amount': commission.salesValue || commission.totalSalesValue || 0,
+                    'Commission Amount': commission.commissionAmount || 0,
+                    'Commission Rate': `${commission.commissionRate || 0}%`,
+                    Status: commission.status || 'pending',
+                    'Payment Date': commission.paymentDate ? new Date(commission.paymentDate).toLocaleDateString('en-IN') : 'N/A'
+                  }));
 
-        {/* Success Message */}
-        {successMessage && (
-          <div className="mb-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-md">
-            <div className="flex items-center">
-              <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-              </svg>
-              {successMessage}
+                  const csvContent = [
+                    Object.keys(csvData[0] || {}).join(','),
+                    ...csvData.map(row => Object.values(row).join(','))
+                  ].join('\n');
+
+                  const blob = new Blob([csvContent], { type: 'text/csv' });
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `individual-commission-records-${new Date().toISOString().split('T')[0]}.csv`;
+                  a.click();
+                  window.URL.revokeObjectURL(url);
+                }}
+                className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export CSV
+              </button>
             </div>
           </div>
-        )}
-        {loadingCommissions ? (
-          <div className="flex items-center justify-center h-32">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Doctor
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Prescriptions
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Sales Value
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Commission Rate
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Commission Amount
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Date
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {commissionHistory.length > 0 ? (
-                  commissionHistory.map((commission) => {
-                    console.log('Rendering commission:', commission);
-                    return (
+
+          {loadingCommissions ? (
+            <div className="flex justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
+            </div>
+          ) : commissionHistory.length === 0 ? (
+            <div className="text-center py-8">
+              <Award className="mx-auto h-12 w-12 text-gray-400" />
+              <h3 className="mt-2 text-sm font-medium text-gray-900">No commission records</h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Commission records will appear here when sales are made with doctor prescriptions.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Doctor
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Sale Date
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Invoice/Receipt
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Sale Amount
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Commission
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Rate
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {getPaginatedCommissions().map((commission) => (
                     <tr key={commission._id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="flex-shrink-0 h-8 w-8">
-                            <div className="h-8 w-8 rounded-full bg-gradient-to-r from-blue-500 to-blue-600 flex items-center justify-center">
-                              <span className="text-xs font-medium text-white">
-                                {commission.doctor?.name?.charAt(0) || 'D'}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="ml-3">
-                            <div className="text-sm font-medium text-gray-900">
-                              Dr. {commission.doctor?.name || 'Unknown'}
-                            </div>
-                            <div className="text-sm text-gray-500">
-                              {commission.doctor?.specialization || 'General'}
-                            </div>
-                          </div>
+                        <div className="text-sm font-medium text-gray-900 text-left">
+                          {commission.doctor?.name || 'Unknown Doctor'}
+                        </div>
+                        <div className="text-sm text-gray-500 text-left">
+                          {commission.doctor?.specialization || 'General'}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {commission.prescriptionCount || 0}
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-left">
+                        <div className="text-sm font-medium text-gray-900">
+                          {new Date(commission.saleDate || commission.createdAt).toLocaleDateString('en-IN', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric'
+                          })}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {new Date(commission.saleDate || commission.createdAt).toLocaleTimeString('en-IN', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        ₹{commission.salesValue?.toLocaleString() || 0}
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-left">
+                        <div className="text-sm font-medium text-gray-900">
+                          {commission.invoiceNumber ? `INV: ${commission.invoiceNumber}` : 'No Invoice'}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {commission.receiptNumber ? `RCP: ${commission.receiptNumber}` : 'No Receipt'}
+                        </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {commission.commissionRate || 0}%
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-left">
+                        ₹{(commission.salesValue || commission.totalSalesValue || 0).toLocaleString()}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-green-600">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-left">
                         ₹{commission.commissionAmount?.toLocaleString() || 0}
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-left">
+                        {commission.commissionRate || 0}%
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                           commission.status === 'paid'
                             ? 'bg-green-100 text-green-800'
-                            : commission.status === 'pending'
+                            : commission.status === 'partial'
                             ? 'bg-yellow-100 text-yellow-800'
-                            : 'bg-gray-100 text-gray-800'
+                            : 'bg-red-100 text-red-800'
                         }`}>
-                          {commission.status === 'paid' ? 'Paid' : commission.status === 'pending' ? 'Pending' : 'Draft'}
+                          {commission.status === 'paid' ? 'Fully Paid' :
+                           commission.status === 'partial' ? 'Partially Paid' : 'Pending'}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {new Date(commission.createdAt).toLocaleDateString('en-IN', {
-                          day: '2-digit',
-                          month: 'short',
-                          year: 'numeric'
-                        })}
-                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        {commission.status === 'pending' && (
+                        <div className="flex space-x-2">
+                          {commission.status !== 'paid' && (
+                            <>
+                              <button
+                                onClick={() => handleRecordPayment(commission)}
+                                className="text-green-600 hover:text-green-900"
+                                title="Record Payment"
+                              >
+                                <DollarSign className="h-4 w-4" />
+                              </button>
+                              <button
+                                onClick={() => markCommissionPaid(commission._id)}
+                                className="text-blue-600 hover:text-blue-900"
+                                title="Mark as Paid"
+                              >
+                                <CheckCircle className="h-4 w-4" />
+                              </button>
+                            </>
+                          )}
                           <button
-                            onClick={() => markCommissionPaid(commission._id)}
-                            disabled={commission.isUpdating}
-                            className={`inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md ${
-                              commission.isUpdating
-                                ? 'text-gray-400 cursor-not-allowed'
-                                : 'text-green-600 hover:text-green-900 hover:bg-green-50'
-                            }`}
-                            title="Mark as Paid"
+                            onClick={() => {
+                              // Show commission details
+                              console.log('View commission details:', commission._id);
+                              // This could open a modal with detailed commission information
+                            }}
+                            className="text-gray-600 hover:text-gray-900"
+                            title="View Details"
                           >
-                            {commission.isUpdating ? (
-                              <>
-                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-600 mr-2"></div>
-                                Processing...
-                              </>
-                            ) : (
-                              'Mark Paid'
-                            )}
+                            <Eye className="h-4 w-4" />
                           </button>
-                        )}
-                        {commission.status === 'paid' && (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                            ✓ Paid
-                            {commission.paymentDate && (
-                              <span className="ml-1 text-green-600">
-                                ({new Date(commission.paymentDate).toLocaleDateString('en-IN', {
-                                  day: '2-digit',
-                                  month: 'short'
-                                })})
-                              </span>
-                            )}
-                          </span>
-                        )}
+                        </div>
                       </td>
                     </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Pagination Controls */}
+          {commissionHistory.length > itemsPerPage && (
+            <div className="flex items-center justify-between mt-6">
+              <div className="text-sm text-gray-700">
+                Showing {((commissionCurrentPage - 1) * itemsPerPage) + 1} to {Math.min(commissionCurrentPage * itemsPerPage, commissionHistory.length)} of {commissionHistory.length} results
+              </div>
+              <div className="flex space-x-2">
+                <button
+                  onClick={() => setCommissionCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={commissionCurrentPage === 1}
+                  className="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+
+                {/* Page Numbers */}
+                {Array.from({ length: Math.min(5, commissionTotalPages) }, (_, i) => {
+                  const pageNum = Math.max(1, Math.min(commissionTotalPages - 4, commissionCurrentPage - 2)) + i;
+                  if (pageNum <= commissionTotalPages) {
+                    return (
+                      <button
+                        key={pageNum}
+                        onClick={() => setCommissionCurrentPage(pageNum)}
+                        className={`px-3 py-2 text-sm font-medium rounded-md ${
+                          commissionCurrentPage === pageNum
+                            ? 'text-white bg-green-600 border border-green-600'
+                            : 'text-gray-500 bg-white border border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        {pageNum}
+                      </button>
                     );
-                  })
-                ) : (
-                  <tr>
-                    <td colSpan="8" className="px-6 py-4 text-center text-gray-500">
-                      No commission data found for the selected filters
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
+                  }
+                  return null;
+                })}
+
+                <button
+                  onClick={() => setCommissionCurrentPage(prev => Math.min(prev + 1, commissionTotalPages))}
+                  disabled={commissionCurrentPage === commissionTotalPages}
+                  className="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1359,7 +1581,7 @@ const StoreManagerDoctors = () => {
               {isEditing ? 'Edit Doctor' : 'Add New Doctor'}
             </h1>
             <p className="mt-2 text-sm text-gray-700 text-left">
-              {isEditing ? 'Update doctor information and commission settings.' : 'Register a new doctor and set up commission tracking.'}
+              {isEditing ? 'Update doctor information and settings.' : 'Register a new doctor with their details.'}
             </p>
           </div>
         <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
@@ -1561,6 +1783,10 @@ const StoreManagerDoctors = () => {
     );
   };
 
+
+
+
+
   if (loading && doctors.length === 0) {
     return (
       <StoreManagerLayout>
@@ -1632,7 +1858,7 @@ const StoreManagerDoctors = () => {
               <div className="relative top-10 mx-auto p-5 border w-11/12 md:w-4/5 lg:w-3/4 xl:w-2/3 shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
                 <div className="mt-3">
                   <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-xl font-semibold text-gray-900 text-left">Doctor Details & Commission Tracking</h3>
+                    <h3 className="text-xl font-semibold text-gray-900 text-left">Doctor Details</h3>
                     <button
                       onClick={() => {
                         setShowDoctorModal(false);
@@ -1697,205 +1923,7 @@ const StoreManagerDoctors = () => {
                       </div>
                     </div>
 
-                    {/* Commission Tracking Section */}
-                    <div className="border-t pt-6">
-                      <h5 className="text-lg font-semibold text-gray-900 mb-4 text-left">Commission Tracking</h5>
 
-                      {loadingCommissionData ? (
-                        <div className="flex items-center justify-center py-8">
-                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
-                          <span className="ml-2 text-gray-600">Loading commission data...</span>
-                        </div>
-                      ) : doctorCommissionData ? (
-                        <div className="space-y-6">
-                          {/* Commission Summary Cards */}
-                          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                            <div className="bg-blue-50 rounded-lg p-4">
-                              <div className="flex items-center">
-                                <div className="flex-shrink-0">
-                                  <DollarSign className="h-8 w-8 text-blue-600" />
-                                </div>
-                                <div className="ml-3">
-                                  <p className="text-sm font-medium text-blue-600 text-left">Total Earned</p>
-                                  <p className="text-lg font-semibold text-blue-900 text-left">
-                                    ₹{doctorCommissionData.summary?.totalCommissionEarned?.toLocaleString() || 0}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="bg-green-50 rounded-lg p-4">
-                              <div className="flex items-center">
-                                <div className="flex-shrink-0">
-                                  <CheckCircle className="h-8 w-8 text-green-600" />
-                                </div>
-                                <div className="ml-3">
-                                  <p className="text-sm font-medium text-green-600 text-left">Total Paid</p>
-                                  <p className="text-lg font-semibold text-green-900 text-left">
-                                    ₹{doctorCommissionData.summary?.totalCommissionPaid?.toLocaleString() || 0}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="bg-yellow-50 rounded-lg p-4">
-                              <div className="flex items-center">
-                                <div className="flex-shrink-0">
-                                  <Clock className="h-8 w-8 text-yellow-600" />
-                                </div>
-                                <div className="ml-3">
-                                  <p className="text-sm font-medium text-yellow-600 text-left">Pending</p>
-                                  <p className="text-lg font-semibold text-yellow-900 text-left">
-                                    ₹{doctorCommissionData.summary?.pendingCommissionAmount?.toLocaleString() || 0}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="bg-gray-50 rounded-lg p-4">
-                              <div className="flex items-center">
-                                <div className="flex-shrink-0">
-                                  <TrendingUp className="h-8 w-8 text-gray-600" />
-                                </div>
-                                <div className="ml-3">
-                                  <p className="text-sm font-medium text-gray-600 text-left">Status</p>
-                                  <p className="text-sm font-semibold text-left">
-                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                      doctorCommissionData.summary?.paymentStatus === 'Fully Paid'
-                                        ? 'bg-green-100 text-green-800'
-                                        : doctorCommissionData.summary?.paymentStatus === 'Partially Paid'
-                                        ? 'bg-yellow-100 text-yellow-800'
-                                        : 'bg-red-100 text-red-800'
-                                    }`}>
-                                      {doctorCommissionData.summary?.paymentStatus || 'Unpaid'}
-                                    </span>
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Payment History Timeline */}
-                          {doctorCommissionData.paymentHistory && doctorCommissionData.paymentHistory.length > 0 && (
-                            <div>
-                              <h6 className="text-md font-medium text-gray-900 mb-3 text-left">Recent Payment History</h6>
-                              <div className="bg-white border rounded-lg max-h-64 overflow-y-auto">
-                                <div className="divide-y divide-gray-200">
-                                  {doctorCommissionData.paymentHistory.slice(0, 5).map((payment, index) => (
-                                    <div key={index} className="p-4 hover:bg-gray-50">
-                                      <div className="flex items-center justify-between">
-                                        <div className="flex items-center space-x-3">
-                                          <div className="flex-shrink-0">
-                                            <div className="h-8 w-8 rounded-full bg-green-100 flex items-center justify-center">
-                                              <DollarSign className="h-4 w-4 text-green-600" />
-                                            </div>
-                                          </div>
-                                          <div>
-                                            <p className="text-sm font-medium text-gray-900 text-left">
-                                              ₹{payment.amount?.toLocaleString()} payment
-                                            </p>
-                                            <p className="text-xs text-gray-500 text-left">
-                                              {new Date(payment.paymentDate).toLocaleDateString('en-IN', {
-                                                day: '2-digit',
-                                                month: 'short',
-                                                year: 'numeric',
-                                                hour: '2-digit',
-                                                minute: '2-digit'
-                                              })}
-                                            </p>
-                                          </div>
-                                        </div>
-                                        <div className="text-right">
-                                          <p className="text-sm text-gray-900 text-left">
-                                            {payment.paymentMethod?.replace('_', ' ').toUpperCase()}
-                                          </p>
-                                          <p className="text-xs text-gray-500 text-left">
-                                            Balance: ₹{payment.runningBalance?.toLocaleString() || 0}
-                                          </p>
-                                        </div>
-                                      </div>
-                                      {payment.paymentReference && (
-                                        <p className="text-xs text-gray-400 mt-1 text-left">
-                                          Ref: {payment.paymentReference}
-                                        </p>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                              {doctorCommissionData.paymentHistory.length > 5 && (
-                                <p className="text-xs text-gray-500 mt-2 text-left">
-                                  Showing 5 of {doctorCommissionData.paymentHistory.length} payments
-                                </p>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Commission Records Summary */}
-                          {doctorCommissionData.commissions && doctorCommissionData.commissions.length > 0 && (
-                            <div>
-                              <h6 className="text-md font-medium text-gray-900 mb-3 text-left">Commission Records</h6>
-                              <div className="bg-white border rounded-lg">
-                                <div className="px-4 py-2 bg-gray-50 border-b">
-                                  <div className="grid grid-cols-6 gap-4 text-xs font-medium text-gray-500 uppercase tracking-wider text-left">
-                                    <div>Period</div>
-                                    <div>Prescriptions</div>
-                                    <div>Sales Value</div>
-                                    <div>Commission</div>
-                                    <div>Status</div>
-                                    <div>Actions</div>
-                                  </div>
-                                </div>
-                                <div className="divide-y divide-gray-200 max-h-48 overflow-y-auto">
-                                  {doctorCommissionData.commissions.slice(0, 5).map((commission, index) => (
-                                    <div key={index} className="px-4 py-3 hover:bg-gray-50">
-                                      <div className="grid grid-cols-6 gap-4 text-sm items-center">
-                                        <div className="text-gray-900 text-left">
-                                          {commission.period?.month}/{commission.period?.year}
-                                        </div>
-                                        <div className="text-gray-900 text-left">
-                                          {commission.prescriptionCount || 0}
-                                        </div>
-                                        <div className="text-gray-900 text-left">
-                                          ₹{commission.salesValue?.toLocaleString() || 0}
-                                        </div>
-                                        <div className="text-green-600 font-medium text-left">
-                                          ₹{commission.commissionAmount?.toLocaleString() || 0}
-                                        </div>
-                                        <div>
-                                          <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                                            commission.status === 'paid'
-                                              ? 'bg-green-100 text-green-800'
-                                              : 'bg-yellow-100 text-yellow-800'
-                                          }`}>
-                                            {commission.status === 'paid' ? 'Paid' : 'Pending'}
-                                          </span>
-                                        </div>
-                                        <div>
-                                          {commission.status === 'pending' && commission.remainingBalance > 0 && (
-                                            <button
-                                              onClick={() => handleRecordPayment(commission)}
-                                              className="inline-flex items-center px-2 py-1 border border-green-600 text-xs font-medium rounded text-green-600 bg-white hover:bg-green-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-                                            >
-                                              <DollarSign className="h-3 w-3 mr-1" />
-                                              Pay
-                                            </button>
-                                          )}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="text-center py-8">
-                          <p className="text-gray-500">No commission data available</p>
-                        </div>
-                      )}
-                    </div>
 
                     <div className="flex justify-end space-x-3 pt-4 border-t">
                       <button
@@ -1950,6 +1978,18 @@ const StoreManagerDoctors = () => {
                           </span>
                         </div>
                         <div>
+                          <span className="text-gray-500">Sales Value:</span>
+                          <span className="ml-2 text-gray-900">
+                            ₹{(selectedCommission.salesValue || selectedCommission.totalSalesValue || 0).toLocaleString()}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Commission Rate:</span>
+                          <span className="ml-2 text-gray-900">
+                            {selectedCommission.commissionRate || 0}%
+                          </span>
+                        </div>
+                        <div>
                           <span className="text-gray-500">Total Commission:</span>
                           <span className="ml-2 text-gray-900">
                             ₹{selectedCommission.commissionAmount?.toLocaleString()}
@@ -1986,35 +2026,7 @@ const StoreManagerDoctors = () => {
                         />
                       </div>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1 text-left">
-                          Payment Method *
-                        </label>
-                        <select
-                          value={paymentFormData.paymentMethod}
-                          onChange={(e) => setPaymentFormData({...paymentFormData, paymentMethod: e.target.value})}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
-                        >
-                          <option value="cash">Cash</option>
-                          <option value="bank_transfer">Bank Transfer</option>
-                          <option value="upi">UPI</option>
-                          <option value="cheque">Cheque</option>
-                          <option value="other">Other</option>
-                        </select>
-                      </div>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1 text-left">
-                          Transaction Reference
-                        </label>
-                        <input
-                          type="text"
-                          value={paymentFormData.paymentReference}
-                          onChange={(e) => setPaymentFormData({...paymentFormData, paymentReference: e.target.value})}
-                          placeholder="Transaction ID, Cheque number, etc."
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
-                        />
-                      </div>
 
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1 text-left">
@@ -2044,7 +2056,7 @@ const StoreManagerDoctors = () => {
                       </button>
                       <button
                         onClick={submitPayment}
-                        disabled={submittingPayment || !paymentFormData.amount || !paymentFormData.paymentMethod}
+                        disabled={submittingPayment || !paymentFormData.amount}
                         className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {submittingPayment ? 'Recording...' : 'Record Payment'}
@@ -2055,6 +2067,85 @@ const StoreManagerDoctors = () => {
               </div>
             </div>
           )}
+
+          {/* Bulk Payment Confirmation Modal */}
+          {showBulkPaymentModal && (
+            <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+              <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
+                <div className="mt-3">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-medium text-gray-900">
+                      Confirm Bulk Payment
+                    </h3>
+                    <button
+                      onClick={() => {
+                        setShowBulkPaymentModal(false);
+                        setBulkPaymentDoctor(null);
+                      }}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      <XCircle className="h-6 w-6" />
+                    </button>
+                  </div>
+
+                  <div className="mb-6">
+                    <p className="text-sm text-gray-600 mb-4">
+                      You are about to pay all pending commissions for <strong>Dr. {bulkPaymentDoctor?.name}</strong>
+                    </p>
+
+                    <div className="bg-gray-50 p-4 rounded-lg mb-4">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-sm font-medium text-gray-700">Total Commissions:</span>
+                        <span className="text-lg font-bold text-green-600">₹{bulkPaymentData.totalAmount?.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-600">Number of Commissions:</span>
+                        <span className="text-sm font-medium text-gray-900">{bulkPaymentData.commissionsCount}</span>
+                      </div>
+                    </div>
+
+                    <div className="max-h-40 overflow-y-auto">
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Commission Details:</h4>
+                      <div className="space-y-2">
+                        {bulkPaymentData.commissions.map((commission, index) => (
+                          <div key={commission._id} className="flex justify-between items-center text-sm bg-white p-2 rounded border">
+                            <span className="text-gray-600">
+                              Sale #{commission.invoiceNumber || commission._id.slice(-6)}
+                            </span>
+                            <span className="font-medium text-gray-900">
+                              ₹{(commission.remainingBalance || commission.commissionAmount)?.toLocaleString()}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex justify-end space-x-3 pt-4 border-t">
+                    <button
+                      onClick={() => {
+                        setShowBulkPaymentModal(false);
+                        setBulkPaymentDoctor(null);
+                      }}
+                      className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                      disabled={processingBulkPayment}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={processBulkPayment}
+                      disabled={processingBulkPayment}
+                      className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {processingBulkPayment ? 'Processing...' : `Pay ₹${bulkPaymentData.totalAmount?.toLocaleString()}`}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       </div>
     </StoreManagerLayout>

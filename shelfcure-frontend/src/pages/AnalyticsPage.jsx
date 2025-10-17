@@ -119,6 +119,18 @@ const AnalyticsPage = () => {
           bg: 'bg-orange-100',
           icon: 'text-orange-600'
         };
+      case 'red':
+        return {
+          text: 'text-red-600',
+          bg: 'bg-red-100',
+          icon: 'text-red-600'
+        };
+      case 'yellow':
+        return {
+          text: 'text-yellow-600',
+          bg: 'bg-yellow-100',
+          icon: 'text-yellow-600'
+        };
       default:
         return {
           text: 'text-blue-600',

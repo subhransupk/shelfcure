@@ -10,6 +10,10 @@ import TestimonialsSection from './sections/TestimonialsSection';
 import FAQSection from './sections/FAQSection';
 import SecuritySection from './sections/SecuritySection';
 import CTASection from './sections/CTASection';
+import PricingSection from './sections/PricingSection';
+import AIAssistantSection from './sections/AIAssistantSection';
+import UserTypesSection from './sections/UserTypesSection';
+import IntegrationsSection from './sections/IntegrationsSection';
 
 const Homepage = () => {
   return (
@@ -26,11 +30,23 @@ const Homepage = () => {
       {/* Counter Section */}
       <CounterSection />
 
+      {/* User Types Section */}
+      <UserTypesSection />
+
       {/* Features Section */}
       <FeaturesSection />
 
+      {/* AI Assistant Section */}
+      <AIAssistantSection />
+
       {/* How It Works Section */}
       <HowItWorksSection />
+
+      {/* Integrations Section */}
+      <IntegrationsSection />
+
+      {/* Pricing Section */}
+      <PricingSection />
 
       {/* Testimonials Section */}
       <TestimonialsSection />
