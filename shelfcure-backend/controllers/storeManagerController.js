@@ -615,6 +615,12 @@ const getStoreAnalytics = async (req, res) => {
     const medicineStats = {};
     sales.forEach(sale => {
       sale.items.forEach(item => {
+        // Skip if medicine reference is null (deleted medicine)
+        if (!item.medicine) {
+          console.warn('⚠️ Sale item has null medicine reference:', item);
+          return;
+        }
+
         const medicineId = item.medicine._id.toString();
         if (!medicineStats[medicineId]) {
           medicineStats[medicineId] = {
@@ -1005,6 +1011,11 @@ const getStoreAnalytics = async (req, res) => {
     const categoryStats = {};
     sales.forEach(sale => {
       sale.items.forEach(item => {
+        // Skip if medicine reference is null (deleted medicine)
+        if (!item.medicine) {
+          return;
+        }
+
         const category = item.medicine.category || 'Other';
         if (!categoryStats[category]) {
           categoryStats[category] = { revenue: 0, quantity: 0 };

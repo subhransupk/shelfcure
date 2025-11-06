@@ -4,8 +4,11 @@ const Subscription = require('../models/Subscription');
 // @desc    Ensure user is a store owner with active subscription
 const storeOwnerOnly = async (req, res, next) => {
   try {
+    console.log('🔐 Store owner auth middleware - checking user:', req.user?.id);
+
     // Check if user is authenticated (should be handled by protect middleware)
     if (!req.user) {
+      console.log('❌ No user found in request');
       return res.status(401).json({
         success: false,
         message: 'Access denied. Authentication required.'
@@ -14,6 +17,7 @@ const storeOwnerOnly = async (req, res, next) => {
 
     // Check if user role is store_owner
     if (req.user.role !== 'store_owner') {
+      console.log('❌ User role is not store_owner:', req.user.role);
       return res.status(403).json({
         success: false,
         message: 'Access denied. Store owner role required.'
@@ -21,19 +25,24 @@ const storeOwnerOnly = async (req, res, next) => {
     }
 
     // Check if store owner has an active subscription
+    console.log('🔍 Looking for subscription for store owner:', req.user.id);
     const subscription = await Subscription.findOne({
       storeOwner: req.user.id
     });
 
     if (!subscription) {
+      console.log('❌ No subscription found for store owner:', req.user.id);
       return res.status(403).json({
         success: false,
         message: 'Access denied. No subscription found. Please contact support.'
       });
     }
 
+    console.log('✅ Subscription found:', subscription._id, 'Status:', subscription.status);
+
     // Check if subscription is active or in trial
     if (!['active', 'trial'].includes(subscription.status)) {
+      console.log('❌ Subscription status is not active/trial:', subscription.status);
       return res.status(403).json({
         success: false,
         message: 'Access denied. Subscription is not active. Please renew your subscription.',
@@ -44,6 +53,7 @@ const storeOwnerOnly = async (req, res, next) => {
 
     // Check if subscription has expired
     if (subscription.endDate && new Date() > subscription.endDate) {
+      console.log('❌ Subscription has expired');
       // Update subscription status to expired
       subscription.status = 'expired';
       await subscription.save();
@@ -58,13 +68,16 @@ const storeOwnerOnly = async (req, res, next) => {
 
     // Add subscription info to request for use in controllers
     req.subscription = subscription;
+    console.log('✅ Store owner auth passed - proceeding to next middleware');
 
     next();
   } catch (error) {
-    console.error('Store owner auth error:', error);
+    console.error('❌ Store owner auth error:', error.message);
+    console.error('Stack:', error.stack);
     res.status(500).json({
       success: false,
-      message: 'Server error during authentication'
+      message: 'Server error during authentication',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };

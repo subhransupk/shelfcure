@@ -78,10 +78,12 @@ const getDashboardData = async (req, res) => {
 const getStoreOwnerAnalytics = async (req, res) => {
   try {
     const storeOwnerId = req.user.id;
-    
+    console.log('📊 Fetching analytics for store owner:', storeOwnerId);
+
     // Get stores
     const stores = await Store.find({ owner: storeOwnerId, isActive: true });
-    
+    console.log('✅ Found stores:', stores.length);
+
     res.status(200).json({
       success: true,
       data: {
@@ -95,10 +97,12 @@ const getStoreOwnerAnalytics = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Analytics error:', error);
+    console.error('❌ Analytics error:', error.message);
+    console.error('Stack:', error.stack);
     res.status(500).json({
       success: false,
-      message: 'Server error while fetching analytics data'
+      message: 'Server error while fetching analytics data',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
