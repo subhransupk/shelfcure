@@ -5,8 +5,6 @@ import ContactHeroSection from '../components/contact/ContactHeroSection';
 import ContactFormSection from '../components/contact/ContactFormSection';
 import ContactInfoSection from '../components/contact/ContactInfoSection';
 import SupportChannelsSection from '../components/contact/SupportChannelsSection';
-import OfficeLocationSection from '../components/contact/OfficeLocationSection';
-import FAQContactSection from '../components/contact/FAQContactSection';
 import GetInTouchSection from '../components/contact/GetInTouchSection';
 
 const ContactPage = () => {
@@ -26,13 +24,7 @@ const ContactPage = () => {
       
       {/* Support Channels Section */}
       <SupportChannelsSection />
-      
-      {/* Office Location Section */}
-      <OfficeLocationSection />
-      
-      {/* FAQ Contact Section */}
-      <FAQContactSection />
-      
+
       {/* Get In Touch Section */}
       <GetInTouchSection />
       

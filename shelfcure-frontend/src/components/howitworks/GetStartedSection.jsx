@@ -1,7 +1,10 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ArrowRight, CheckCircle, Clock, Shield, Users } from 'lucide-react';
 
 const GetStartedSection = () => {
+  const navigate = useNavigate();
+
   const trialFeatures = [
     'Full feature access for 14 days',
     'No credit card required',
@@ -68,7 +71,10 @@ const GetStartedSection = () => {
           </div>
 
           {/* CTA Button */}
-          <button className="bg-white text-primary-600 hover:bg-primary-50 font-bold text-xl px-12 py-5 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-1 mb-8">
+          <button
+            onClick={() => navigate('/signup')}
+            className="bg-white text-primary-600 hover:bg-primary-50 font-bold text-xl px-12 py-5 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-1 mb-8"
+          >
             Start Your Free Trial
             <ArrowRight className="w-6 h-6 ml-2 inline" />
           </button>
@@ -139,8 +145,8 @@ const GetStartedSection = () => {
           </div>
           <p className="text-primary-200 text-sm mt-4">
             Call us at{' '}
-            <a href="tel:+911234567890" className="text-white font-semibold hover:underline">
-              +91 12345 67890
+            <a href="tel:+917008410320" className="text-white font-semibold hover:underline">
+              +91-7008410320
             </a>{' '}
             or email{' '}
             <a href="mailto:support@shelfcure.com" className="text-white font-semibold hover:underline">

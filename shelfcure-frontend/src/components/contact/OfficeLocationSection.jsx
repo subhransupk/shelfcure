@@ -4,10 +4,7 @@ import { MapPin, Clock, Phone, Mail, Car, Train, Plane } from 'lucide-react';
 const OfficeLocationSection = () => {
   const officeDetails = {
     name: 'ShelfCure Technologies Pvt. Ltd.',
-    address: 'Business District, Bandra Kurla Complex',
-    city: 'Mumbai, Maharashtra 400051',
-    country: 'India',
-    phone: '+91 12345 67890',
+    phone: '+91-7008410320',
     email: 'office@shelfcure.com',
     hours: {
       weekdays: 'Monday - Friday: 9:00 AM - 6:00 PM',
@@ -55,34 +52,26 @@ const OfficeLocationSection = () => {
         <div className="grid lg:grid-cols-2 gap-12">
           {/* Office Information */}
           <div className="space-y-8">
-            {/* Address Card */}
+            {/* Contact Details Card */}
             <div className="bg-white rounded-2xl p-8 shadow-soft">
               <div className="flex items-start gap-4 mb-6">
                 <div className="w-12 h-12 bg-primary-100 rounded-xl flex items-center justify-center">
-                  <MapPin className="w-6 h-6 text-primary-500" />
+                  <Phone className="w-6 h-6 text-primary-500" />
                 </div>
                 <div>
                   <h3 className="text-xl font-bold text-secondary-900 mb-2">
-                    Office Address
+                    Contact Information
                   </h3>
-                  <div className="space-y-1 text-secondary-600">
-                    <p className="font-semibold">{officeDetails.name}</p>
-                    <p>{officeDetails.address}</p>
-                    <p>{officeDetails.city}</p>
-                    <p>{officeDetails.country}</p>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3">
+                      <Phone className="w-5 h-5 text-primary-500" />
+                      <span className="text-secondary-700">{officeDetails.phone}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Mail className="w-5 h-5 text-primary-500" />
+                      <span className="text-secondary-700">{officeDetails.email}</span>
+                    </div>
                   </div>
-                </div>
-              </div>
-
-              {/* Contact Details */}
-              <div className="grid sm:grid-cols-2 gap-4 pt-6 border-t border-gray-100">
-                <div className="flex items-center gap-3">
-                  <Phone className="w-5 h-5 text-primary-500" />
-                  <span className="text-secondary-700">{officeDetails.phone}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Mail className="w-5 h-5 text-primary-500" />
-                  <span className="text-secondary-700">{officeDetails.email}</span>
                 </div>
               </div>
             </div>
@@ -150,33 +139,8 @@ const OfficeLocationSection = () => {
             </div>
           </div>
 
-          {/* Map Placeholder */}
+          {/* Additional Information */}
           <div className="space-y-8">
-            {/* Interactive Map */}
-            <div className="bg-white rounded-2xl p-8 shadow-soft">
-              <h3 className="text-xl font-bold text-secondary-900 mb-6">
-                Find Us on Map
-              </h3>
-              
-              {/* Map Placeholder */}
-              <div className="bg-gray-100 rounded-xl h-80 flex items-center justify-center mb-6">
-                <div className="text-center">
-                  <MapPin className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500 font-medium">Interactive Map</p>
-                  <p className="text-gray-400 text-sm">Click to open in Google Maps</p>
-                </div>
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-4">
-                <button className="btn-primary flex-1 justify-center">
-                  Open in Google Maps
-                </button>
-                <button className="btn-secondary flex-1 justify-center">
-                  Get Directions
-                </button>
-              </div>
-            </div>
-
             {/* Schedule Visit */}
             <div className="bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-2xl p-8">
               <h3 className="text-xl font-bold mb-4">

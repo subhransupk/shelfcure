@@ -1,5 +1,6 @@
 import React from 'react';
-import { Mail, Phone, MapPin, Facebook, Twitter, Linkedin, Instagram, ArrowRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Mail, Phone, Facebook, Twitter, Linkedin, Instagram, ArrowRight } from 'lucide-react';
 
 const Footer = () => {
   const currentYear = new Date().getFullYear();
@@ -8,41 +9,41 @@ const Footer = () => {
     {
       title: 'Product',
       links: [
-        { name: 'Features', href: '#features' },
-        { name: 'Pricing', href: '#pricing' },
-        { name: 'Mobile App', href: '#mobile' },
-        { name: 'Integrations', href: '#integrations' },
-        { name: 'API Documentation', href: '#api' }
+        { name: 'Features', href: '/features' },
+        { name: 'Pricing', href: '/pricing' },
+        { name: 'Mobile App', href: '/features' },
+        { name: 'Integrations', href: '/features' },
+        { name: 'API Documentation', href: '/api' }
       ]
     },
     {
       title: 'Solutions',
       links: [
-        { name: 'Small Pharmacies', href: '#small-pharmacy' },
-        { name: 'Chain Stores', href: '#chain-stores' },
-        { name: 'Hospital Pharmacies', href: '#hospital' },
-        { name: 'Online Pharmacies', href: '#online' },
-        { name: 'Enterprise', href: '#enterprise' }
+        { name: 'Small Pharmacies', href: '/features' },
+        { name: 'Chain Stores', href: '/features' },
+        { name: 'Hospital Pharmacies', href: '/features' },
+        { name: 'Online Pharmacies', href: '/features' },
+        { name: 'Enterprise', href: '/contact' }
       ]
     },
     {
       title: 'Resources',
       links: [
-        { name: 'Help Center', href: '#help' },
-        { name: 'Documentation', href: '#docs' },
-        { name: 'Blog', href: '#blog' },
-        { name: 'Case Studies', href: '#case-studies' },
-        { name: 'Webinars', href: '#webinars' }
+        { name: 'Help Center', href: '/help-center' },
+        { name: 'Documentation', href: '/documentation' },
+        { name: 'Blog', href: '/blog' },
+        { name: 'Case Studies', href: '/case-studies' },
+        { name: 'Webinars', href: '/webinars' }
       ]
     },
     {
       title: 'Company',
       links: [
-        { name: 'About Us', href: '#about' },
-        { name: 'Careers', href: '#careers' },
-        { name: 'Contact', href: '#contact' },
-        { name: 'Privacy Policy', href: '#privacy' },
-        { name: 'Terms of Service', href: '#terms' }
+        { name: 'About Us', href: '/about' },
+        { name: 'Careers', href: '/careers' },
+        { name: 'Contact', href: '/contact' },
+        { name: 'Privacy Policy', href: '/privacy' },
+        { name: 'Terms of Service', href: '/terms' }
       ]
     }
   ];
@@ -86,7 +87,7 @@ const Footer = () => {
       <div className="container-max px-4 sm:px-6 lg:px-8 py-16">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-8">
           {/* Company Info */}
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 text-left">
             <div className="mb-6">
               <img
                 src="/images/logo/final-logo.png"
@@ -95,10 +96,10 @@ const Footer = () => {
               />
             </div>
             <p className="text-secondary-300 mb-6 leading-relaxed">
-              Revolutionizing pharmacy management with our comprehensive MERN stack solution. 
+              Revolutionizing pharmacy management with our comprehensive MERN stack solution.
               Streamline operations, increase efficiency, and grow your business with ShelfCure.
             </p>
-            
+
             {/* Contact Info */}
             <div className="space-y-3">
               <div className="flex items-center gap-3 text-secondary-300">
@@ -107,11 +108,7 @@ const Footer = () => {
               </div>
               <div className="flex items-center gap-3 text-secondary-300">
                 <Phone className="w-5 h-5 text-primary-400" />
-                <span>+91 12345 67890</span>
-              </div>
-              <div className="flex items-center gap-3 text-secondary-300">
-                <MapPin className="w-5 h-5 text-primary-400" />
-                <span>Mumbai, Maharashtra, India</span>
+                <span>+91-7008410320</span>
               </div>
             </div>
           </div>
@@ -123,12 +120,12 @@ const Footer = () => {
               <ul className="space-y-3">
                 {section.links.map((link, linkIndex) => (
                   <li key={linkIndex}>
-                    <a
-                      href={link.href}
+                    <Link
+                      to={link.href}
                       className="text-secondary-300 hover:text-primary-400 transition-colors duration-200"
                     >
                       {link.name}
-                    </a>
+                    </Link>
                   </li>
                 ))}
               </ul>
@@ -162,15 +159,15 @@ const Footer = () => {
 
             {/* Additional Links */}
             <div className="flex items-center gap-6 text-sm text-secondary-400">
-              <a href="#privacy" className="hover:text-primary-400 transition-colors duration-200">
+              <Link to="/privacy" className="hover:text-primary-400 transition-colors duration-200">
                 Privacy Policy
-              </a>
-              <a href="#terms" className="hover:text-primary-400 transition-colors duration-200">
+              </Link>
+              <Link to="/terms" className="hover:text-primary-400 transition-colors duration-200">
                 Terms of Service
-              </a>
-              <a href="#cookies" className="hover:text-primary-400 transition-colors duration-200">
+              </Link>
+              <Link to="/cookies" className="hover:text-primary-400 transition-colors duration-200">
                 Cookie Policy
-              </a>
+              </Link>
             </div>
           </div>
         </div>

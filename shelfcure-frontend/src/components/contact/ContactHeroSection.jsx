@@ -3,7 +3,7 @@ import { MessageCircle, Phone, Mail, ArrowDown, Clock, Users, Headphones } from 
 
 const ContactHeroSection = () => {
   const quickContact = [
-    { icon: Phone, label: '+91 12345 67890', description: 'Call us directly' },
+    { icon: Phone, label: '+91-7008410320', description: 'Call us directly' },
     { icon: Mail, label: 'support@shelfcure.com', description: 'Send us an email' },
     { icon: MessageCircle, label: 'Live Chat', description: 'Chat with our team' }
   ];

@@ -159,7 +159,7 @@ const ContactFormSection = () => {
                           (value) => setFormData(prev => ({ ...prev, phone: value }))
                         )}
                         className="w-full px-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200 bg-white"
-                        placeholder="+91 12345 67890"
+                        placeholder="+91-7008410320"
                       />
                     </div>
                     <div>

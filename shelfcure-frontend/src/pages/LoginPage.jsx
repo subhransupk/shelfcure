@@ -3,8 +3,6 @@ import Header from '../components/Header';
 import Footer from '../components/Footer';
 import LoginHeroSection from '../components/login/LoginHeroSection';
 import LoginFormSection from '../components/login/LoginFormSection';
-import LoginFeaturesSection from '../components/login/LoginFeaturesSection';
-import LoginTestimonialsSection from '../components/login/LoginTestimonialsSection';
 
 const LoginPage = () => {
   return (
@@ -17,13 +15,7 @@ const LoginPage = () => {
       
       {/* Login Form Section */}
       <LoginFormSection />
-      
-      {/* Login Features Section */}
-      <LoginFeaturesSection />
-      
-      {/* Login Testimonials Section */}
-      <LoginTestimonialsSection />
-      
+
       {/* Footer */}
       <Footer />
     </div>

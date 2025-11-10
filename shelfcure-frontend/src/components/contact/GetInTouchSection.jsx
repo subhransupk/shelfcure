@@ -131,8 +131,8 @@ const GetInTouchSection = () => {
               Questions? We're here to help!
             </p>
             <div className="flex flex-col sm:flex-row gap-6 justify-center text-sm">
-              <a href="tel:+911234567890" className="text-white hover:text-green-200 font-medium transition-colors duration-200">
-                📞 +91 12345 67890
+              <a href="tel:+917008410320" className="text-white hover:text-green-200 font-medium transition-colors duration-200">
+                📞 +91-7008410320
               </a>
               <a href="mailto:support@shelfcure.com" className="text-white hover:text-green-200 font-medium transition-colors duration-200">
                 ✉️ support@shelfcure.com

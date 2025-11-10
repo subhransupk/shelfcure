@@ -6,6 +6,7 @@ import AboutPage from './pages/AboutPage';
 import FeaturesPage from './pages/FeaturesPage';
 import HowItWorksPage from './pages/HowItWorksPage';
 import ContactPage from './pages/ContactPage';
+import PricingPage from './pages/PricingPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import AdminLoginPage from './pages/AdminLoginPage';
@@ -113,6 +114,18 @@ import ProtectedRoute from './components/ProtectedRoute';
 import './App.css';
 import './styles/store-panel.css';
 
+// Footer Pages
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
+import TermsOfServicePage from './pages/TermsOfServicePage';
+import CookiePolicyPage from './pages/CookiePolicyPage';
+import HelpCenterPage from './pages/HelpCenterPage';
+import DocumentationPage from './pages/DocumentationPage';
+import CareersPage from './pages/CareersPage';
+import BlogPage from './pages/BlogPage';
+import APIDocumentationPage from './pages/APIDocumentationPage';
+import CaseStudiesPage from './pages/CaseStudiesPage';
+import WebinarsPage from './pages/WebinarsPage';
+
 function App() {
   return (
     <div className="App">
@@ -122,9 +135,24 @@ function App() {
           <Route path="/about" element={<AboutPage />} />
           <Route path="/features" element={<FeaturesPage />} />
           <Route path="/how-it-works" element={<HowItWorksPage />} />
+          <Route path="/pricing" element={<PricingPage />} />
           <Route path="/contact" element={<ContactPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+
+          {/* Footer Pages */}
+          <Route path="/privacy" element={<PrivacyPolicyPage />} />
+          <Route path="/terms" element={<TermsOfServicePage />} />
+          <Route path="/cookies" element={<CookiePolicyPage />} />
+          <Route path="/help-center" element={<HelpCenterPage />} />
+          <Route path="/help" element={<HelpCenterPage />} />
+          <Route path="/documentation" element={<DocumentationPage />} />
+          <Route path="/docs" element={<DocumentationPage />} />
+          <Route path="/careers" element={<CareersPage />} />
+          <Route path="/blog" element={<BlogPage />} />
+          <Route path="/api" element={<APIDocumentationPage />} />
+          <Route path="/case-studies" element={<CaseStudiesPage />} />
+          <Route path="/webinars" element={<WebinarsPage />} />
           <Route path="/admin-login" element={<AdminLoginPage />} />
           <Route path="/admin/login" element={<AdminLoginPage />} />
           <Route path="/admin/dashboard" element={<AdminDashboard />} />

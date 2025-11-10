@@ -1,7 +1,10 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Smartphone, Wifi, Bell, RefreshCw, Download, Camera, BarChart, Users } from 'lucide-react';
 
 const MobileFeaturesSection = () => {
+  const navigate = useNavigate();
+
   const mobileFeatures = [
     {
       icon: Smartphone,
@@ -134,10 +137,10 @@ const MobileFeaturesSection = () => {
               and manage your pharmacy from anywhere, anytime.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <button className="bg-white text-primary-600 hover:bg-primary-50 font-bold px-8 py-4 rounded-xl transition-colors duration-200">
-                Download for iOS
-              </button>
-              <button className="border-2 border-white text-white hover:bg-white hover:text-primary-600 font-bold px-8 py-4 rounded-xl transition-all duration-200">
+              <button
+                onClick={() => navigate('/login')}
+                className="bg-white text-primary-600 hover:bg-primary-50 font-bold px-8 py-4 rounded-xl transition-colors duration-200"
+              >
                 Download for Android
               </button>
             </div>

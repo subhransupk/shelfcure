@@ -10,7 +10,6 @@ import AIFeaturesSection from '../components/features/AIFeaturesSection';
 import IntegrationFeaturesSection from '../components/features/IntegrationFeaturesSection';
 import SecurityFeaturesSection from '../components/features/SecurityFeaturesSection';
 import MobileFeaturesSection from '../components/features/MobileFeaturesSection';
-import FeatureComparisonSection from '../components/features/FeatureComparisonSection';
 
 const FeaturesPage = () => {
   return (
@@ -44,10 +43,7 @@ const FeaturesPage = () => {
       
       {/* Mobile Features Section */}
       <MobileFeaturesSection />
-      
-      {/* Feature Comparison Section */}
-      <FeatureComparisonSection />
-      
+
       {/* Footer */}
       <Footer />
     </div>

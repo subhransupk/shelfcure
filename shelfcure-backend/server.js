@@ -17,11 +17,28 @@ const server = createServer(app);
 // Socket.IO setup for real-time features
 const io = new Server(server, {
   cors: {
-    origin: [
-      process.env.FRONTEND_URL || "http://localhost:3000",
-      "http://localhost:3001", // Allow both ports for development
-      "http://localhost:3002"  // Additional port if needed
-    ],
+    origin: function(origin, callback) {
+      // Allow all localhost origins in development
+      if (process.env.NODE_ENV === 'development') {
+        if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      } else {
+        // In production, use specific origins
+        const allowedOrigins = [
+          process.env.FRONTEND_URL || "http://localhost:3000",
+          "http://localhost:3001",
+          "http://localhost:3002"
+        ];
+        if (allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      }
+    },
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true
   }
@@ -42,11 +59,28 @@ app.use(morgan('combined'));
 
 // CORS configuration
 app.use(cors({
-  origin: [
-    process.env.FRONTEND_URL || "http://localhost:3000",
-    "http://localhost:3001", // Allow both ports for development
-    "http://localhost:3002"  // Additional port if needed
-  ],
+  origin: function(origin, callback) {
+    // Allow all localhost origins in development
+    if (process.env.NODE_ENV === 'development') {
+      if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    } else {
+      // In production, use specific origins
+      const allowedOrigins = [
+        process.env.FRONTEND_URL || "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:3002"
+      ];
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: [

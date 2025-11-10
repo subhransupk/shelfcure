@@ -4,47 +4,36 @@ import { Linkedin, Twitter, Mail } from 'lucide-react';
 const TeamSection = () => {
   const teamMembers = [
     {
-      name: 'Rajesh Kumar',
-      role: 'CEO & Co-Founder',
-      bio: 'Healthcare technology veteran with 10+ years of experience in digital transformation.',
+      name: 'Biswajit Rout',
+      role: 'CEO',
+      bio: 'Visionary leader driving ShelfCure\'s mission to transform pharmacy management through innovative technology.',
       image: '/api/placeholder/300/300',
       social: {
         linkedin: '#',
         twitter: '#',
-        email: 'rajesh@shelfcure.com'
+        email: 'biswajit@shelfcure.com'
       }
     },
     {
-      name: 'Priya Sharma',
-      role: 'CTO & Co-Founder',
-      bio: 'Full-stack developer and AI specialist passionate about solving healthcare challenges.',
+      name: 'Subhransu Sekhar Samanta',
+      role: 'CTO',
+      bio: 'Technical architect and full-stack expert building scalable solutions for healthcare management.',
       image: '/api/placeholder/300/300',
       social: {
         linkedin: '#',
         twitter: '#',
-        email: 'priya@shelfcure.com'
+        email: 'subhransu@shelfcure.com'
       }
     },
     {
-      name: 'Dr. Amit Patel',
-      role: 'Head of Product',
-      bio: 'Pharmacist turned product manager, bridging the gap between technology and healthcare.',
+      name: 'Rakesh Patra',
+      role: 'CMO',
+      bio: 'Marketing strategist focused on connecting ShelfCure with pharmacy businesses across India.',
       image: '/api/placeholder/300/300',
       social: {
         linkedin: '#',
         twitter: '#',
-        email: 'amit@shelfcure.com'
-      }
-    },
-    {
-      name: 'Sneha Reddy',
-      role: 'Head of Design',
-      bio: 'UX/UI designer focused on creating intuitive experiences for healthcare professionals.',
-      image: '/api/placeholder/300/300',
-      social: {
-        linkedin: '#',
-        twitter: '#',
-        email: 'sneha@shelfcure.com'
+        email: 'rakesh@shelfcure.com'
       }
     }
   ];
@@ -64,7 +53,7 @@ const TeamSection = () => {
         </div>
 
         {/* Team Grid */}
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8 mb-16">
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 mb-16 max-w-4xl mx-auto">
           {teamMembers.map((member, index) => (
             <div
               key={index}

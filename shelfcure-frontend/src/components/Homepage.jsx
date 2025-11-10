@@ -2,15 +2,12 @@ import React from 'react';
 import Header from './Header';
 import Footer from './Footer';
 import HeroSection from './sections/HeroSection';
-import AboutSection from './sections/AboutSection';
 import CounterSection from './sections/CounterSection';
 import FeaturesSection from './sections/FeaturesSection';
 import HowItWorksSection from './sections/HowItWorksSection';
 import TestimonialsSection from './sections/TestimonialsSection';
-import FAQSection from './sections/FAQSection';
 import SecuritySection from './sections/SecuritySection';
 import CTASection from './sections/CTASection';
-import PricingSection from './sections/PricingSection';
 import AIAssistantSection from './sections/AIAssistantSection';
 import UserTypesSection from './sections/UserTypesSection';
 import IntegrationsSection from './sections/IntegrationsSection';
@@ -23,9 +20,6 @@ const Homepage = () => {
 
       {/* Hero Section */}
       <HeroSection />
-
-      {/* About Section */}
-      <AboutSection />
 
       {/* Counter Section */}
       <CounterSection />
@@ -45,14 +39,8 @@ const Homepage = () => {
       {/* Integrations Section */}
       <IntegrationsSection />
 
-      {/* Pricing Section */}
-      <PricingSection />
-
       {/* Testimonials Section */}
       <TestimonialsSection />
-
-      {/* FAQ Section */}
-      <FAQSection />
 
       {/* Security Section */}
       <SecuritySection />

@@ -51,14 +51,8 @@ const ContactSection = () => {
     {
       icon: Phone,
       title: 'Call Us',
-      details: '+91 12345 67890',
+      details: '+91-7008410320',
       description: 'Mon-Fri from 9am to 6pm'
-    },
-    {
-      icon: MapPin,
-      title: 'Visit Us',
-      details: 'Mumbai, Maharashtra',
-      description: 'Come say hello at our office'
     },
     {
       icon: Clock,
@@ -212,7 +206,7 @@ const ContactSection = () => {
                       value={formData.phone}
                       onChange={handleInputChange}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors duration-200"
-                      placeholder="+91 12345 67890"
+                      placeholder="+91-7008410320"
                     />
                   </div>
                   <div>

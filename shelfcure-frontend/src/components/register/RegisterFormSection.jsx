@@ -264,7 +264,7 @@ const RegisterFormSection = () => {
                       className={`w-full px-4 py-4 border rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200 bg-white ${
                         errors.phone ? 'border-red-300' : 'border-gray-300'
                       }`}
-                      placeholder="+91 12345 67890"
+                      placeholder="+91-7008410320"
                     />
                     {errors.phone && (
                       <p className="mt-2 text-sm text-red-600 flex items-center gap-1">

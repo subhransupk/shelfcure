@@ -1,7 +1,10 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Play, ArrowDown, Zap, Clock, CheckCircle } from 'lucide-react';
 
 const HowItWorksHeroSection = () => {
+  const navigate = useNavigate();
+
   const quickStats = [
     { icon: Clock, label: '5 Minutes', description: 'Setup Time' },
     { icon: Zap, label: '3 Steps', description: 'To Get Started' },
@@ -75,7 +78,10 @@ const HowItWorksHeroSection = () => {
                 <Play className="w-5 h-5" />
                 Watch Demo
               </button>
-              <button className="btn-secondary text-lg px-8 py-4">
+              <button
+                onClick={() => navigate('/signup')}
+                className="btn-secondary text-lg px-8 py-4"
+              >
                 Start Free Trial
               </button>
             </div>

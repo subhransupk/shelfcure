@@ -6,8 +6,8 @@ const ContactInfoSection = () => {
     {
       icon: Phone,
       title: 'Phone Support',
-      primary: '+91 12345 67890',
-      secondary: 'Toll-free: 1800-123-4567',
+      primary: '+91-7008410320',
+      secondary: '+91-7437988568',
       availability: 'Mon-Fri: 9:00 AM - 6:00 PM IST',
       description: 'Speak directly with our support team for immediate assistance.',
       color: 'bg-blue-100 text-blue-600',

@@ -296,12 +296,12 @@ const CTASection = () => {
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-6 text-lg">
               <motion.a
-                href="tel:+911234567890"
+                href="tel:+917008410320"
                 className="text-white font-semibold hover:text-green-200 transition-colors duration-200 flex items-center gap-2"
                 whileHover={{ scale: 1.05 }}
               >
                 <Phone className="w-5 h-5" />
-                +91 12345 67890
+                +91-7008410320
               </motion.a>
               <span className="hidden sm:block text-primary-300">•</span>
               <motion.a

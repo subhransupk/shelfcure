@@ -9,7 +9,6 @@ import ValuesSection from '../components/about/ValuesSection';
 import StatsSection from '../components/about/StatsSection';
 import TimelineSection from '../components/about/TimelineSection';
 import CultureSection from '../components/about/CultureSection';
-import JoinUsSection from '../components/about/JoinUsSection';
 
 const AboutPage = () => {
   return (
@@ -40,10 +39,7 @@ const AboutPage = () => {
       
       {/* Culture Section */}
       <CultureSection />
-      
-      {/* Join Us Section */}
-      <JoinUsSection />
-      
+
       {/* Footer */}
       <Footer />
     </div>

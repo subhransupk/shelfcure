@@ -1006,7 +1006,7 @@ const StoreManagerNotifications = () => {
             <label className="block text-sm font-medium text-gray-700">Store Phone Number</label>
             <input
               type="tel"
-              placeholder="+91 9876543210"
+              placeholder="+91-7008410320"
               value={whatsappSettings.phoneNumber}
               onChange={(e) => setWhatsappSettings(prev => ({ ...prev, phoneNumber: e.target.value }))}
               className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"

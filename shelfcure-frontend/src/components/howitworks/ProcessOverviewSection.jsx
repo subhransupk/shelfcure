@@ -1,7 +1,10 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { UserPlus, Settings, TrendingUp, ArrowRight } from 'lucide-react';
 
 const ProcessOverviewSection = () => {
+  const navigate = useNavigate();
+
   const processSteps = [
     {
       number: 1,
@@ -131,7 +134,10 @@ const ProcessOverviewSection = () => {
               Join hundreds of pharmacies that have already streamlined their operations with ShelfCure.
             </p>
             <div className="flex justify-center">
-              <button className="btn-primary text-lg px-8 py-4">
+              <button
+                onClick={() => navigate('/signup')}
+                className="btn-primary text-lg px-8 py-4"
+              >
                 Start Your Free Trial
                 <ArrowRight className="w-5 h-5" />
               </button>
