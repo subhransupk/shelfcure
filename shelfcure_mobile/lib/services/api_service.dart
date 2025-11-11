@@ -24,13 +24,15 @@ class ApiService {
 
   Future<Map<String, dynamic>> login(String email, String password) async {
     try {
+      final loginUrl =
+          '${AppConstants.apiBaseUrl}${AppConstants.loginEndpoint}';
       _logger.i('Attempting login for email: $email');
+      _logger.i('Login URL: $loginUrl');
+      _logger.i('API Base URL: ${AppConstants.apiBaseUrl}');
 
       final response = await http
           .post(
-            Uri.parse(
-              '${AppConstants.apiBaseUrl}${AppConstants.loginEndpoint}',
-            ),
+            Uri.parse(loginUrl),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({'email': email, 'password': password}),
           )
@@ -39,6 +41,7 @@ class ApiService {
           );
 
       _logger.i('Login response status: ${response.statusCode}');
+      _logger.i('Login response body: ${response.body}');
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body);
@@ -75,12 +78,15 @@ class ApiService {
       }
     } on TimeoutException catch (e) {
       _logger.e('Login timeout: $e');
+      _logger.e('Timeout details - API URL: ${AppConstants.apiBaseUrl}');
       return {
         'success': false,
         'message': 'Connection timeout. Please check your internet connection.',
       };
     } catch (e) {
       _logger.e('Login error: $e');
+      _logger.e('Error type: ${e.runtimeType}');
+      _logger.e('API Base URL: ${AppConstants.apiBaseUrl}');
       return {
         'success': false,
         'message': 'Connection error. Please check your internet connection.',
