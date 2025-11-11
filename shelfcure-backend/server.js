@@ -20,7 +20,13 @@ const io = new Server(server, {
     origin: function(origin, callback) {
       // Allow all localhost origins in development
       if (process.env.NODE_ENV === 'development') {
-        if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        // Allow localhost, 127.0.0.1, and all local network IPs (192.168.x.x, 10.x.x.x)
+        if (!origin ||
+            origin.includes('localhost') ||
+            origin.includes('127.0.0.1') ||
+            origin.includes('192.168.') ||
+            origin.includes('10.0.') ||
+            origin.includes('10.')) {
           callback(null, true);
         } else {
           callback(new Error('Not allowed by CORS'));
@@ -62,7 +68,13 @@ app.use(cors({
   origin: function(origin, callback) {
     // Allow all localhost origins in development
     if (process.env.NODE_ENV === 'development') {
-      if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+      // Allow localhost, 127.0.0.1, and all local network IPs (192.168.x.x, 10.x.x.x)
+      if (!origin ||
+          origin.includes('localhost') ||
+          origin.includes('127.0.0.1') ||
+          origin.includes('192.168.') ||
+          origin.includes('10.0.') ||
+          origin.includes('10.')) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));

@@ -30,9 +30,9 @@ class AppConstants {
 
   // Choose your configuration:
   // static const String apiBaseUrl = 'http://10.0.2.2:5000'; // Android Emulator
-  // static const String apiBaseUrl = 'http://192.168.1.100:5000'; // Physical Device (update IP)
   static const String apiBaseUrl =
-      'http://localhost:5000'; // Web/Chrome testing
+      'http://192.168.1.3:5000'; // Physical Device (your machine IP)
+  // static const String apiBaseUrl = 'http://localhost:5000'; // Web/Chrome testing
 
   static const String apiVersion = '/api';
 
